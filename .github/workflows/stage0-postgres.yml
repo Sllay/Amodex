@@ -18,7 +18,7 @@ jobs:
     timeout-minutes: 15
     services:
       postgres:
-        image: postgres:16
+        image: postgres@sha256:1beaa3084eee2676f20a9cd9928f0bf2c5bf674f8e49f81017912183d377c61c
         env:
           POSTGRES_DB: amodex
           POSTGRES_USER: amodex
@@ -56,7 +56,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          container_id="$(docker ps --filter ancestor=postgres:16 --format '{{.ID}}' | head -n 1)"
+          container_id="$(docker ps --filter publish=5432 --format '{{.ID}}' | head -n 1)"
           if [ -z "$container_id" ]; then
             echo 'PostgreSQL service container not found for resource observation.' >&2
             exit 1
