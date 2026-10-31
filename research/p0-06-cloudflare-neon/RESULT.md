@@ -1,54 +1,101 @@
 # P0-06B — Cloudflare Workers + Neon Postgres Control Plane
 
-Status: **BLOCKED_EXTERNAL_CREDENTIALS**
+Status: **ADAPT**
 
-This is the replacement Stage 0 hosting experiment after Northflank was rejected as the primary Control Plane host for the owner's current account because its single free project slot is already occupied by an unrelated project that must not be touched.
+P0-06B replaces Northflank as the current-account primary Control Plane hosting path after P0-06A was rejected for account-capacity reasons. The resulting architecture keeps durable truth in PostgreSQL while allowing the HTTP/scheduler surface to be disposable and event-driven.
 
-The experiment preserves the same architectural rule: durable truth remains in PostgreSQL; the HTTP/control surface is disposable and may be serverless.
+## Decision
 
-## Why this backend
+**ADAPT.**
 
-Revalidated on 2026-10-31:
-
-### Cloudflare Workers Free
-
-- Python Workers are first-class and support FastAPI/Pydantic-compatible packages.
-- Free plan includes 100,000 requests/day.
-- Free plan supports Cron Triggers.
-- Cloudflare Queues are available on Workers Free.
-- Secrets are injected as encrypted Worker secrets.
-- Workers do not require an always-on VM to remain reachable.
-
-### Neon Free
-
-- no credit card required for Free signup;
-- up to 100 projects on the current Free plan;
-- 1 GB Postgres storage per project;
-- 100 CU-hours per project/month;
-- autoscaling/scale-to-zero;
-- Postgres remains normal Postgres, preserving the P0-04 lease/fencing design;
-- Functions/Data API exist, but P0-06B does not make them authoritative unless explicitly adopted by evidence.
-
-## Architectural shape under test
+Adopt:
 
 ```text
-Termux / dashboard / webhook / cron
-               |
-               v
-       Cloudflare Worker
-       Control Plane edge API
-               |
-               v
-          Neon Postgres
-       durable authority/state
-               |
-               +--> Provider API
-               +--> RunnerBackend
+Cloudflare Worker
+  -> thin Control Plane HTTP/API surface
+  -> periodic reconciliation/scheduler wakeups
+  -> secret injection and provider egress
+
+Neon Postgres
+  -> durable authority/state
+  -> lease/fencing/coordination substrate already proven by P0-04
+
+RunnerBackend
+  -> all long-running execution, Hermes, shell, Git worktrees and Godot
 ```
 
-The Worker is not a Runner. Heavy coding, Godot, shell, Git worktrees and Hermes remain outside Workers.
+Do not adopt:
 
-## Required GitHub Actions secrets
+```text
+Cloudflare Worker as a Runner
+Cloudflare local memory as durable truth
+Cloudflare Cron as low-latency task dispatch
+Cloudflare Queues as an authoritative queue in Stage 1
+```
+
+Cloudflare Queues were **not tested by this PoC** and are not required for Stage 1. PostgreSQL remains the initial authoritative coordination/queue/lease substrate from P0-04. A free queue may be evaluated later only as an optimization with its own evidence.
+
+---
+
+## Why ADAPT instead of ADOPT
+
+The original hosting assumption expected a small continuously running Control Plane process. Cloudflare Workers instead provide event-driven/serverless execution.
+
+That changes the runtime shape but not the authority model:
+
+```text
+client / webhook / scheduled wakeup
+            |
+            v
+     Cloudflare Worker
+     thin Control Plane
+            |
+            v
+       Neon Postgres
+     durable authority
+            |
+            +--> Provider Governor / provider APIs
+            +--> disposable RunnerBackend
+```
+
+Long-lived execution must never depend on a Worker request staying alive. The Worker validates, mutates durable state transactionally, schedules/reconciles work, and returns. Long work executes in Runners.
+
+Cron is accepted for periodic reconciliation/maintenance, not low-latency dispatch, because Cloudflare documents that Cron Trigger configuration changes may take up to 15 minutes to propagate globally. The real PoC observed 546.292 seconds (~9.1 minutes) before the newly deployed trigger produced its first durable event.
+
+---
+
+## Environment and pins
+
+Successful source SHA:
+
+```text
+80e16bb0563836d6bfd53ec066fab189446692e8
+```
+
+GitHub Actions runner observed:
+
+```text
+Ubuntu 26.04.1 LTS
+Node.js 24.22.1
+npm 11.19.1
+```
+
+Fixture pins:
+
+```text
+wrangler: 4.156.0
+@neondatabase/serverless: 1.2.0
+Cloudflare compatibility date: 2026-10-31
+Neon PostgreSQL project: pg_version 18
+```
+
+No production dependency is inferred solely from these research pins. Stage implementation must preserve intentional pinning and revalidate mutable external constraints.
+
+---
+
+## Credential gate
+
+Required GitHub Actions secrets:
 
 ```text
 CLOUDFLARE_API_TOKEN
@@ -56,66 +103,193 @@ CLOUDFLARE_ACCOUNT_ID
 NEON_API_KEY
 ```
 
-No secret value may be committed, printed, stored in RESULT files, or returned from the probe.
-
-## Credential gate
-
-The first P0-06B workflow performs only read-only account checks:
-
-1. authenticate to Cloudflare using the configured account ID + API token;
-2. verify Workers API access;
-3. authenticate to Neon;
-4. list accessible Neon projects;
-5. record only non-sensitive capability metadata/counts;
-6. scan tracked files for accidental secret leakage.
-
-No infrastructure mutation occurs until all three credentials pass this gate.
-
-## Full P0-06B pass criteria
-
-After the credential gate passes, the mutation phase must prove all of the following before P0-06B can close:
+Optional when an account exposes more than one Neon organization:
 
 ```text
-create isolated Neon project
-create minimal durable schema/event row
-create/deploy namespaced Cloudflare Worker
-inject Neon connection material as Worker secret
-GET /health works
-provider egress works
-write/read durable synthetic event
-redeploy Worker to a new version
-same event survives redeploy
-Cron Trigger wakes scheduler path
-Queue enqueue/dequeue path works within free tier
-no durable truth depends on Worker local memory
-no paid product/plan is enabled
-no secret appears in logs/artifacts/repository
-cleanup or explicit retention is recorded
+NEON_ORG_ID
 ```
 
-## Zero-cost enforcement
+Read-only credential/capability checks passed before mutation:
 
-The experiment must fail closed if either platform requires a paid plan, billing upgrade, or resource outside current free allowances.
+```text
+Cloudflare Workers API access: true
+Neon API access: true
+credential values recorded: false
+mutation during credential gate: false
+```
 
-No automatic upgrade or paid fallback is permitted.
+The probe does not print token values, account ID, Neon API key, database URI or runtime secret.
 
-## CPU/runtime adaptation
+---
 
-Cloudflare Workers Free has a small per-request CPU budget. Therefore the expected Control Plane design is intentionally thin:
+## Real deployment procedure
 
-- validate request/identity;
-- transact durable state;
-- enqueue/claim work;
-- call lightweight provider/governor endpoints;
-- wake/schedule orchestration;
-- return status/events.
+The successful mutation probe performed all of the following against the real free accounts:
 
-Long-running reasoning and execution remain Runner responsibilities.
+1. resolved the Neon organization;
+2. created one isolated, namespaced Neon PostgreSQL project;
+3. generated a synthetic runtime secret;
+4. deployed a namespaced Cloudflare Worker as build A;
+5. injected `DATABASE_URL` and the synthetic secret through Wrangler secrets;
+6. confirmed the configured Cron schedule through the Cloudflare API;
+7. waited for `/health` to prove:
+   - PostgreSQL connectivity;
+   - runtime secret injection;
+   - outbound provider-network connectivity;
+8. wrote a durable synthetic event to Neon;
+9. redeployed the same Worker as build B;
+10. confirmed the Cron schedule remained attached;
+11. confirmed `/health` for build B;
+12. read the original event and proved it still carried build A as its writer;
+13. waited for the real Cloudflare Cron Trigger to execute without a connected client;
+14. observed the scheduled handler persist its marker to Neon;
+15. deleted the Worker and temporary Neon project;
+16. ran a tracked-secret leakage scan.
 
-This is an **ADAPT candidate**, not a silent change to the Stage 0 architecture.
+---
 
-## Current decision
+## Successful evidence
 
-**BLOCKED_EXTERNAL_CREDENTIALS.**
+Workflow:
 
-The owner must create free Cloudflare and Neon accounts and add the three GitHub Actions secrets above. The credential probe is read-only and will not mutate either account.
+```text
+run: 41189477201
+job: 124503095078
+result: success
+```
+
+Observed result:
+
+```yaml
+backend: cloudflare-workers+neon-postgres
+status: PASS
+source_sha: 80e16bb0563836d6bfd53ec066fab189446692e8
+
+builds:
+  initial: 80e16bb05638-a-1
+  redeploy: 80e16bb05638-b-1
+
+health:
+  database: true
+  secret_injected: true
+  provider_egress: true
+
+durable_state_survived_redeploy: true
+
+event_driven_compute: true
+client_connection_required_for_background_cron: false
+
+cron:
+  expression: "* * * * *"
+  schedule_attached_before_and_after_redeploy: true
+  persisted_state: true
+  propagation_wait_seconds: 546.292
+
+cleanup:
+  worker_deleted: true
+  neon_project_deleted: true
+
+credential_values_recorded: false
+database_uri_recorded: false
+elapsed_seconds: 562.908
+```
+
+The successful run also completed the tracked-secret scan.
+
+---
+
+## Failure discovered and corrected
+
+The first mutation attempt used a 210-second Cron wait window and failed only on the scheduled-event assertion.
+
+That was a test-design error. Current Cloudflare documentation states that Cron Trigger configuration changes can take up to 15 minutes to propagate. The Worker deployment, Neon connectivity and durable redeploy path had already progressed far enough to show that the failure was isolated to the premature Cron deadline.
+
+The probe was corrected to:
+
+- use the canonical every-minute expression `* * * * *`;
+- query the Cloudflare schedules API and fail immediately if the schedule is not attached;
+- verify schedule attachment again after redeploy;
+- allow 1020 seconds for propagation;
+- record the observed propagation delay.
+
+The corrected run passed with a real observed Cron delay of 546.292 seconds.
+
+---
+
+## Orphan-resource audit
+
+The failed first mutation attempt left namespaced research resources behind despite best-effort `finally` cleanup. This was discovered because later read-only counts increased.
+
+A dedicated fail-closed cleanup tool was added with this invariant:
+
+> it may delete only resources whose visible name starts exactly with `amodex-p006b-`.
+
+Cleanup evidence:
+
+```text
+workflow run: 41190356342
+job: 124505718439
+result: success
+prefix: amodex-p006b-
+```
+
+Observed cleanup:
+
+```yaml
+cloudflare:
+  found: 2
+  deleted: 2
+  remaining: 0
+
+neon:
+  found: 2
+  deleted: 2
+  remaining: 0
+
+non_prefixed_resources_touched: false
+```
+
+The cleanup credential scan also passed. No unrelated Worker or Neon project was modified.
+
+This finding becomes a production requirement: cloud resource creation/deletion must be idempotent, namespaced, reconciled after ambiguous failures, and followed by explicit orphan detection. Best-effort `finally` cleanup alone is insufficient authority.
+
+---
+
+## Zero-cost boundary
+
+This PoC used the current free accounts and did not intentionally enable a paid plan or paid fallback.
+
+The zero-cost invariant remains stronger than this single successful run:
+
+- current plan eligibility must be revalidated during implementation and deployment;
+- no billing upgrade may be automatic;
+- resource creation must fail closed when a required capability is paid-only or free capacity is exhausted;
+- provider and hosting cost state remains explicit configuration/observation data, not a timeless assumption.
+
+---
+
+## Stage 1 consequences
+
+Frozen direction from this PoC:
+
+```text
+Cloudflare Worker
+  = thin stateless/event-driven Control Plane entrypoint
+
+Neon Postgres
+  = durable authority and initial coordination substrate
+
+PostgreSQL
+  = task/lease/fencing/event truth from P0-04
+
+Cloudflare Cron
+  = periodic reconciliation and maintenance wakeup
+  != low-latency task queue
+
+RunnerBackend
+  = long-running execution
+```
+
+No Stage 1 component may treat a Worker instance, process memory, request lifetime, Cron delivery time, or Cloudflare-local transient state as authoritative.
+
+P0-06B is therefore **closed as ADAPT**.
