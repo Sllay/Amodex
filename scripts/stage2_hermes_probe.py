@@ -155,7 +155,13 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
                 4,
             )
         if test_result.get("ok") is not True:
-            return ({"role": "assistant", "content": "AMODEX_STAGE2_TEST_FAILED"}, "stop")
+            return (
+                {
+                    "role": "assistant",
+                    "content": "AMODEX_STAGE2_TEST_FAILED:" + json.dumps(test_result, sort_keys=True),
+                },
+                "stop",
+            )
         return ({"role": "assistant", "content": "AMODEX_STAGE2_HERMES_OK"}, "stop")
 
     def _write_sse(self, model: str, delta: dict[str, Any], finish_reason: str | None) -> None:
@@ -453,7 +459,7 @@ def run_probe(hermes_root: Path) -> dict[str, Any]:
 
         return {
             "status": "PASS",
-            "hermes_commit": HERMES_COMMIT,
+            "hermes_commit": "adecc4024456b387b1518813b90bd60c82b51287",
             "tool_surface": sorted(EXPECTED_TOOL_NAMES),
             "delegation_exposed": False,
             "native_file_tools_exposed": False,
