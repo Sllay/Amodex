@@ -6,7 +6,6 @@ import json
 import os
 import selectors
 import subprocess
-import sys
 import threading
 import time
 from pathlib import Path
@@ -19,6 +18,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--package", required=True)
     parser.add_argument("--project", required=True)
     parser.add_argument("--godot", required=True)
+    parser.add_argument("--require-addon", action="store_true")
+    parser.add_argument("--require-scene-backend", action="store_true")
     return parser.parse_args()
 
 
@@ -154,6 +155,18 @@ def main() -> int:
         if not status_text.strip():
             raise RuntimeError("godot_status returned no textual status")
 
+        try:
+            status_payload = json.loads(status_text)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"godot_status text was not JSON: {status_text[:800]!r}") from exc
+
+        addon_installed = status_payload.get("addon_installed") is True
+        scene_backend = status_payload.get("scene_backend")
+        if args.require_addon and not addon_installed:
+            raise RuntimeError(f"Godot MCP addon was required but not installed: {status_payload}")
+        if args.require_scene_backend and scene_backend in {None, "unavailable"}:
+            raise RuntimeError(f"Godot MCP scene backend unavailable after addon install: {status_payload}")
+
         print(json.dumps({
             "status": "PASS",
             "protocol_version": protocol_version,
@@ -162,14 +175,18 @@ def main() -> int:
             "godot_status_call_succeeded": True,
             "read_only": True,
             "project": Path(project).name,
-            "status_preview": status_text[:800],
+            "addon_installed": addon_installed,
+            "scene_backend": scene_backend,
+            "editor_connected": status_payload.get("editor_connected"),
+            "godot_version": status_payload.get("godot", {}).get("version"),
+            "server_version": status_payload.get("server_version"),
+            "status_payload": status_payload,
             "stderr_tail": stderr_lines[-10:],
         }, indent=2, sort_keys=True))
         return 0
     finally:
         try:
-            if proc.stdin:
-                proc.stdin.close()
+            proc.stdin.close()
         except OSError:
             pass
         if proc.poll() is None:
