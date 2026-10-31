@@ -1,0 +1,56 @@
+name: stage0-contracts
+
+on:
+  push:
+    branches:
+      - stage/0-feasibility
+  pull_request:
+    branches:
+      - docs/part-1-foundation
+
+permissions:
+  contents: write
+
+jobs:
+  lock-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+
+      - name: Install pinned uv
+        run: python3 -m pip install --disable-pip-version-check uv==0.10.0
+
+      - name: Install pinned Python
+        run: uv python install 3.13.5
+
+      - name: Resolve dependency lock
+        run: uv lock --python 3.13.5
+
+      - name: Recreate environment from lock
+        run: uv sync --python 3.13.5 --extra dev --frozen
+
+      - name: Run P0-01 contract suite
+        run: uv run --python 3.13.5 --extra dev --frozen pytest -q
+
+      - name: Prove schema generation
+        run: |
+          uv run --python 3.13.5 --extra dev --frozen python -m amodex.contracts schema tool-call > /tmp/tool-call.schema.json
+          python3 -c 'import json; data=json.load(open("/tmp/tool-call.schema.json")); assert data["title"] == "ToolCall"'
+          sha256sum uv.lock
+
+      - name: Persist generated lock on Stage 0 branch
+        if: github.event_name == 'push' && github.ref_name == 'stage/0-feasibility'
+        run: |
+          if git diff --quiet -- uv.lock && git ls-files --error-unmatch uv.lock >/dev/null 2>&1; then
+            echo "uv.lock already tracked and unchanged"
+            exit 0
+          fi
+          git config user.name "amodex-stage0-ci"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add uv.lock
+          git commit -m "chore(stage0): lock contract dependencies"
+          git push origin HEAD:${GITHUB_REF_NAME}
