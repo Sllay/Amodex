@@ -68,6 +68,7 @@ This repository is being completed in three specification passes before implemen
 - `docs/SECURITY_THREAT_MODEL.md` — trust zones, prompt injection, secrets, filesystem/shell/network isolation, supply chain, MCP trust, evidence integrity and security tests.
 - `docs/RUNNER_AND_MCP_PROTOCOL.md` — RunnerBackend lifecycle, profiles, bootstrap, Hermes/MCP integration, Godot/Serena topology, visual/headless validation and hosting PoCs.
 - `docs/GITHUB_INTEGRATION.md` — GitHub App strategy, task branch/checkpoint/PR lifecycle, webhooks, polling, protection discovery, Actions integration and expected-SHA promotion behavior.
+- `docs/research/PART2_VERIFIED_BASELINE_2026-10-31.md` — dated external fact baseline for Hermes, Northflank, Godot MCP, Black-Islands and implementation revalidation requirements.
 
 ### Part 3 — Implementation program and acceptance system — PENDING
 
