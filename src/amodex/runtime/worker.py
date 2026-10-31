@@ -119,13 +119,22 @@ class Stage1Worker:
                 request_key=request_key,
             )
         except ProviderFailure as exc:
+            waiting_for_free_quota = exc.code == "RATE_LIMITED"
             return self.repository.transition(
                 run_id=run.run_id,
                 worker_id=self.worker_id,
                 fencing_token=run.fencing_token,
-                state=RunState.UNKNOWN_OUTCOME if exc.ambiguous_outcome else RunState.FAILED,
+                state=(
+                    RunState.WAITING_PROVIDER
+                    if waiting_for_free_quota
+                    else RunState.UNKNOWN_OUTCOME
+                    if exc.ambiguous_outcome
+                    else RunState.FAILED
+                ),
                 kind=(
-                    EventKind.PROVIDER_OUTCOME_UNKNOWN
+                    EventKind.PROVIDER_WAIT
+                    if waiting_for_free_quota
+                    else EventKind.PROVIDER_OUTCOME_UNKNOWN
                     if exc.ambiguous_outcome
                     else EventKind.RUN_FAILED
                 ),
@@ -134,6 +143,7 @@ class Stage1Worker:
                     "retry_after_seconds": exc.retry_after_seconds,
                     "ambiguous_outcome": exc.ambiguous_outcome,
                     "request_key": request_key,
+                    "paid_fallback": False,
                 },
                 last_error_code=exc.code,
                 release_lease=True,
@@ -159,6 +169,11 @@ class Stage1Worker:
         )
 
 
+def _free_quota_available_from_env() -> bool:
+    raw = os.environ.get("AMODEX_FREE_QUOTA_AVAILABLE", "1").strip().lower()
+    return raw not in {"0", "false", "no", "off"}
+
+
 def main() -> None:
     repo = PostgresRunRepository(os.environ["AMODEX_DATABASE_URL"])
     worker = Stage1Worker(
@@ -167,6 +182,6 @@ def main() -> None:
         governor=ProviderGovernor.stage1_default(),
         worker_id=f"worker-{new_uuid7()}",
     )
-    result = worker.process_once()
+    result = worker.process_once(free_quota_available=_free_quota_available_from_env())
     if result is not None:
         print(result.model_dump_json())

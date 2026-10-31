@@ -60,6 +60,7 @@ jobs:
           tests/integration/test_stage1_vertical_slice.py
           tests/integration/test_stage1_crash_recovery.py
           tests/integration/test_stage1_migrations.py
+          tests/integration/test_stage1_provider_failures.py
 
       - name: Run real Gemini durable provider smoke
         run: >-

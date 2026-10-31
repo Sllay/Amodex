@@ -1,0 +1,10 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "amodex-stage1-control-plane",
+  "main": "src/main.py",
+  "compatibility_date": "2026-10-31",
+  "compatibility_flags": ["python_workers"],
+  "vars": {
+    "BUILD_ID": "local"
+  }
+}

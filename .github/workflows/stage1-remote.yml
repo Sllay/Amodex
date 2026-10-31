@@ -1,0 +1,86 @@
+name: stage1-remote
+
+on:
+  push:
+    branches:
+      - stage/1-durable-runtime
+    paths:
+      - 'src/amodex/**'
+      - 'migrations/**'
+      - 'deploy/cloudflare/**'
+      - 'scripts/stage1_remote_probe.py'
+      - '.github/workflows/stage1-remote.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  remote-vertical-slice:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+
+    steps:
+      - name: Checkout exact Stage 1 revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+
+      - name: Require cloud credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID NEON_API_KEY GEMINI_API_KEY; do
+            if [ -z "${!name:-}" ]; then
+              echo "missing required secret: $name" >&2
+              exit 1
+            fi
+          done
+
+      - name: Install pinned uv and Python
+        run: |
+          python3 -m pip install --disable-pip-version-check uv==0.10.0
+          uv python install 3.13.5
+
+      - name: Recreate root Stage 1 environment
+        run: uv sync --python 3.13.5 --extra dev --frozen
+
+      - name: Resolve and recreate Cloudflare Python Worker environment
+        run: |
+          uv lock --project deploy/cloudflare --python 3.13.5
+          uv sync --project deploy/cloudflare --python 3.13.5 --group dev --frozen
+          rm -rf deploy/cloudflare/src/amodex
+          cp -R src/amodex deploy/cloudflare/src/amodex
+
+      - name: Execute real remote Stage 1 vertical slice
+        run: uv run --python 3.13.5 --extra dev --frozen python scripts/stage1_remote_probe.py
+
+      - name: Scan tracked files for configured secret values
+        shell: bash
+        run: |
+          set -euo pipefail
+          for secret in "$CLOUDFLARE_API_TOKEN" "$NEON_API_KEY" "$GEMINI_API_KEY"; do
+            if git grep -F -- "$secret" -- . ':!uv.lock' ':!deploy/cloudflare/uv.lock'; then
+              echo 'configured secret value found in tracked content' >&2
+              exit 1
+            fi
+          done
+          echo 'tracked-secret scan PASS'
+
+      - name: Persist Cloudflare deployment lock
+        if: github.event_name == 'push' && github.ref_name == 'stage/1-durable-runtime'
+        run: |
+          if git diff --quiet -- deploy/cloudflare/uv.lock && git ls-files --error-unmatch deploy/cloudflare/uv.lock >/dev/null 2>&1; then
+            echo 'Cloudflare uv.lock already tracked and unchanged'
+            exit 0
+          fi
+          git config user.name 'amodex-stage1-ci'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add deploy/cloudflare/uv.lock
+          git commit -m 'chore(stage1): lock Cloudflare runtime dependencies'
+          git push origin HEAD:${GITHUB_REF_NAME}
