@@ -60,6 +60,14 @@ class CommandResult:
 
 
 @dataclass(frozen=True, slots=True)
+class ValidatorRuntime:
+    """Runner-owned validator runtime; never chosen by the model."""
+
+    python: str
+    pythonpath: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class ContextFile:
     path: str
     sha256: str
@@ -143,6 +151,7 @@ class ScopedWorkspaceTools:
         leases: PathLeaseRegistry | None = None,
         secrets: SecretBroker | None = None,
         allowed_validator_programs: Iterable[str] = ("python", "python3", "python3.13", "pytest"),
+        validator_runtime: ValidatorRuntime | None = None,
     ) -> None:
         self.task = task
         self.workspace = workspace.resolve(strict=True)
@@ -151,6 +160,20 @@ class ScopedWorkspaceTools:
         self.leases = leases or PathLeaseRegistry()
         self.secrets = secrets or SecretBroker()
         self.allowed_validator_programs = frozenset(allowed_validator_programs)
+        self.validator_runtime = validator_runtime or ValidatorRuntime(python=sys.executable)
+        self._validate_validator_runtime()
+
+    def _validate_validator_runtime(self) -> None:
+        python = Path(self.validator_runtime.python)
+        if not python.is_absolute() or not python.is_file() or not os.access(python, os.X_OK):
+            raise CommandDenied(f"trusted validator interpreter is invalid: {python}")
+        for raw in self.validator_runtime.pythonpath:
+            candidate = Path(raw)
+            if not candidate.is_absolute() or not candidate.is_dir():
+                raise CommandDenied(f"trusted validator import path is invalid: {candidate}")
+            resolved = candidate.resolve(strict=True)
+            if resolved == self.workspace or self.workspace in resolved.parents:
+                raise CommandDenied("validator import path cannot originate inside the task workspace")
 
     @staticmethod
     def _normalize_relative(path: str) -> str:
@@ -324,16 +347,6 @@ class ScopedWorkspaceTools:
         elif program != "pytest":
             raise CommandDenied(f"validator command shape is not allowed: {program}")
 
-    @staticmethod
-    def _trusted_validator_python() -> str:
-        if os.name == "nt":
-            candidate = Path(sys.prefix) / "Scripts" / "python.exe"
-        else:
-            candidate = Path(sys.prefix) / "bin" / "python"
-        if not candidate.is_file():
-            raise CommandDenied(f"trusted runner interpreter is unavailable: {candidate}")
-        return str(candidate)
-
     def run_validator(self, argv: Sequence[str], *, cwd: str = ".", timeout_seconds: int = 60) -> CommandResult:
         self._require_operation("run_tests")
         self._validate_validator_argv(argv)
@@ -348,12 +361,13 @@ class ScopedWorkspaceTools:
                 raise CommandDenied(f"validator cwd is not a directory: {cwd}")
         safe_env = {key: value for key, value in os.environ.items() if key in self._SAFE_ENV_KEYS}
         safe_env["PYTHONNOUSERSITE"] = "1"
+        if self.validator_runtime.pythonpath:
+            safe_env["PYTHONPATH"] = os.pathsep.join(self.validator_runtime.pythonpath)
         program = Path(argv[0]).name
-        trusted_python = self._trusted_validator_python()
         if program.startswith("python"):
-            command = [trusted_python, *argv[1:]]
+            command = [self.validator_runtime.python, *argv[1:]]
         else:
-            command = [trusted_python, "-m", "pytest", *argv[1:]]
+            command = [self.validator_runtime.python, "-m", "pytest", *argv[1:]]
         completed = subprocess.run(
             command,
             cwd=resolved_cwd,

@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import shutil
 import socket
 import sys
@@ -25,7 +24,7 @@ from amodex.runtime.hermes_worker import (
     POLICY_SENTINEL,
     HermesScopedWorker,
 )
-from amodex.tools.scoped_workspace import ScopedWorkspaceTools
+from amodex.tools.scoped_workspace import ScopedWorkspaceTools, ValidatorRuntime
 
 UNTRUSTED_SENTINEL = "UNTRUSTED_OVERRIDE_SENTINEL_DO_NOT_OBEY"
 
@@ -336,13 +335,20 @@ def role_text(request: dict[str, Any], role: str) -> str:
     )
 
 
-def run_probe(hermes_root: Path) -> dict[str, Any]:
+def run_probe(hermes_root: Path, validator_python: Path, validator_pythonpath: Path) -> dict[str, Any]:
     with tempfile.TemporaryDirectory(prefix="amodex-stage2-hermes-") as temp_dir:
         root = Path(temp_dir)
         workspace = create_workspace(root)
         task = make_task()
         authority_before = task.model_dump(mode="json")
-        tools = ScopedWorkspaceTools(task=task, workspace=workspace)
+        tools = ScopedWorkspaceTools(
+            task=task,
+            workspace=workspace,
+            validator_runtime=ValidatorRuntime(
+                python=str(validator_python),
+                pythonpath=(str(validator_pythonpath),),
+            ),
+        )
         capsule = tools.build_context_capsule(
             ("src/calculator.py", "src/untrusted.txt", "tests/test_calculator.py")
         )
@@ -476,10 +482,16 @@ def run_probe(hermes_root: Path) -> dict[str, Any]:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--hermes-root", required=True, type=Path)
+    parser.add_argument("--validator-python", required=True, type=Path)
+    parser.add_argument("--validator-pythonpath", required=True, type=Path)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     try:
-        result = run_probe(args.hermes_root.resolve())
+        result = run_probe(
+            args.hermes_root.resolve(),
+            args.validator_python,
+            args.validator_pythonpath.resolve(strict=True),
+        )
     except Exception as exc:
         print(f"S2-V3 FAIL: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1

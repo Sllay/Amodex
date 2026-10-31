@@ -68,6 +68,8 @@ jobs:
 
           "$HERMES_VENV_PYTHON" "$GITHUB_WORKSPACE/scripts/stage2_hermes_probe.py" \
             --hermes-root "$HERMES_DIR" \
+            --validator-python "$HERMES_VENV_PYTHON" \
+            --validator-pythonpath "$PYTEST_LOCATION" \
             --output "$RUNNER_TEMP/stage2-hermes-result.json"
           cat "$RUNNER_TEMP/stage2-hermes-result.json"
 
