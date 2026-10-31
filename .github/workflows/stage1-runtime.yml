@@ -52,12 +52,14 @@ jobs:
       - name: Recreate environment from lock
         run: uv sync --python 3.13.5 --extra dev --frozen
 
-      - name: Run contract + Stage 1 deterministic suites
+      - name: Run contract + Stage 1 deterministic/crash suites
         run: >-
           uv run --python 3.13.5 --extra dev --frozen pytest -q
           tests/unit
           tests/contract
           tests/integration/test_stage1_vertical_slice.py
+          tests/integration/test_stage1_crash_recovery.py
+          tests/integration/test_stage1_migrations.py
 
       - name: Run real Gemini durable provider smoke
         run: >-

@@ -23,6 +23,12 @@ class RunState(StrEnum):
     BLOCKED = "BLOCKED"
 
 
+class ProviderRequestState(StrEnum):
+    NONE = "NONE"
+    STARTED = "STARTED"
+    COMPLETED = "COMPLETED"
+
+
 class EventKind(StrEnum):
     RUN_CREATED = "RUN_CREATED"
     RUN_CLAIMED = "RUN_CLAIMED"
@@ -30,6 +36,7 @@ class EventKind(StrEnum):
     PROVIDER_WAIT = "PROVIDER_WAIT"
     PROVIDER_REQUEST_STARTED = "PROVIDER_REQUEST_STARTED"
     PROVIDER_REQUEST_COMPLETED = "PROVIDER_REQUEST_COMPLETED"
+    PROVIDER_OUTCOME_UNKNOWN = "PROVIDER_OUTCOME_UNKNOWN"
     RUN_COMPLETED = "RUN_COMPLETED"
     RUN_FAILED = "RUN_FAILED"
     LEASE_EXPIRED_RECLAIMED = "LEASE_EXPIRED_RECLAIMED"
@@ -44,6 +51,8 @@ class RunRecord(ContractModel):
     model: str | None = None
     result_text: str | None = None
     last_error_code: str | None = None
+    provider_request_key: UUIDv7Str | None = None
+    provider_request_state: ProviderRequestState = ProviderRequestState.NONE
     revision: int = Field(ge=1)
     fencing_token: int = Field(ge=0)
     lease_owner: str | None = None
