@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """P0-02: prove Hermes can remain a bounded Amodex worker runtime.
 
-The probe runs against an exact Hermes source commit, uses only a loopback fake
-provider, and keeps Amodex authority outside Hermes session state.
+The probe runs against one exact Hermes commit, uses only a loopback fake
+OpenAI-compatible provider, and keeps Amodex authority outside Hermes session
+state. No paid model/API call is made.
 """
 
 from __future__ import annotations
@@ -54,11 +55,11 @@ def tool_names(definitions: list[dict[str, Any]]) -> set[str]:
 
 
 class ProviderState:
-    def __init__(self) -> None:
+    def __init__(self, *, slow: bool = False) -> None:
         self.lock = threading.Lock()
         self.requests: list[dict[str, Any]] = []
         self.request_started = threading.Event()
-        self.slow = False
+        self.slow = slow
 
     def capture(self, payload: dict[str, Any]) -> None:
         with self.lock:
@@ -72,14 +73,15 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
     def log_message(self, *_args: Any) -> None:
         return
 
-    def do_POST(self) -> None:  # noqa: N802 - stdlib server API
-        length = int(self.headers.get("content-length", "0"))
-        payload = json.loads(self.rfile.read(length) or b"{}")
-        self.state.capture(payload)
+    def do_GET(self) -> None:  # noqa: N802 - stdlib API
+        body = json.dumps({"data": []}).encode("utf-8")
+        self.send_response(200)
+        self.send_header("content-type", "application/json")
+        self.send_header("content-length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
-        if self.state.slow:
-            time.sleep(12)
-
+    def _response_message(self, payload: dict[str, Any]) -> tuple[dict[str, Any], str]:
         messages = payload.get("messages") or []
         exposed = {
             (entry.get("function") or {}).get("name")
@@ -103,64 +105,114 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
                 if marker in user_text
                 else "/tmp/amodex-probe-missing"
             )
-            assistant_message: dict[str, Any] = {
-                "role": "assistant",
-                "content": None,
-                "tool_calls": [
-                    {
-                        "id": "call-amodex-read-1",
-                        "type": "function",
-                        "function": {
-                            "name": "read_file",
-                            "arguments": json.dumps({"path": target}),
-                        },
-                    }
-                ],
-            }
-            finish_reason = "tool_calls"
-        else:
-            assistant_message = {
-                "role": "assistant",
-                "content": "AMODEX_HERMES_PROBE_OK",
-            }
-            finish_reason = "stop"
+            return (
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {
+                            "index": 0,
+                            "id": "call-amodex-read-1",
+                            "type": "function",
+                            "function": {
+                                "name": "read_file",
+                                "arguments": json.dumps({"path": target}),
+                            },
+                        }
+                    ],
+                },
+                "tool_calls",
+            )
 
-        body = {
-            "id": f"chatcmpl-amodex-{len(self.state.requests)}",
-            "object": "chat.completion",
+        return (
+            {"role": "assistant", "content": "AMODEX_HERMES_PROBE_OK"},
+            "stop",
+        )
+
+    def _write_sse(self, model: str, delta: dict[str, Any], finish_reason: str | None) -> None:
+        frame = {
+            "id": "chatcmpl-amodex-local",
+            "object": "chat.completion.chunk",
             "created": int(time.time()),
-            "model": payload.get("model") or "amodex-local-probe",
+            "model": model,
             "choices": [
                 {
                     "index": 0,
-                    "message": assistant_message,
+                    "delta": delta,
                     "finish_reason": finish_reason,
                 }
             ],
-            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
         }
-        encoded = json.dumps(body).encode("utf-8")
+        self.wfile.write(("data: " + json.dumps(frame) + "\n\n").encode("utf-8"))
+        self.wfile.flush()
+
+    def do_POST(self) -> None:  # noqa: N802 - stdlib API
+        length = int(self.headers.get("content-length", "0"))
+        payload = json.loads(self.rfile.read(length) or b"{}")
+        self.state.capture(payload)
+
+        # Used only by the hard-cancel sub-probe.
+        if self.state.slow:
+            time.sleep(12)
+
+        message, finish_reason = self._response_message(payload)
+        model = str(payload.get("model") or "amodex-local-probe")
+
         try:
+            if payload.get("stream"):
+                self.send_response(200)
+                self.send_header("content-type", "text/event-stream")
+                self.send_header("cache-control", "no-cache")
+                self.end_headers()
+                self._write_sse(model, message, None)
+                self._write_sse(model, {}, finish_reason)
+                self.wfile.write(b"data: [DONE]\n\n")
+                self.wfile.flush()
+                return
+
+            nonstream_message = dict(message)
+            if nonstream_message.get("tool_calls"):
+                nonstream_message["tool_calls"] = [
+                    {key: value for key, value in call.items() if key != "index"}
+                    for call in nonstream_message["tool_calls"]
+                ]
+            body = {
+                "id": "chatcmpl-amodex-local",
+                "object": "chat.completion",
+                "created": int(time.time()),
+                "model": model,
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": nonstream_message,
+                        "finish_reason": finish_reason,
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "total_tokens": 2,
+                },
+            }
+            encoded = json.dumps(body).encode("utf-8")
             self.send_response(200)
             self.send_header("content-type", "application/json")
             self.send_header("content-length", str(len(encoded)))
             self.end_headers()
             self.wfile.write(encoded)
         except (BrokenPipeError, ConnectionResetError):
+            # Expected if the hard-cancel test terminates the in-flight request.
             return
 
 
 @contextmanager
 def fake_provider(*, slow: bool = False):
-    state = ProviderState()
-    state.slow = slow
+    state = ProviderState(slow=slow)
     handler = type("BoundHandler", (FakeProviderHandler,), {"state": state})
     server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
-        host, port = server.server_address
-        yield state, f"http://{host}:{port}/v1"
+        yield state, f"http://127.0.0.1:{server.server_port}/v1"
     finally:
         server.shutdown()
         server.server_close()
@@ -260,6 +312,12 @@ def register(ctx):
 def write_hermes_config(hermes_home: Path) -> None:
     hermes_home.mkdir(parents=True, exist_ok=True)
     (hermes_home / "config.yaml").write_text(
+        "model:\n"
+        "  context_length: 131072\n"
+        "agent:\n"
+        "  api_max_retries: 0\n"
+        "compression:\n"
+        "  enabled: false\n"
         "plugins:\n"
         "  enabled:\n"
         "    - amodex-probe\n"
@@ -291,7 +349,7 @@ def extract_final(result: Any) -> str:
 
 
 def make_agent(AIAgent: type, *, base_url: str, toolsets: list[str]) -> Any:
-    return AIAgent(
+    agent = AIAgent(
         api_key="local-not-a-secret",
         base_url=base_url,
         provider="openai",
@@ -305,6 +363,15 @@ def make_agent(AIAgent: type, *, base_url: str, toolsets: list[str]) -> Any:
         max_iterations=6,
         ephemeral_system_prompt=SYSTEM_SENTINEL,
     )
+    if hasattr(agent, "client") and hasattr(agent.client, "max_retries"):
+        agent.client.max_retries = 0
+    return agent
+
+
+def close_agent(agent: Any) -> None:
+    closer = getattr(agent, "close", None)
+    if callable(closer):
+        closer()
 
 
 def raw_names(model_tools: Any, enabled: list[str], disabled: list[str] | None = None) -> set[str]:
@@ -396,33 +463,27 @@ def run_probe(hermes_root: Path) -> dict[str, Any]:
                 if isinstance(item, dict) and isinstance(item.get("name"), str)
             }
             require("amodex-probe" in loaded, f"probe plugin not discovered: {sorted(loaded)}")
-            require(
-                bool(loaded["amodex-probe"].get("enabled")),
-                f"probe plugin not enabled: {loaded['amodex-probe']}",
-            )
+            require(bool(loaded["amodex-probe"].get("enabled")), "probe plugin was not enabled")
 
             empty_names = raw_names(model_tools, [])
             require(not empty_names, f"empty whitelist leaked tools: {sorted(empty_names)}")
 
             rogue_names = raw_names(model_tools, ["amodex_rogue"])
-            require(
-                "amodex_rogue_tool" in rogue_names,
-                f"probe plugin registered no rogue tool: {sorted(rogue_names)}",
-            )
+            require("amodex_rogue_tool" in rogue_names, "probe plugin did not register rogue tool")
 
             file_names = raw_names(model_tools, ["file"])
             require("read_file" in file_names, f"file whitelist missing read_file: {sorted(file_names)}")
             require(
                 file_names <= EXPECTED_FILE_TOOLS,
-                f"unexpected raw file tools exposed: {sorted(file_names - EXPECTED_FILE_TOOLS)}",
+                f"unexpected raw file tools: {sorted(file_names - EXPECTED_FILE_TOOLS)}",
             )
             require(
                 not (file_names & FORBIDDEN_TOOLS),
                 f"forbidden raw tools leaked: {sorted(file_names & FORBIDDEN_TOOLS)}",
             )
 
-            no_delegation_names = raw_names(model_tools, ["file"], ["delegation"])
-            require("delegate_task" not in no_delegation_names, "delegation remained exposed")
+            no_delegation = raw_names(model_tools, ["file"], ["delegation"])
+            require("delegate_task" not in no_delegation, "delegation remained exposed")
 
             assembled_file_names = tool_names(
                 model_tools.get_tool_definitions(
@@ -433,19 +494,23 @@ def run_probe(hermes_root: Path) -> dict[str, Any]:
             )
             require(
                 assembled_file_names == file_names,
-                "tool-search-off surface differs from raw scoped file surface: "
+                "tool-search-off surface differs from raw scoped surface: "
                 f"raw={sorted(file_names)} assembled={sorted(assembled_file_names)}",
             )
 
             with fake_provider() as (provider_state, base_url), loopback_only_network():
                 agent = make_agent(AIAgent, base_url=base_url, toolsets=["file"])
-                result = agent.run_conversation(
-                    user_message=(
-                        "Read the exact file using the available tool. "
-                        f"READ_TARGET={target}"
-                    ),
-                    task_id="amodex-p0-02-task",
-                )
+                try:
+                    result = agent.run_conversation(
+                        user_message=(
+                            "Read the exact file using the available tool. "
+                            f"READ_TARGET={target}"
+                        ),
+                        task_id="amodex-p0-02-task",
+                    )
+                finally:
+                    close_agent(agent)
+
                 require(
                     "AMODEX_HERMES_PROBE_OK" in extract_final(result),
                     "programmatic conversation did not complete",
@@ -455,9 +520,8 @@ def run_probe(hermes_root: Path) -> dict[str, Any]:
                     "expected provider -> tool -> provider round trip",
                 )
                 first_request = provider_state.requests[0]
-                request_text = json.dumps(first_request, sort_keys=True)
                 require(
-                    SYSTEM_SENTINEL in request_text,
+                    SYSTEM_SENTINEL in json.dumps(first_request, sort_keys=True),
                     "custom Amodex system context was not sent",
                 )
                 exposed = {
@@ -465,13 +529,9 @@ def run_probe(hermes_root: Path) -> dict[str, Any]:
                     for entry in first_request.get("tools", [])
                     if isinstance(entry, dict)
                 }
-                require(exposed == file_names, f"provider surface drift: {sorted(exposed)}")
-                require("read_file" in exposed, "read_file not exposed to model")
+                require(exposed == file_names, f"provider tool surface drift: {sorted(exposed)}")
                 require("delegate_task" not in exposed, "delegate_task leaked to model")
-                require(
-                    "amodex_rogue_tool" not in exposed,
-                    "rogue plugin tool leaked to model",
-                )
+                require("amodex_rogue_tool" not in exposed, "rogue plugin tool leaked to model")
 
             events = load_events(events_file)
             event_names = [event.get("event") for event in events]
@@ -495,7 +555,7 @@ def run_probe(hermes_root: Path) -> dict[str, Any]:
                     event.get("telemetry_schema_version") == "hermes.observer.v1"
                     for event in events
                 ),
-                "observer telemetry schema version missing/drifted",
+                "observer telemetry schema version missing or drifted",
             )
 
             with fake_provider(slow=True) as (slow_state, slow_url), loopback_only_network():
@@ -514,10 +574,7 @@ def run_probe(hermes_root: Path) -> dict[str, Any]:
                 worker = threading.Thread(target=run_slow, daemon=True)
                 started = time.monotonic()
                 worker.start()
-                require(
-                    slow_state.request_started.wait(timeout=5),
-                    "slow provider request never started",
-                )
+                require(slow_state.request_started.wait(timeout=5), "slow provider request never started")
                 accepted = cancel_agent.interrupt(
                     hard_cancel=True,
                     tool_reason="amodex_lease_revoked",
@@ -525,10 +582,8 @@ def run_probe(hermes_root: Path) -> dict[str, Any]:
                 require(accepted is not False, "Hermes rejected hard interrupt")
                 worker.join(timeout=5)
                 elapsed = time.monotonic() - started
-                require(
-                    not worker.is_alive(),
-                    "hard interrupt did not terminate blocked run within 5s",
-                )
+                close_agent(cancel_agent)
+                require(not worker.is_alive(), "hard interrupt did not end blocked run within 5s")
                 require(elapsed < 8, f"hard interrupt latency too high: {elapsed:.2f}s")
 
             durable_before = json.loads(authority_file.read_text(encoding="utf-8"))
@@ -545,10 +600,13 @@ def run_probe(hermes_root: Path) -> dict[str, Any]:
                     base_url=base_url,
                     toolsets=recreated["enabled_toolsets"],
                 )
-                recovered = recovery_agent.run_conversation(
-                    user_message="Return normally after worker reconstruction.",
-                    task_id=recreated["task_id"],
-                )
+                try:
+                    recovered = recovery_agent.run_conversation(
+                        user_message="Return normally after worker reconstruction.",
+                        task_id=recreated["task_id"],
+                    )
+                finally:
+                    close_agent(recovery_agent)
                 require(
                     "AMODEX_HERMES_PROBE_OK" in extract_final(recovered),
                     "worker reconstruction failed",
@@ -568,7 +626,7 @@ def run_probe(hermes_root: Path) -> dict[str, Any]:
                 "observer_events": event_names,
                 "hard_interrupt": True,
                 "external_authority_recovery": True,
-                "provider_control": "loopback_openai_compatible",
+                "provider_control": "loopback_openai_compatible_sse",
             }
         finally:
             os.chdir(old_cwd)
@@ -581,6 +639,7 @@ def main() -> int:
     parser.add_argument("--hermes-root", required=True, type=Path)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
+
     try:
         result = run_probe(args.hermes_root.resolve())
     except Exception as exc:
