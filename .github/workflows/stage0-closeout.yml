@@ -1,0 +1,181 @@
+name: stage0-closeout
+
+on:
+  push:
+    branches:
+      - stage/0-feasibility
+    paths:
+      - '.github/workflows/stage0-closeout.yml'
+      - 'docs/decisions/**'
+      - 'research/**/RESULT.md'
+      - 'src/amodex/contracts/**'
+      - 'tests/contract/**'
+      - 'uv.lock'
+      - 'pyproject.toml'
+
+permissions:
+  contents: read
+
+jobs:
+  closeout:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      NORTHFLANK_API_TOKEN: ${{ secrets.NORTHFLANK_API_TOKEN }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+
+    steps:
+      - name: Checkout exact Stage 0 revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+
+      - name: Install pinned contract toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check uv==0.10.0
+          uv python install 3.13.5
+          uv sync --python 3.13.5 --extra dev --frozen
+
+      - name: Re-run executable contract baseline at closeout SHA
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv run --python 3.13.5 --extra dev --frozen pytest -q
+          uv run --python 3.13.5 --extra dev --frozen python -m amodex.contracts schema tool-call > "$RUNNER_TEMP/tool-call.schema.json"
+          python3 - "$RUNNER_TEMP/tool-call.schema.json" <<'PY'
+          import json, pathlib, sys
+          data = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          assert data['title'] == 'ToolCall', data
+          print('CONTRACT_SCHEMA_OK')
+          PY
+          sha256sum uv.lock
+
+      - name: Validate all blocking Stage 0 decisions are recorded
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          expected = {
+              'research/p0-01-contracts/RESULT.md': ('ADOPT',),
+              'research/p0-02-hermes/RESULT.md': ('ADAPT',),
+              'research/p0-03-providers/RESULT.md': ('ADOPT',),
+              'research/p0-04-postgres/RESULT.md': ('ADAPT',),
+              'research/p0-05-git/RESULT.md': ('ADAPT',),
+              'research/p0-06-northflank/RESULT.md': ('REJECT_AS_PRIMARY_FOR_CURRENT_ACCOUNT',),
+              'research/p0-06-cloudflare-neon/RESULT.md': ('ADAPT',),
+              'research/p0-07-general-runner/RESULT.md': ('ADAPT',),
+              'research/p0-08-godot-headless/RESULT.md': ('ADAPT',),
+              'research/p0-09-godot-visual/RESULT.md': ('ADAPT',),
+          }
+          for raw_path, markers in expected.items():
+              path = Path(raw_path)
+              if not path.is_file():
+                  raise SystemExit(f'missing Stage 0 result: {raw_path}')
+              text = path.read_text(encoding='utf-8')
+              for marker in markers:
+                  if marker not in text:
+                      raise SystemExit(f'{raw_path} missing decision marker {marker}')
+
+          adr1 = Path('docs/decisions/ADR-0001-event-driven-control-plane-hosting.md').read_text(encoding='utf-8')
+          adr2 = Path('docs/decisions/ADR-0002-initial-runner-backend-strategy.md').read_text(encoding='utf-8')
+          if 'Accepted' not in adr1:
+              raise SystemExit('ADR-0001 is not accepted')
+          if 'Accepted' not in adr2:
+              raise SystemExit('ADR-0002 is not accepted')
+
+          register = Path('docs/POC_REGISTER.md').read_text(encoding='utf-8')
+          if 'P0-10' not in register or 'blocking only before Amodex claims Runner portability' not in register:
+              raise SystemExit('P0-10 defer boundary is not explicitly preserved')
+
+          print('STAGE0_DECISION_REGISTER_OK')
+          PY
+
+      - name: Compile retained Stage 0 Python research
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m compileall -q src/amodex/contracts research
+          echo 'PYTHON_RESEARCH_COMPILE_OK'
+
+      - name: Reject tracked secret values
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in GEMINI_API_KEY NORTHFLANK_API_TOKEN CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID NEON_API_KEY; do
+            value="${!name:-}"
+            if [ -z "$value" ]; then
+              echo "closeout secret not configured: $name" >&2
+              exit 1
+            fi
+            if git grep -n -F "$value" -- . >"$RUNNER_TEMP/secret-hit" 2>/dev/null; then
+              echo "tracked content contains configured secret value for $name" >&2
+              sed 's/.*/[redacted match]/' "$RUNNER_TEMP/secret-hit" >&2
+              exit 1
+            fi
+          done
+          echo 'TRACKED_SECRET_VALUE_SCAN_OK'
+
+      - name: Repository hygiene gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git ls-files | grep -E '(^|/)\.env($|\.)|(^|/)id_rsa($|\.)|\.(pem|p12|pfx)$' >"$RUNNER_TEMP/hygiene-bad"; then
+            echo 'credential-like file tracked unexpectedly' >&2
+            cat "$RUNNER_TEMP/hygiene-bad" >&2
+            exit 1
+          fi
+          if git ls-files research | grep -E '(^|/)\.godot/|\.(log|zip|png)$' >"$RUNNER_TEMP/research-junk"; then
+            echo 'runtime/generated evidence committed in research instead of CI artifact storage' >&2
+            cat "$RUNNER_TEMP/research-junk" >&2
+            exit 1
+          fi
+          if git status --porcelain | grep -v '^?? ' >"$RUNNER_TEMP/dirty"; then
+            echo 'tracked working tree changed during closeout validation' >&2
+            cat "$RUNNER_TEMP/dirty" >&2
+            exit 1
+          fi
+          echo 'REPOSITORY_HYGIENE_OK'
+
+      - name: Assert no temporary Stage 0 Git refs remain
+        shell: bash
+        run: |
+          set -euo pipefail
+          git ls-remote --heads origin > "$RUNNER_TEMP/heads.txt"
+          if awk '{print $2}' "$RUNNER_TEMP/heads.txt" | grep -E '^refs/heads/(p0-05-|p0-07-|amodex-p0)' >"$RUNNER_TEMP/temp-refs"; then
+            echo 'temporary Stage 0 branch/ref remains' >&2
+            cat "$RUNNER_TEMP/temp-refs" >&2
+            exit 1
+          fi
+          echo 'TEMPORARY_GIT_REFS_ZERO'
+
+      - name: Re-audit P0-06B cloud fixture namespace
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 research/p0-06-cloudflare-neon/cleanup_probe_resources.py | tee "$RUNNER_TEMP/p006b-cleanup.json"
+          python3 - "$RUNNER_TEMP/p006b-cleanup.json" <<'PY'
+          import json, pathlib, sys
+          data = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          assert data['status'] == 'PASS', data
+          assert data['cloudflare']['remaining'] == 0, data
+          assert data['neon']['remaining'] == 0, data
+          assert data['non_prefixed_resources_touched'] is False, data
+          print('P0_06B_NAMESPACE_CLEAN_OK')
+          PY
+
+      - name: Stage 0 closeout verdict
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat <<'EOF'
+          STAGE_0_CLOSEOUT=PASS
+          P0_10=DEFERRED_NON_BLOCKING_UNTIL_PORTABILITY_CLAIM
+          NEXT_STAGE=STAGE_1_DURABLE_REMOTE_RUNTIME
+          EOF
