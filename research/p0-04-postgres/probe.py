@@ -137,7 +137,7 @@ def claim_worker(dsn: str, worker_id: str, start_event, result_queue) -> None:
     try:
         claim = claim_job(dsn, worker_id)
         result_queue.put({"worker": worker_id, "claim": asdict(claim) if claim else None})
-    except BaseException as exc:  # process boundary: return failure to parent
+    except BaseException as exc:
         result_queue.put({"worker": worker_id, "error": repr(exc)})
 
 
@@ -288,7 +288,6 @@ def uncommitted_transition_worker(dsn: str, ready_queue) -> None:
     conn = connect(dsn)
     try:
         cur = conn.cursor()
-        cur.execute("BEGIN")
         cur.execute(
             """
             UPDATE jobs
