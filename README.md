@@ -6,7 +6,7 @@ Amodex is not intended to be a swarm of autonomous agents debating architecture.
 
 ## Current status
 
-**Architecture and design closure only. Production implementation has not started.**
+**Architecture and design closure only. Production implementation has not started. Parts 1 and 2 of the three-pass specification are complete; Part 3 remains before implementation begins.**
 
 The repository is intentionally being specified before coding begins. Until the seven implementation stages are formally opened, production code, placeholder services, mock integrations presented as real features, empty modules, speculative dependency wiring, and disconnected scripts are out of scope.
 
@@ -49,7 +49,7 @@ The order can only be changed by an ADR when a dependency or safety requirement 
 
 This repository is being completed in three specification passes before implementation.
 
-### Part 1 — Foundation and authority model
+### Part 1 — Foundation and authority model — COMPLETE
 
 - `AGENTS.md` — root operating contract for any coding agent or future Amodex instance working on this repository.
 - `docs/PROJECT_CHARTER.md` — product scope, invariants, non-goals, authority boundaries, and anti-placeholder rules.
@@ -60,13 +60,18 @@ This repository is being completed in three specification passes before implemen
 - `docs/GIT_LIFECYCLE.md` — branches, worktrees, checkpoints, validation, promotion, stale-base handling, and rollback.
 - `docs/research/HERMES_BASELINE.md` — current Hermes capabilities we can reuse and the boundaries Amodex must replace or wrap.
 
-### Part 2 — Runtime contracts and integration specifications
+### Part 2 — Runtime contracts and integration specifications — COMPLETE
 
-Part 2 will formalize versioned schemas and protocols for tasks, runs, tool calls, provider governance, MCP capabilities, persistence, GitHub integration, secrets, runner lifecycle, validation evidence, and security enforcement.
+- `docs/contracts/RUNTIME_CONTRACTS.md` — canonical versioned contracts for projects, runs, tasks, TaskPackages, ContextCapsules, attempts, leases, tools, providers, checkpoints, evidence, promotion, runners, MCP and policy decisions.
+- `docs/PROVIDER_GOVERNOR.md` — zero-cost admission, capability routing, quota accounting, rate limiting, retries, circuit breakers, fallback compatibility and provider error normalization.
+- `docs/PERSISTENCE_AND_RECOVERY.md` — PostgreSQL authority, event/current-state model, leases/fencing, checkpoint durability, side-effect journaling, crash reconciliation and fault-injection requirements.
+- `docs/SECURITY_THREAT_MODEL.md` — trust zones, prompt injection, secrets, filesystem/shell/network isolation, supply chain, MCP trust, evidence integrity and security tests.
+- `docs/RUNNER_AND_MCP_PROTOCOL.md` — RunnerBackend lifecycle, profiles, bootstrap, Hermes/MCP integration, Godot/Serena topology, visual/headless validation and hosting PoCs.
+- `docs/GITHUB_INTEGRATION.md` — GitHub App strategy, task branch/checkpoint/PR lifecycle, webhooks, polling, protection discovery, Actions integration and expected-SHA promotion behavior.
 
-### Part 3 — Implementation program and acceptance system
+### Part 3 — Implementation program and acceptance system — PENDING
 
-Part 3 will freeze the seven-stage implementation DAG, repository layout, PoCs, test matrix, fault-injection plan, Black-Islands benchmark, deployment runbook, Definition of Done, and implementation kickoff sequence.
+Part 3 will freeze the seven-stage implementation DAG, physical repository layout, exact PoCs, test/fault-injection matrix, Black-Islands benchmark, deployment runbook, Definition of Done, and the implementation kickoff sequence.
 
 No implementation stage begins merely because a directory exists. Each stage must satisfy its own entry criteria and vertical-slice exit gate.
 
