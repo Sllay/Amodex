@@ -1,0 +1,67 @@
+name: stage0-northflank
+
+on:
+  push:
+    branches:
+      - stage/0-feasibility
+    paths:
+      - 'research/p0-06-northflank/**'
+      - '.github/workflows/stage0-northflank.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  northflank-control-plane:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      NORTHFLANK_API_TOKEN: ${{ secrets.NORTHFLANK_API_TOKEN }}
+      NORTHFLANK_PROJECT_ID: ${{ secrets.NORTHFLANK_PROJECT_ID }}
+      NORTHFLANK_REGION: europe-west
+
+    steps:
+      - name: Checkout exact Amodex revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Detect Northflank credential
+        id: credential
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${NORTHFLANK_API_TOKEN:-}" ]; then
+            echo 'available=true' >> "$GITHUB_OUTPUT"
+            echo 'P0-06 Northflank credential is available.'
+          else
+            echo 'available=false' >> "$GITHUB_OUTPUT"
+            echo 'P0-06 BLOCKED_EXTERNAL_CREDENTIAL: add NORTHFLANK_API_TOKEN as a repository Actions secret.'
+          fi
+
+      - name: Execute real Northflank Control Plane probe
+        if: steps.credential.outputs.available == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 research/p0-06-northflank/northflank_probe.py \
+            --output "$RUNNER_TEMP/p0-06-result.json"
+          cat "$RUNNER_TEMP/p0-06-result.json"
+
+      - name: Assert credential did not enter tracked files
+        if: steps.credential.outputs.available == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git grep -n -F "$NORTHFLANK_API_TOKEN" -- . >/tmp/amodex-nf-secret-hits 2>/dev/null; then
+            echo 'Northflank credential unexpectedly found in tracked content.' >&2
+            sed 's/.*/[redacted match]/' /tmp/amodex-nf-secret-hits >&2
+            exit 1
+          fi
+          git diff --exit-code
+
+      - name: Preserve blocked status without fabricating host evidence
+        if: steps.credential.outputs.available != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'P0-06 remains BLOCKED_EXTERNAL_CREDENTIAL; no Northflank deployment was attempted.'
