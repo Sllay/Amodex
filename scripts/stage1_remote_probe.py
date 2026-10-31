@@ -116,10 +116,14 @@ def run_command(args: list[str], *, env: dict[str, str], cwd: Path | None = None
 
 
 def deploy_worker(*, env: dict[str, str], name: str, build_id: str, secrets_file: Path) -> str:
+    deploy_env = env.copy()
+    deploy_env.pop("VIRTUAL_ENV", None)
+    deploy_env["UV_PYTHON"] = "3.13.5"
     output = run_command([
-        "uv", "run", "--project", str(DEPLOY_DIR), "--frozen", "pywrangler", "deploy",
-        "--name", name, "--var", f"BUILD_ID:{build_id}", "--secrets-file", str(secrets_file),
-    ], env=env, cwd=DEPLOY_DIR, timeout=420)
+        "uv", "run", "--project", str(DEPLOY_DIR), "--python", "3.13.5", "--frozen",
+        "pywrangler", "deploy", "--name", name, "--var", f"BUILD_ID:{build_id}",
+        "--secrets-file", str(secrets_file),
+    ], env=deploy_env, cwd=DEPLOY_DIR, timeout=420)
     matches = re.findall(r"https://[A-Za-z0-9._-]+\.workers\.dev", output)
     return matches[-1].rstrip("/") if matches else ""
 
@@ -177,7 +181,7 @@ def run_worker(database_url: str, gemini_key: str, *, quota_available: bool) -> 
     env["AMODEX_DATABASE_URL"] = database_url
     env["GEMINI_API_KEY"] = gemini_key
     env["AMODEX_FREE_QUOTA_AVAILABLE"] = "1" if quota_available else "0"
-    return run_command(["uv", "run", "--frozen", "amodex-worker"], env=env, timeout=120)
+    return run_command([sys.executable, "-m", "amodex.runtime.worker"], env=env, timeout=120)
 
 
 def run_probe() -> dict[str, Any]:
