@@ -145,7 +145,6 @@ def main() -> int:
     for project in projects_before:
         delete_neon_project(neon_key, project["id"], project["name"])
 
-    # Cloudflare delete is normally immediate. Neon can be briefly eventually consistent.
     workers_after: list[str] = []
     projects_after: list[dict[str, str]] = []
     deadline = time.monotonic() + 90
@@ -172,8 +171,8 @@ def main() -> int:
             "deleted": len(projects_before),
             "remaining": 0,
         },
-        "non_prefixed_resources_touched": false,
-    }, indent=2, sort_keys=True).replace('false', 'false'))
+        "non_prefixed_resources_touched": False,
+    }, indent=2, sort_keys=True))
     return 0
 
 
