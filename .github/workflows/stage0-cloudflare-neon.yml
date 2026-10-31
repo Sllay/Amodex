@@ -1,0 +1,76 @@
+name: stage0-cloudflare-neon
+
+on:
+  push:
+    branches:
+      - stage/0-feasibility
+    paths:
+      - 'research/p0-06-cloudflare-neon/**'
+      - '.github/workflows/stage0-cloudflare-neon.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  credential-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+
+    steps:
+      - name: Checkout exact Amodex revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Detect required credentials
+        id: credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID NEON_API_KEY; do
+            if [ -z "${!name:-}" ]; then
+              echo "missing: $name"
+              missing=1
+            fi
+          done
+          if [ "$missing" -eq 0 ]; then
+            echo 'available=true' >> "$GITHUB_OUTPUT"
+            echo 'P0-06B credentials available.'
+          else
+            echo 'available=false' >> "$GITHUB_OUTPUT"
+            echo 'P0-06B BLOCKED_EXTERNAL_CREDENTIALS; no cloud mutation attempted.'
+          fi
+
+      - name: Run read-only Cloudflare + Neon capability probe
+        if: steps.credentials.outputs.available == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 research/p0-06-cloudflare-neon/credential_probe.py \
+            --output "$RUNNER_TEMP/p0-06b-credential-result.json"
+          cat "$RUNNER_TEMP/p0-06b-credential-result.json"
+
+      - name: Assert secrets did not enter tracked files
+        if: steps.credentials.outputs.available == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for value in "$CLOUDFLARE_API_TOKEN" "$CLOUDFLARE_ACCOUNT_ID" "$NEON_API_KEY"; do
+            if [ -n "$value" ] && git grep -n -F "$value" -- . >/tmp/amodex-p006b-secret-hits 2>/dev/null; then
+              echo 'P0-06B secret unexpectedly found in tracked content.' >&2
+              sed 's/.*/[redacted match]/' /tmp/amodex-p006b-secret-hits >&2
+              exit 1
+            fi
+          done
+          git diff --exit-code
+
+      - name: Preserve blocked state without fabricating evidence
+        if: steps.credentials.outputs.available != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'P0-06B remains BLOCKED_EXTERNAL_CREDENTIALS; Cloudflare and Neon were not mutated.'
