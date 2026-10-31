@@ -147,7 +147,6 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(encoded)
         except (BrokenPipeError, ConnectionResetError):
-            # Expected when the hard-cancel test aborts a request.
             return
 
 
@@ -264,7 +263,11 @@ def write_hermes_config(hermes_home: Path) -> None:
         "plugins:\n"
         "  enabled:\n"
         "    - amodex-probe\n"
-        "  disabled: []\n",
+        "  disabled: []\n"
+        "tools:\n"
+        "  tool_search:\n"
+        "    enabled: off\n"
+        "    defer: []\n",
         encoding="utf-8",
     )
 
@@ -301,6 +304,17 @@ def make_agent(AIAgent: type, *, base_url: str, toolsets: list[str]) -> Any:
         skip_background_review=True,
         max_iterations=6,
         system_message=SYSTEM_SENTINEL,
+    )
+
+
+def raw_names(model_tools: Any, enabled: list[str], disabled: list[str] | None = None) -> set[str]:
+    return tool_names(
+        model_tools.get_tool_definitions(
+            enabled_toolsets=enabled,
+            disabled_toolsets=disabled,
+            quiet_mode=True,
+            skip_tool_search_assembly=True,
+        )
     )
 
 
@@ -382,44 +396,46 @@ def run_probe(hermes_root: Path) -> dict[str, Any]:
                 if isinstance(item, dict) and isinstance(item.get("name"), str)
             }
             require("amodex-probe" in loaded, f"probe plugin not discovered: {sorted(loaded)}")
-            require(bool(loaded["amodex-probe"].get("enabled")), f"probe plugin not enabled: {loaded['amodex-probe']}")
-
-            empty_names = tool_names(
-                model_tools.get_tool_definitions(enabled_toolsets=[], quiet_mode=True)
+            require(
+                bool(loaded["amodex-probe"].get("enabled")),
+                f"probe plugin not enabled: {loaded['amodex-probe']}",
             )
+
+            empty_names = raw_names(model_tools, [])
             require(not empty_names, f"empty whitelist leaked tools: {sorted(empty_names)}")
 
-            rogue_names = tool_names(
-                model_tools.get_tool_definitions(
-                    enabled_toolsets=["amodex_rogue"], quiet_mode=True
-                )
-            )
+            rogue_names = raw_names(model_tools, ["amodex_rogue"])
             require(
                 "amodex_rogue_tool" in rogue_names,
                 f"probe plugin registered no rogue tool: {sorted(rogue_names)}",
             )
 
-            file_names = tool_names(
-                model_tools.get_tool_definitions(enabled_toolsets=["file"], quiet_mode=True)
-            )
+            file_names = raw_names(model_tools, ["file"])
             require("read_file" in file_names, f"file whitelist missing read_file: {sorted(file_names)}")
             require(
                 file_names <= EXPECTED_FILE_TOOLS,
-                f"unexpected file tools exposed: {sorted(file_names - EXPECTED_FILE_TOOLS)}",
+                f"unexpected raw file tools exposed: {sorted(file_names - EXPECTED_FILE_TOOLS)}",
             )
             require(
                 not (file_names & FORBIDDEN_TOOLS),
-                f"forbidden tools leaked: {sorted(file_names & FORBIDDEN_TOOLS)}",
+                f"forbidden raw tools leaked: {sorted(file_names & FORBIDDEN_TOOLS)}",
             )
 
-            no_delegation_names = tool_names(
+            no_delegation_names = raw_names(model_tools, ["file"], ["delegation"])
+            require("delegate_task" not in no_delegation_names, "delegation remained exposed")
+
+            assembled_file_names = tool_names(
                 model_tools.get_tool_definitions(
                     enabled_toolsets=["file"],
                     disabled_toolsets=["delegation"],
                     quiet_mode=True,
                 )
             )
-            require("delegate_task" not in no_delegation_names, "delegation remained exposed")
+            require(
+                assembled_file_names == file_names,
+                "tool-search-off surface differs from raw scoped file surface: "
+                f"raw={sorted(file_names)} assembled={sorted(assembled_file_names)}",
+            )
 
             with fake_provider() as (provider_state, base_url), loopback_only_network():
                 agent = make_agent(AIAgent, base_url=base_url, toolsets=["file"])
@@ -449,6 +465,7 @@ def run_probe(hermes_root: Path) -> dict[str, Any]:
                     for entry in first_request.get("tools", [])
                     if isinstance(entry, dict)
                 }
+                require(exposed == file_names, f"provider surface drift: {sorted(exposed)}")
                 require("read_file" in exposed, "read_file not exposed to model")
                 require("delegate_task" not in exposed, "delegate_task leaked to model")
                 require(
@@ -542,7 +559,9 @@ def run_probe(hermes_root: Path) -> dict[str, Any]:
                 "license": "MIT",
                 "programmatic_embedding": True,
                 "context_injection": True,
-                "final_file_toolset": sorted(file_names),
+                "tool_search_policy": "off_for_initial_amodex_worker",
+                "raw_file_toolset": sorted(file_names),
+                "provider_file_toolset": sorted(assembled_file_names),
                 "delegation_exposed": False,
                 "rogue_plugin_registered": True,
                 "rogue_plugin_leaked": False,
