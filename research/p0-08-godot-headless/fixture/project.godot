@@ -1,0 +1,19 @@
+; Amodex Stage 0 P0-08 deterministic Godot fixture.
+; Mirrors Black-Islands engine family without touching its private repository.
+
+config_version=5
+
+[application]
+
+config/name="Amodex P0-08 Headless Fixture"
+run/main_scene="res://main.tscn"
+
+[display]
+
+window/size/viewport_width=640
+window/size/viewport_height=360
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
