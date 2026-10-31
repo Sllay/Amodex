@@ -46,12 +46,12 @@ jobs:
           git diff --exit-code
           test -z "$(git status --porcelain=v1)"
 
-      - name: Cleanup any dangling P0-05 worker fixture refs
+      - name: Cleanup any dangling P0-05 fixture refs
         if: always()
         shell: bash
         run: |
           set +e
-          git ls-remote --heads origin 'refs/heads/p0-05-worker-*' \
+          git ls-remote --heads origin 'refs/heads/p0-05-*' \
             | awk '{print $2}' \
             | sed 's#refs/heads/##' \
             | while read -r branch; do
