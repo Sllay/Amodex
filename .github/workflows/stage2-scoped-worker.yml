@@ -9,14 +9,15 @@ on:
       - main
     paths:
       - 'src/amodex/tools/**'
-      - 'tests/integration/test_stage2_scoped_tools.py'
+      - 'src/amodex/git/**'
+      - 'tests/integration/test_stage2_*.py'
       - '.github/workflows/stage2-scoped-worker.yml'
 
 permissions:
   contents: read
 
 jobs:
-  scoped-tool-boundary:
+  scoped-worker:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
@@ -49,7 +50,7 @@ jobs:
           uv python install 3.13.5
           uv sync --python 3.13.5 --extra dev --frozen
 
-      - name: Run deterministic Stage 0/1 regression plus S2-V1
+      - name: Run deterministic Stage 0/1 regression plus Stage 2 slices
         run: >-
           uv run --python 3.13.5 --extra dev --frozen pytest -q
           tests/unit
@@ -59,6 +60,7 @@ jobs:
           tests/integration/test_stage1_migrations.py
           tests/integration/test_stage1_provider_failures.py
           tests/integration/test_stage2_scoped_tools.py
+          tests/integration/test_stage2_checkpoint_lifecycle.py
 
       - name: Repository hygiene
         shell: bash
