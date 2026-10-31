@@ -1,0 +1,73 @@
+name: stage0-postgres
+
+on:
+  push:
+    branches:
+      - stage/0-feasibility
+    paths:
+      - 'research/p0-04-postgres/**'
+      - '.github/workflows/stage0-postgres.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  postgres-lease-fencing:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: amodex
+          POSTGRES_USER: amodex
+          POSTGRES_PASSWORD: amodex
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U amodex -d amodex"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      AMODEX_P0_04_DSN: postgresql://amodex:amodex@127.0.0.1:5432/amodex
+
+    steps:
+      - name: Checkout exact Amodex revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Install pinned PostgreSQL client driver
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check --no-cache-dir 'psycopg[binary]==3.2.10'
+          python3 -c 'import psycopg; print("psycopg", psycopg.__version__)'
+
+      - name: Run concurrent lease and fencing probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 research/p0-04-postgres/probe.py \
+            --output "$RUNNER_TEMP/p0-04-result.json"
+          cat "$RUNNER_TEMP/p0-04-result.json"
+
+      - name: Observe PostgreSQL service resource footprint
+        shell: bash
+        run: |
+          set -euo pipefail
+          container_id="$(docker ps --filter ancestor=postgres:16 --format '{{.ID}}' | head -n 1)"
+          if [ -z "$container_id" ]; then
+            echo 'PostgreSQL service container not found for resource observation.' >&2
+            exit 1
+          fi
+          echo "container_id=$container_id"
+          docker stats --no-stream \
+            --format 'cpu={{.CPUPerc}} memory={{.MemUsage}} memory_percent={{.MemPerc}} pids={{.PIDs}}' \
+            "$container_id"
+
+      - name: Assert PoC did not mutate tracked files
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --exit-code
