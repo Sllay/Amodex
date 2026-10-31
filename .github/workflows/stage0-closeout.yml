@@ -91,8 +91,13 @@ jobs:
               raise SystemExit('ADR-0002 is not accepted')
 
           register = Path('docs/POC_REGISTER.md').read_text(encoding='utf-8')
-          if 'P0-10' not in register or 'blocking only before Amodex claims Runner portability' not in register:
-              raise SystemExit('P0-10 defer boundary is not explicitly preserved')
+          required_p010 = (
+              '# 11. P0-10 — fallback RunnerBackend portability',
+              '**Blocking:** before claiming Runner portability; may occur during Stage 1/2',
+          )
+          for marker in required_p010:
+              if marker not in register:
+                  raise SystemExit(f'P0-10 defer boundary missing normative marker: {marker}')
 
           print('STAGE0_DECISION_REGISTER_OK')
           PY
