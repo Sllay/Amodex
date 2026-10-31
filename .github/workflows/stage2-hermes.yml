@@ -58,7 +58,14 @@ jobs:
           source ./activate
           python -m pip install --disable-pip-version-check pytest==9.0.2
           export PYTHONPATH="$GITHUB_WORKSPACE/src${PYTHONPATH:+:$PYTHONPATH}"
-          python "$GITHUB_WORKSPACE/scripts/stage2_hermes_probe.py" \
+
+          PYTEST_BIN="$(command -v pytest)"
+          test -n "$PYTEST_BIN"
+          HERMES_VENV_PYTHON="$(dirname "$PYTEST_BIN")/python"
+          test -x "$HERMES_VENV_PYTHON"
+          "$HERMES_VENV_PYTHON" -c 'import pytest, pygments, sys; print(sys.executable)'
+
+          "$HERMES_VENV_PYTHON" "$GITHUB_WORKSPACE/scripts/stage2_hermes_probe.py" \
             --hermes-root "$HERMES_DIR" \
             --output "$RUNNER_TEMP/stage2-hermes-result.json"
           cat "$RUNNER_TEMP/stage2-hermes-result.json"
