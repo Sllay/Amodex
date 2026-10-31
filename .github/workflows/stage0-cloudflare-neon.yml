@@ -13,13 +13,14 @@ permissions:
   contents: read
 
 jobs:
-  credential-gate:
+  cloudflare-neon-control-plane:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+      NEON_ORG_ID: ${{ secrets.NEON_ORG_ID }}
 
     steps:
       - name: Checkout exact Amodex revision
@@ -54,12 +55,23 @@ jobs:
             --output "$RUNNER_TEMP/p0-06b-credential-result.json"
           cat "$RUNNER_TEMP/p0-06b-credential-result.json"
 
+      - name: Execute real Cloudflare Workers + Neon Postgres probe
+        if: steps.credentials.outputs.available == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --version
+          npm --version
+          python3 research/p0-06-cloudflare-neon/deploy_probe.py \
+            --output "$RUNNER_TEMP/p0-06b-deploy-result.json"
+          cat "$RUNNER_TEMP/p0-06b-deploy-result.json"
+
       - name: Assert secrets did not enter tracked files
         if: steps.credentials.outputs.available == 'true'
         shell: bash
         run: |
           set -euo pipefail
-          for value in "$CLOUDFLARE_API_TOKEN" "$CLOUDFLARE_ACCOUNT_ID" "$NEON_API_KEY"; do
+          for value in "$CLOUDFLARE_API_TOKEN" "$CLOUDFLARE_ACCOUNT_ID" "$NEON_API_KEY" "${NEON_ORG_ID:-}"; do
             if [ -n "$value" ] && git grep -n -F "$value" -- . >/tmp/amodex-p006b-secret-hits 2>/dev/null; then
               echo 'P0-06B secret unexpectedly found in tracked content.' >&2
               sed 's/.*/[redacted match]/' /tmp/amodex-p006b-secret-hits >&2
