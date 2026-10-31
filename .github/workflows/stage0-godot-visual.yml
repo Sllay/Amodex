@@ -1,0 +1,190 @@
+name: stage0-godot-visual
+
+on:
+  push:
+    branches:
+      - stage/0-feasibility
+    paths:
+      - '.github/workflows/stage0-godot-visual.yml'
+      - 'research/p0-09-godot-visual/**'
+
+permissions:
+  contents: read
+
+jobs:
+  godot-visual:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      GODOT_VERSION: '4.7.2'
+      GODOT_URL: 'https://github.com/godotengine/godot-builds/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip'
+      GODOT_SHA256: 'cadd3204e728a35d3f13adb7fd0d7902636b79f6b95c40c265eb73b6c35329e4'
+      NODE_VERSION: '22.23.4'
+      NODE_SHA256: '1805bcd35e6815559bd2eb97db438d3fdb0eb3a5e6a977b7c1badca76337e9ce'
+      GODOT_MCP_PACKAGE: '@shin2344234/godot-mcp@0.1.2'
+      FIXTURE: 'research/p0-09-godot-visual/fixture'
+      DISPLAY: ':99'
+      LIBGL_ALWAYS_SOFTWARE: '1'
+
+    steps:
+      - name: Checkout exact Stage 0 source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 1
+
+      - name: Ensure virtual display tooling
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v Xvfb >/dev/null 2>&1 || ! command -v xdpyinfo >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends xvfb x11-utils mesa-utils
+          fi
+          Xvfb :99 -screen 0 1280x720x24 -nolisten tcp -ac >"$RUNNER_TEMP/xvfb.log" 2>&1 &
+          XVFB_PID=$!
+          echo "XVFB_PID=$XVFB_PID" >> "$GITHUB_ENV"
+          ready=false
+          for _ in $(seq 1 80); do
+            if xdpyinfo -display :99 >/dev/null 2>&1; then
+              ready=true
+              break
+            fi
+            sleep 0.1
+          done
+          test "$ready" = true
+          xdpyinfo -display :99 | grep -E 'dimensions:|depth of root window:'
+          echo 'XVFB_READY=1280x720x24'
+
+      - name: Install exact Godot and Node pins
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 --output "$RUNNER_TEMP/godot.zip" "$GODOT_URL"
+          printf '%s  %s\n' "$GODOT_SHA256" "$RUNNER_TEMP/godot.zip" | sha256sum --check --strict
+          mkdir -p "$RUNNER_TEMP/godot"
+          unzip -q "$RUNNER_TEMP/godot.zip" -d "$RUNNER_TEMP/godot"
+          GODOT_BIN="$RUNNER_TEMP/godot/Godot_v4.7.2-stable_linux.x86_64"
+          chmod +x "$GODOT_BIN"
+
+          NODE_ARCHIVE="node-v${NODE_VERSION}-linux-x64.tar.xz"
+          curl --fail --location --retry 3 --output "$RUNNER_TEMP/$NODE_ARCHIVE" \
+            "https://nodejs.org/dist/v${NODE_VERSION}/${NODE_ARCHIVE}"
+          printf '%s  %s\n' "$NODE_SHA256" "$RUNNER_TEMP/$NODE_ARCHIVE" | sha256sum --check --strict
+          tar -xJf "$RUNNER_TEMP/$NODE_ARCHIVE" -C "$RUNNER_TEMP"
+          NODE_HOME="$RUNNER_TEMP/node-v${NODE_VERSION}-linux-x64"
+
+          echo "GODOT_BIN=$GODOT_BIN" >> "$GITHUB_ENV"
+          echo "NODE_HOME=$NODE_HOME" >> "$GITHUB_ENV"
+          echo "$NODE_HOME/bin" >> "$GITHUB_PATH"
+
+          "$GODOT_BIN" --version
+          test "$(node --version)" = 'v22.23.4'
+
+      - name: Prepare isolated addon-enabled visual fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          VISUAL_FIXTURE="$RUNNER_TEMP/p009-visual-fixture"
+          cp -a "$FIXTURE" "$VISUAL_FIXTURE"
+          export GODOT_PATH="$GODOT_BIN"
+          npx -y "$GODOT_MCP_PACKAGE" init \
+            --project "$VISUAL_FIXTURE" \
+            --yes \
+            --agents codex \
+            --no-agents-md \
+            --no-claude-md \
+            | tee "$RUNNER_TEMP/godot-mcp-init.log"
+          test -f "$VISUAL_FIXTURE/addons/godot_mcp/plugin.cfg"
+          grep -q 'godot_mcp' "$VISUAL_FIXTURE/project.godot"
+          echo "VISUAL_FIXTURE=$VISUAL_FIXTURE" >> "$GITHUB_ENV"
+
+      - name: Execute live windowed MCP visual proof twice
+        shell: bash
+        run: |
+          set -euo pipefail
+          EVIDENCE_DIR="$RUNNER_TEMP/p009-evidence"
+          mkdir -p "$EVIDENCE_DIR"
+          python3 research/p0-09-godot-visual/visual_mcp_probe.py \
+            --npx "$NODE_HOME/bin/npx" \
+            --package "$GODOT_MCP_PACKAGE" \
+            --project "$VISUAL_FIXTURE" \
+            --godot "$GODOT_BIN" \
+            --output-dir "$EVIDENCE_DIR" \
+            --iterations 2 \
+            | tee "$RUNNER_TEMP/p009-probe.log"
+
+          test -s "$EVIDENCE_DIR/before-1.png"
+          test -s "$EVIDENCE_DIR/after-1.png"
+          test -s "$EVIDENCE_DIR/before-2.png"
+          test -s "$EVIDENCE_DIR/after-2.png"
+          test -s "$EVIDENCE_DIR/evidence.json"
+
+          sha256sum "$EVIDENCE_DIR"/*.png | tee "$EVIDENCE_DIR/sha256sums.txt"
+          python3 - "$EVIDENCE_DIR/evidence.json" <<'PY'
+          import json, pathlib, sys
+          data = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          assert data['status'] == 'PASS', data
+          assert data['repeated_runs'] == 2, data
+          assert all(i['image_size'] == [640, 360] for i in data['iterations']), data
+          assert all(i['before_sha256'] != i['after_sha256'] for i in data['iterations']), data
+          assert all(str(i.get('display', '')).lower() != 'headless' for i in data['iterations']), data
+          print('P0_09_EVIDENCE_OK')
+          PY
+
+      - name: Verify Godot processes exited before display teardown
+        shell: bash
+        run: |
+          set -euo pipefail
+          if pgrep -af 'Godot_v4\.7\.2-stable_linux\.x86_64' >"$RUNNER_TEMP/p009-orphans.txt"; then
+            echo 'orphaned Godot process detected after MCP probe' >&2
+            cat "$RUNNER_TEMP/p009-orphans.txt" >&2
+            exit 1
+          fi
+          echo 'NO_GODOT_ORPHANS'
+
+      - name: Record software-render/display diagnostics
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '=== X display ==='
+          xdpyinfo -display :99 | grep -E 'dimensions:|depth of root window:'
+          echo '=== OpenGL software renderer ==='
+          if command -v glxinfo >/dev/null 2>&1; then
+            glxinfo -display :99 -B | grep -E 'OpenGL vendor|OpenGL renderer|OpenGL version|direct rendering' || true
+          fi
+          echo '=== runner memory ==='
+          free -m
+          echo '=== repository integrity ==='
+          git diff --exit-code -- research/p0-09-godot-visual .github/workflows/stage0-godot-visual.yml
+
+      - name: Upload P0-09 screenshot and metrics evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: p0-09-visual-evidence-${{ github.run_id }}
+          path: ${{ runner.temp }}/p009-evidence
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Stop virtual display and assert cleanup
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          pkill -f 'Godot_v4\.7\.2-stable_linux\.x86_64' || true
+          if [ -n "${XVFB_PID:-}" ] && kill -0 "$XVFB_PID" 2>/dev/null; then
+            kill "$XVFB_PID" || true
+            for _ in $(seq 1 40); do
+              if ! kill -0 "$XVFB_PID" 2>/dev/null; then
+                break
+              fi
+              sleep 0.1
+            done
+            if kill -0 "$XVFB_PID" 2>/dev/null; then
+              kill -9 "$XVFB_PID" || true
+            fi
+          fi
+          if [ -n "${XVFB_PID:-}" ] && kill -0 "$XVFB_PID" 2>/dev/null; then
+            echo 'Xvfb did not terminate' >&2
+            exit 1
+          fi
+          echo 'P0-09 CLEANUP_OK'
