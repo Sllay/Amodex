@@ -185,3 +185,7 @@ def main() -> None:
     result = worker.process_once(free_quota_available=_free_quota_available_from_env())
     if result is not None:
         print(result.model_dump_json())
+
+
+if __name__ == "__main__":
+    main()
