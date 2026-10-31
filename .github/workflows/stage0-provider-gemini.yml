@@ -1,6 +1,12 @@
 name: stage0-provider-gemini
 
 on:
+  push:
+    branches:
+      - stage/0-feasibility
+    paths:
+      - research/p0-03-providers/**
+      - .github/workflows/stage0-provider-gemini.yml
   workflow_dispatch:
 
 permissions:
@@ -16,16 +22,21 @@ jobs:
       - name: Checkout exact Amodex revision
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
-      - name: Require external free-tier credential
+      - name: Detect external free-tier credential
+        id: credential
         shell: bash
         run: |
           set -euo pipefail
           if [ -z "${GEMINI_API_KEY:-}" ]; then
-            echo "P0-03 BLOCKED_EXTERNAL_CREDENTIAL: add a free Gemini key as repository secret GEMINI_API_KEY." >&2
-            exit 2
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "P0-03 BLOCKED_EXTERNAL_CREDENTIAL: add a free Gemini key as repository secret GEMINI_API_KEY."
+          else
+            echo "available=true" >> "$GITHUB_OUTPUT"
+            echo "P0-03 credential detected; secret value remains masked and is not printed."
           fi
 
       - name: Execute fixed free-tier capability probe
+        if: steps.credential.outputs.available == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -33,12 +44,20 @@ jobs:
           cat "$RUNNER_TEMP/p0-03-gemini-result.json"
 
       - name: Assert no secret material entered tracked files
+        if: steps.credential.outputs.available == 'true'
         shell: bash
         run: |
           set -euo pipefail
-          if git grep -n -F "$GEMINI_API_KEY" -- . ':!research/p0-03-providers/RESULT.md' >/tmp/amodex-secret-hits 2>/dev/null; then
+          if git grep -n -F "$GEMINI_API_KEY" -- . >/tmp/amodex-secret-hits 2>/dev/null; then
             echo "Provider credential unexpectedly found in tracked content." >&2
             sed 's/.*/[redacted match]/' /tmp/amodex-secret-hits >&2
             exit 1
           fi
           git diff --exit-code
+
+      - name: Preserve blocked status without fabricating provider evidence
+        if: steps.credential.outputs.available != 'true'
+        shell: bash
+        run: |
+          echo "P0-03 remains BLOCKED_EXTERNAL_CREDENTIAL. No inference request was attempted."
+          echo "After GEMINI_API_KEY is configured, re-run this workflow job on the same commit."
