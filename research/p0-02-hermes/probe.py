@@ -303,7 +303,7 @@ def make_agent(AIAgent: type, *, base_url: str, toolsets: list[str]) -> Any:
         skip_context_files=True,
         skip_background_review=True,
         max_iterations=6,
-        system_message=SYSTEM_SENTINEL,
+        ephemeral_system_prompt=SYSTEM_SENTINEL,
     )
 
 
