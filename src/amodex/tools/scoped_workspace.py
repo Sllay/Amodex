@@ -11,6 +11,7 @@ import hashlib
 import os
 import re
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from threading import Lock
@@ -337,8 +338,12 @@ class ScopedWorkspaceTools:
                 raise CommandDenied(f"validator cwd is not a directory: {cwd}")
         safe_env = {key: value for key, value in os.environ.items() if key in self._SAFE_ENV_KEYS}
         safe_env["PYTHONNOUSERSITE"] = "1"
+        program = Path(argv[0]).name
+        command = list(argv)
+        if program.startswith("python"):
+            command[0] = sys.executable
         completed = subprocess.run(
-            list(argv),
+            command,
             cwd=resolved_cwd,
             env=safe_env,
             shell=False,
