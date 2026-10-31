@@ -15,7 +15,7 @@ permissions:
 jobs:
   cancellable-runner:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Checkout exact Stage 0 source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -80,7 +80,7 @@ jobs:
           set -euo pipefail
           trap 'echo "P0-07 CANCEL_SIGNAL_RECEIVED"; exit 130' INT TERM
 
-          for i in $(seq 1 60); do
+          for i in $(seq 1 90); do
             echo "P0-07 cancellable heartbeat $i branch=$CHECKPOINT_BRANCH"
             if [ $((i % 3)) -eq 0 ]; then
               python3 - "$i" > "$RUNNER_TEMP/status.json" <<'PY'
