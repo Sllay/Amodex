@@ -9,16 +9,14 @@ on:
       - '.github/workflows/stage0-git.yml'
   workflow_dispatch:
 
+# Worker authority is intentionally narrower than promotion authority.
 permissions:
   contents: write
-  pull-requests: write
 
 jobs:
-  git-reconciliation:
+  git-reconciliation-worker:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    env:
-      GITHUB_TOKEN: ${{ github.token }}
 
     steps:
       - name: Checkout exact Amodex revision
@@ -30,20 +28,33 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git config user.name 'Amodex Stage 0 Bot'
+          git config user.name 'Amodex Stage 0 Worker'
           git config user.email 'amodex-stage0@users.noreply.github.com'
 
-      - name: Run expected-SHA and reconciliation probe
+      - name: Run worker expected-SHA reconciliation probe
         shell: bash
         run: |
           set -euo pipefail
           python3 research/p0-05-git/probe.py \
-            --output "$RUNNER_TEMP/p0-05-result.json"
-          cat "$RUNNER_TEMP/p0-05-result.json"
+            --output "$RUNNER_TEMP/p0-05-worker-result.json"
+          cat "$RUNNER_TEMP/p0-05-worker-result.json"
 
-      - name: Assert main stayed unchanged locally and tracked files are clean
+      - name: Assert tracked files stayed clean
         shell: bash
         run: |
           set -euo pipefail
           git diff --exit-code
-          git status --porcelain=v1
+          test -z "$(git status --porcelain=v1)"
+
+      - name: Cleanup any dangling P0-05 worker fixture refs
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          git ls-remote --heads origin 'refs/heads/p0-05-worker-*' \
+            | awk '{print $2}' \
+            | sed 's#refs/heads/##' \
+            | while read -r branch; do
+                [ -z "$branch" ] && continue
+                git push origin --delete "$branch" || true
+              done
