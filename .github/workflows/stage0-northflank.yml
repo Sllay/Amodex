@@ -1,0 +1,130 @@
+name: stage0-northflank
+
+on:
+  push:
+    branches:
+      - stage/0-feasibility
+    paths:
+      - 'research/p0-06-northflank/**'
+      - '.github/workflows/stage0-northflank.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  northflank-control-plane:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      NORTHFLANK_API_TOKEN: ${{ secrets.NORTHFLANK_API_TOKEN }}
+      NORTHFLANK_PROJECT_ID: ${{ secrets.NORTHFLANK_PROJECT_ID }}
+      NORTHFLANK_REGION: europe-west
+
+    steps:
+      - name: Checkout exact Amodex revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Detect Northflank credential
+        id: credential
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${NORTHFLANK_API_TOKEN:-}" ]; then
+            echo 'available=true' >> "$GITHUB_OUTPUT"
+            echo 'P0-06 Northflank credential is available.'
+          else
+            echo 'available=false' >> "$GITHUB_OUTPUT"
+            echo 'P0-06 BLOCKED_EXTERNAL_CREDENTIAL: add NORTHFLANK_API_TOKEN as a repository Actions secret.'
+          fi
+
+      - name: Guard dedicated Northflank project slot
+        id: project_slot
+        if: steps.credential.outputs.available == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -n "${NORTHFLANK_PROJECT_ID:-}" ]; then
+            echo 'ready=true' >> "$GITHUB_OUTPUT"
+            echo 'Using explicitly reserved NORTHFLANK_PROJECT_ID for Amodex.'
+            exit 0
+          fi
+
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          token = os.environ["NORTHFLANK_API_TOKEN"]
+          req = urllib.request.Request("https://api.northflank.com/v1/projects")
+          req.add_header("Authorization", f"Bearer {token}")
+          req.add_header("Content-Type", "application/json")
+          req.add_header("User-Agent", "amodex-p0-06-slot-guard")
+
+          with urllib.request.urlopen(req, timeout=30) as response:
+              body = json.load(response)
+
+          data = body.get("data") if isinstance(body, dict) else None
+          if isinstance(data, list):
+              projects = data
+          elif isinstance(data, dict):
+              projects = data.get("projects") or []
+          else:
+              projects = []
+
+          projects = [p for p in projects if isinstance(p, dict) and p.get("id")]
+
+          output = os.environ["GITHUB_OUTPUT"]
+          with open(output, "a", encoding="utf-8") as handle:
+              if projects:
+                  handle.write("ready=false\n")
+                  handle.write("reason=existing_project_requires_explicit_reservation\n")
+              else:
+                  handle.write("ready=true\n")
+                  handle.write("reason=free_project_slot_available\n")
+
+          if projects:
+              print(
+                  "P0-06 BLOCKED_PROJECT_SLOT: an existing Northflank project is present. "
+                  "Amodex will not reuse or modify it implicitly. Free a project slot or "
+                  "set NORTHFLANK_PROJECT_ID only for a project explicitly reserved for Amodex."
+              )
+          else:
+              print("No existing project detected; probe may create its dedicated Amodex Stage 0 project.")
+          PY
+
+      - name: Execute real Northflank Control Plane probe
+        if: steps.credential.outputs.available == 'true' && steps.project_slot.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 research/p0-06-northflank/northflank_probe.py \
+            --output "$RUNNER_TEMP/p0-06-result.json"
+          cat "$RUNNER_TEMP/p0-06-result.json"
+
+      - name: Assert credential did not enter tracked files
+        if: steps.credential.outputs.available == 'true' && steps.project_slot.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git grep -n -F "$NORTHFLANK_API_TOKEN" -- . >/tmp/amodex-nf-secret-hits 2>/dev/null; then
+            echo 'Northflank credential unexpectedly found in tracked content.' >&2
+            sed 's/.*/[redacted match]/' /tmp/amodex-nf-secret-hits >&2
+            exit 1
+          fi
+          git diff --exit-code
+
+      - name: Preserve credential block without fabricating host evidence
+        if: steps.credential.outputs.available != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'P0-06 remains BLOCKED_EXTERNAL_CREDENTIAL; no Northflank deployment was attempted.'
+
+      - name: Preserve project-slot block without touching existing project
+        if: steps.credential.outputs.available == 'true' && steps.project_slot.outputs.ready != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'P0-06 remains BLOCKED_PROJECT_SLOT; existing Northflank project was not modified.'

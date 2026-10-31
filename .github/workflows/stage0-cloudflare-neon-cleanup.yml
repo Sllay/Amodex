@@ -1,0 +1,56 @@
+name: stage0-cloudflare-neon-cleanup
+
+on:
+  push:
+    branches:
+      - stage/0-feasibility
+    paths:
+      - 'research/p0-06-cloudflare-neon/cleanup_probe_resources.py'
+      - '.github/workflows/stage0-cloudflare-neon-cleanup.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cleanup-p006b:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+
+    steps:
+      - name: Checkout exact Amodex revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Require cleanup credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID NEON_API_KEY; do
+            if [ -z "${!name:-}" ]; then
+              echo "missing required secret: $name" >&2
+              exit 1
+            fi
+          done
+
+      - name: Delete only namespaced P0-06B leftovers and verify zero remain
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 research/p0-06-cloudflare-neon/cleanup_probe_resources.py
+
+      - name: Assert cleanup credentials are not tracked
+        shell: bash
+        run: |
+          set -euo pipefail
+          for value in "$CLOUDFLARE_API_TOKEN" "$CLOUDFLARE_ACCOUNT_ID" "$NEON_API_KEY"; do
+            if git grep -n -F "$value" -- . >/tmp/amodex-p006b-cleanup-secret-hits 2>/dev/null; then
+              echo 'cleanup credential unexpectedly found in tracked content' >&2
+              sed 's/.*/[redacted match]/' /tmp/amodex-p006b-cleanup-secret-hits >&2
+              exit 1
+            fi
+          done
+          git diff --exit-code

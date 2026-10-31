@@ -1,0 +1,68 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://main.gd" id="1_main"]
+
+[node name="VisualFixture" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_main")
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0.055, 0.075, 0.12, 1)
+
+[node name="Panel" type="Control" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Title" type="Label" parent="Panel"]
+layout_mode = 0
+offset_left = 42.0
+offset_top = 30.0
+offset_right = 598.0
+offset_bottom = 74.0
+theme_override_font_sizes/font_size = 28
+text = "AMODEX VISUAL RUNNER"
+horizontal_alignment = 1
+
+[node name="Status" type="Label" parent="Panel"]
+layout_mode = 0
+offset_left = 42.0
+offset_top = 105.0
+offset_right = 598.0
+offset_bottom = 157.0
+theme_override_font_sizes/font_size = 24
+text = "WAITING_INPUT"
+horizontal_alignment = 1
+
+[node name="Hint" type="Label" parent="Panel"]
+layout_mode = 0
+offset_left = 42.0
+offset_top = 165.0
+offset_right = 598.0
+offset_bottom = 195.0
+text = "MCP must click the button and verify the rendered change"
+horizontal_alignment = 1
+
+[node name="ClickButton" type="Button" parent="Panel"]
+layout_mode = 0
+offset_left = 220.0
+offset_top = 225.0
+offset_right = 420.0
+offset_bottom = 295.0
+theme_override_font_sizes/font_size = 22
+text = "CLICK_ME"

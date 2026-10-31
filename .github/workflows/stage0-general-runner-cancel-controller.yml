@@ -1,0 +1,129 @@
+name: stage0-general-runner-cancel-controller
+
+on:
+  push:
+    branches:
+      - stage/0-feasibility
+    paths:
+      - '.github/workflows/stage0-general-runner-cancel.yml'
+      - '.github/workflows/stage0-general-runner-cancel-controller.yml'
+
+permissions:
+  actions: write
+  contents: write
+
+jobs:
+  control-plane-cancel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout exact Stage 0 source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 1
+
+      - name: Discover target run, wait for SAFE checkpoint, cancel externally, reconstruct, cleanup
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          API="https://api.github.com/repos/${GITHUB_REPOSITORY}"
+          AUTH=(-H "Accept: application/vnd.github+json" -H "Authorization: Bearer ${GH_TOKEN}" -H "X-GitHub-Api-Version: 2026-03-10")
+
+          TARGET_RUN_ID=""
+          for _ in $(seq 1 60); do
+            curl --fail --silent --show-error "${AUTH[@]}" \
+              "${API}/actions/workflows/stage0-general-runner-cancel.yml/runs?event=push&branch=stage%2F0-feasibility&per_page=20" \
+              -o "$RUNNER_TEMP/runs.json"
+            TARGET_RUN_ID=$(python3 - "$GITHUB_SHA" "$RUNNER_TEMP/runs.json" <<'PY'
+          import json, pathlib, sys
+          head_sha, path = sys.argv[1:3]
+          data = json.loads(pathlib.Path(path).read_text())
+          matches = [r for r in data.get('workflow_runs', []) if r.get('head_sha') == head_sha]
+          print(matches[0]['id'] if matches else '')
+          PY
+            )
+            [ -n "$TARGET_RUN_ID" ] && break
+            sleep 2
+          done
+          if [ -z "$TARGET_RUN_ID" ]; then
+            echo 'target cancellation workflow run was not discovered' >&2
+            exit 1
+          fi
+
+          BRANCH="p0-07-cancel-${TARGET_RUN_ID}-1"
+          echo "P0-07 controller target_run=${TARGET_RUN_ID} branch=${BRANCH}"
+
+          CHECKPOINT_READY=0
+          for _ in $(seq 1 90); do
+            if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+              CHECKPOINT_READY=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "$CHECKPOINT_READY" -ne 1 ]; then
+            echo 'SAFE checkpoint branch did not appear before controller deadline' >&2
+            exit 1
+          fi
+
+          echo 'P0-07 controller observed durable checkpoint; issuing external cancel'
+          curl --fail --silent --show-error -X POST "${AUTH[@]}" \
+            "${API}/actions/runs/${TARGET_RUN_ID}/cancel" >/dev/null
+
+          STATUS=""
+          CONCLUSION=""
+          for _ in $(seq 1 90); do
+            curl --fail --silent --show-error "${AUTH[@]}" \
+              "${API}/actions/runs/${TARGET_RUN_ID}" -o "$RUNNER_TEMP/run.json"
+            read -r STATUS CONCLUSION < <(python3 - "$RUNNER_TEMP/run.json" <<'PY'
+          import json, pathlib, sys
+          data = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          print(data.get('status', ''), data.get('conclusion') or '')
+          PY
+            )
+            if [ "$STATUS" = "completed" ]; then
+              break
+            fi
+            sleep 2
+          done
+          if [ "$CONCLUSION" != "cancelled" ]; then
+            echo "target run did not finish as cancelled: status=${STATUS} conclusion=${CONCLUSION}" >&2
+            exit 1
+          fi
+
+          git fetch --depth=1 origin "$BRANCH:$BRANCH"
+          git show "$BRANCH:.amodex-p007/cancel-checkpoint.json" > "$RUNNER_TEMP/checkpoint.json"
+          python3 - "$TARGET_RUN_ID" "$RUNNER_TEMP/checkpoint.json" <<'PY'
+          import json, pathlib, sys
+          expected_run, path = sys.argv[1:3]
+          data = json.loads(pathlib.Path(path).read_text())
+          assert data['state'] == 'SAFE_BEFORE_CANCEL', data
+          assert data['task_id'] == f'P0-07-CANCEL-{expected_run}-1', data
+          assert len(data['boot_fingerprint']) == 64, data
+          print(json.dumps({
+              'status': 'PASS',
+              'external_cancel': True,
+              'target_run_id': int(expected_run),
+              'checkpoint_state': data['state'],
+              'checkpoint_survived_cancel': True,
+              'reconstructed_after_cancel': True,
+          }, sort_keys=True))
+          PY
+
+          git push origin --delete "$BRANCH"
+          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+            echo 'checkpoint branch cleanup failed' >&2
+            exit 1
+          fi
+
+          while read -r ref; do
+            [ -z "$ref" ] && continue
+            stale_branch=${ref#refs/heads/}
+            if [[ "$stale_branch" == p0-07-cancel-* ]]; then
+              git push origin --delete "$stale_branch" || true
+            fi
+          done < <(git ls-remote --heads origin 'refs/heads/p0-07-cancel-*' | awk '{print $2}')
+
+          echo 'P0-07 external cancellation and reconstruction PASS'

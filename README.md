@@ -6,9 +6,27 @@ Amodex is not intended to be a swarm of autonomous agents debating architecture.
 
 ## Current status
 
-**Architecture/design closure is complete. Production implementation has not started. Parts 1, 2, and 3 of the three-pass specification are complete.**
+**Architecture/design Parts 1–3 are complete and Stage 0 feasibility is COMPLETE. Stage 1 is next.**
 
-The next activity is Stage 0 feasibility implementation, following `docs/KICKOFF_PLAN.md` and the ordered PoCs in `docs/POC_REGISTER.md`. Until the owner explicitly starts implementation, production code, placeholder services, mock integrations presented as real features, empty modules, speculative dependency wiring, and disconnected scripts remain out of scope.
+Stage 0 closed on 2026-10-31 with a green final closeout gate. The consolidated evidence is in `research/STAGE0_RESULT.md`.
+
+Final Stage 0 decisions:
+
+```text
+P0-01  ADOPT — executable contracts / Python baseline
+P0-02  ADAPT — Hermes bounded worker runtime
+P0-03  ADOPT — real zero-cost Gemini provider path
+P0-04  ADAPT — PostgreSQL claim / lease / fencing
+P0-05  ADAPT — Git/GitHub expected-SHA + reconciliation
+P0-06A REJECT_AS_PRIMARY_FOR_CURRENT_ACCOUNT — Northflank account capacity
+P0-06B ADAPT — Cloudflare Workers + Neon event-driven Control Plane
+P0-07  ADAPT — disposable General Runner lifecycle + external cancellation
+P0-08  ADAPT — Godot 4.7.2 headless Runner capability
+P0-09  ADAPT — Godot windowed/Xvfb/input/screenshot Runner capability
+P0-10  DEFERRED — required before claiming verified multi-backend Runner portability
+```
+
+Stage 0 proved the high-risk external assumptions with real providers, PostgreSQL, GitHub operations, hosted control-plane infrastructure, disposable runners, Godot 4.7.2, Serena and Godot MCP. It did **not** build the full production scheduler, Director, coding worker or user-facing product.
 
 ## Core product constraints
 
@@ -23,22 +41,49 @@ The next activity is Stage 0 feasibility implementation, following `docs/KICKOFF
 9. **Deterministic control plane.** Scheduling, leases, permissions, provider limits, Git gates, validation status, and monetary policy must not depend on an LLM deciding to behave correctly.
 10. **Evidence over claims.** A task is complete only when its acceptance criteria have executable evidence bound to the exact code/environment state tested.
 
-## Foundation strategy
+## Evidence-backed foundation strategy
 
-Hermes Agent by Nous Research is the primary runtime substrate under evaluation because its current architecture already provides a mature agent loop, provider resolution, tool registry, MCP integration, plugin system, persistent sessions, terminal backends, context engines, memory, and multiple execution surfaces. Amodex will not adopt Hermes' delegation or social-agent behavior blindly. The Amodex Control Plane remains authoritative over task DAGs, file ownership, concurrency, promotion, cost policy, and worker scope.
+### Worker runtime
 
-Northflank Sandbox is the primary zero-cost hosting candidate for the initial control plane. Heavy Godot execution is designed as an on-demand Runner capability rather than a permanently running service. If the free Northflank compute envelope cannot safely run a full Godot visual validation workload, the RunnerBackend abstraction allows another zero-cost backend without changing task/control-plane semantics.
+Hermes Agent by Nous Research is accepted with adaptation as the worker/runtime substrate. Amodex owns durable authority, provider routing, tool authorization, delegation, cancellation, Git policy and cost policy. Hermes runs inside a bounded worker runtime rather than becoming the Control Plane.
+
+### Control Plane
+
+Stage 0 replaced the original Northflank-primary assumption for the current owner account. The accepted baseline is:
+
+```text
+Cloudflare Workers
+  -> thin stateless/event-driven Control Plane surface
+
+Neon PostgreSQL
+  -> durable authority/state
+
+PostgreSQL
+  -> initial scheduler/lease/fencing coordination substrate
+```
+
+Cloudflare Cron is accepted only for periodic reconciliation/maintenance wakeups because real propagation was measured in minutes. Cloudflare Queues were not proven in Stage 0 and are not implicitly adopted.
+
+See `docs/decisions/ADR-0001-event-driven-control-plane-hosting.md`.
+
+### Runner strategy
+
+`RunnerBackend` remains backend-neutral. GitHub Actions is the first concrete disposable backend only when the current repository/account policy classifies that execution as free. It is not treated as unlimited free compute for private repositories.
+
+P0-10 remains open and must run before Amodex claims verified portability across two concrete Runner backends.
+
+See `docs/decisions/ADR-0002-initial-runner-backend-strategy.md`.
 
 ## Planned implementation stages
 
 Implementation is divided into seven stages:
 
-| Stage | Scope | Exit meaning |
+| Stage | Scope | Status / exit meaning |
 |---|---|---|
-| 0 | Executable contracts + feasibility PoCs | high-risk assumptions are measured before broad coding |
-| 1 | Durable remote runtime + provider layer | remote run survives client disconnects/restarts |
+| 0 | Executable contracts + feasibility PoCs | **COMPLETE** — high-risk assumptions measured |
+| 1 | Durable remote runtime + provider layer | **NEXT** — remote run survives client disconnects/restarts |
 | 2 | Scoped coding worker + deterministic tools | first useful single-worker coding vertical slice |
-| 3 | Technical Director + DAG + Context Engine + ownership | Amodex becomes an orchestrated engineering system |
+| 3 | Technical Director + DAG + Context Engine + ownership | orchestrated engineering system |
 | 4 | Git checkpoints + validation + Candidate/Promotion | **Amodex V1 Safe** for carefully scoped real projects |
 | 5 | Specialized workers and capability routing | controlled specialization without swarm behavior |
 | 6 | Product surfaces: Termux CLI, web, project operations | daily-use product rather than engineering prototype |
@@ -47,59 +92,80 @@ The detailed dependency order, entry gates, vertical slices, and exit gates live
 
 ## Documentation map
 
-The pre-implementation specification is complete in three passes.
-
 ### Part 1 — Foundation and authority model — COMPLETE
 
-- `AGENTS.md` — root operating contract for any coding agent or future Amodex instance working on this repository.
-- `docs/PROJECT_CHARTER.md` — product scope, invariants, non-goals, authority boundaries, and anti-placeholder rules.
-- `docs/SYSTEM_ARCHITECTURE.md` — control plane, runtime, runners, state boundaries, and service topology.
-- `docs/ZERO_COST_AND_HOSTING.md` — cost policy, Northflank topology, resource strategy, and fallback rules.
-- `docs/AGENT_GOVERNANCE.md` — Technical Director, worker roles, concurrency, ownership, correction flow, and anti-loop policy.
-- `docs/CONTEXT_ENGINE.md` — repository ingestion, source authority, context compilation, and progressive disclosure.
-- `docs/GIT_LIFECYCLE.md` — branches, worktrees, checkpoints, validation, Candidate/Promotion, stale-base handling, and rollback.
-- `docs/research/HERMES_BASELINE.md` — current Hermes capabilities we can reuse and the boundaries Amodex must replace or wrap.
+- `AGENTS.md`
+- `docs/PROJECT_CHARTER.md`
+- `docs/SYSTEM_ARCHITECTURE.md`
+- `docs/ZERO_COST_AND_HOSTING.md`
+- `docs/AGENT_GOVERNANCE.md`
+- `docs/CONTEXT_ENGINE.md`
+- `docs/GIT_LIFECYCLE.md`
+- `docs/research/HERMES_BASELINE.md`
 
 ### Part 2 — Runtime contracts and integration specifications — COMPLETE
 
-- `docs/contracts/RUNTIME_CONTRACTS.md` — canonical versioned contracts for projects, runs, tasks, TaskPackages, ContextCapsules, attempts, leases, tools, providers, checkpoints, evidence, Candidate, Promotion, runners, MCP and policy decisions.
-- `docs/PROVIDER_GOVERNOR.md` — zero-cost admission, capability routing, quota accounting, rate limiting, retries, circuit breakers, fallback compatibility and provider error normalization.
-- `docs/PERSISTENCE_AND_RECOVERY.md` — PostgreSQL authority, event/current-state model, leases/fencing, checkpoint durability, side-effect journaling, crash reconciliation and fault-injection requirements.
-- `docs/SECURITY_THREAT_MODEL.md` — trust zones, prompt injection, secrets, filesystem/shell/network isolation, supply chain, MCP trust, evidence integrity and security tests.
-- `docs/RUNNER_AND_MCP_PROTOCOL.md` — RunnerBackend lifecycle, profiles, bootstrap, Hermes/MCP integration, Godot/Serena topology, visual/headless validation and hosting PoCs.
-- `docs/GITHUB_INTEGRATION.md` — GitHub App strategy, task branch/checkpoint/PR lifecycle, webhooks, polling, protection discovery, Actions integration and expected-SHA promotion behavior.
-- `docs/research/PART2_VERIFIED_BASELINE_2026-10-31.md` — dated external fact baseline for Hermes, Northflank, Godot MCP, Black-Islands and implementation revalidation requirements.
+- `docs/contracts/RUNTIME_CONTRACTS.md`
+- `docs/PROVIDER_GOVERNOR.md`
+- `docs/PERSISTENCE_AND_RECOVERY.md`
+- `docs/SECURITY_THREAT_MODEL.md`
+- `docs/RUNNER_AND_MCP_PROTOCOL.md`
+- `docs/GITHUB_INTEGRATION.md`
+- `docs/research/PART2_VERIFIED_BASELINE_2026-10-31.md`
 
 ### Part 3 — Implementation program and acceptance system — COMPLETE
 
-- `docs/REPOSITORY_LAYOUT.md` — final target repository/module layout and dependency-direction rules, without pre-creating empty packages.
-- `docs/IMPLEMENTATION_PROGRAM.md` — seven-stage DAG, vertical slices, entry/exit gates, and anti-placeholder acceptance rules.
-- `docs/POC_REGISTER.md` — ordered feasibility PoCs for contracts, Hermes, providers, PostgreSQL, Git, Northflank and Godot runners.
-- `docs/TEST_AND_FAULT_MATRIX.md` — unit/contract/integration/security/fault/benchmark matrix and V1 critical failure set.
-- `docs/BLACK_ISLANDS_BENCHMARK.md` — real-project benchmark progression from read-only ingestion through optional controlled write/recovery.
-- `docs/DEPLOYMENT_RUNBOOK.md` — zero-cost Northflank topology, Runner fallback, deploy/restart/rollback/backup procedures.
-- `docs/DEFINITION_OF_DONE.md` — task/module/integration/stage/V1 completion rules.
-- `docs/KICKOFF_PLAN.md` — exact first 1–2 day implementation sequence after architecture acceptance.
+- `docs/REPOSITORY_LAYOUT.md`
+- `docs/IMPLEMENTATION_PROGRAM.md`
+- `docs/POC_REGISTER.md`
+- `docs/TEST_AND_FAULT_MATRIX.md`
+- `docs/BLACK_ISLANDS_BENCHMARK.md`
+- `docs/DEPLOYMENT_RUNBOOK.md`
+- `docs/DEFINITION_OF_DONE.md`
+- `docs/KICKOFF_PLAN.md`
 
-No implementation stage begins merely because a directory exists. Each stage must satisfy its own entry criteria and vertical-slice exit gate.
+### Stage 0 implementation evidence — COMPLETE
+
+- `research/STAGE0_RESULT.md` — consolidated closeout.
+- `research/p0-01-contracts/RESULT.md`
+- `research/p0-02-hermes/RESULT.md`
+- `research/p0-03-providers/RESULT.md`
+- `research/p0-04-postgres/RESULT.md`
+- `research/p0-05-git/RESULT.md`
+- `research/p0-06-northflank/RESULT.md`
+- `research/p0-06-cloudflare-neon/RESULT.md`
+- `research/p0-07-general-runner/RESULT.md`
+- `research/p0-08-godot-headless/RESULT.md`
+- `research/p0-09-godot-visual/RESULT.md`
+- `docs/decisions/ADR-0001-event-driven-control-plane-hosting.md`
+- `docs/decisions/ADR-0002-initial-runner-backend-strategy.md`
 
 ## Reference project
 
-`Sllay/Black-Islands` is the primary real-world benchmark for Amodex. It already demonstrates progressive disclosure, scoped subagents, Godot MCP, Serena, phase contracts, build evidence, ADRs, validated checkpoints, and a large modular Godot 4.7.2 project. Amodex must prove that it can operate on that style of project without violating repository contracts, overclaiming evidence, or polluting `main`.
+`Sllay/Black-Islands` is the primary real-world benchmark for Amodex. It already demonstrates progressive disclosure, scoped subagents, Godot MCP, Serena, phase contracts, build evidence, ADRs, validated checkpoints, and a large modular Godot 4.7.2 project.
 
-## Immediate next step
+Black-Islands remained read-only during Stage 0. No write benchmark was authorized or performed.
 
-When implementation is explicitly started, begin with **Stage 0** and follow `docs/KICKOFF_PLAN.md`:
+## Immediate next step — Stage 1
 
-1. executable strict contracts;
-2. Hermes embedding/authority-isolation PoC;
-3. real free-provider structured/tool-call PoC;
-4. PostgreSQL lease/fencing PoC;
-5. Git/GitHub expected-SHA reconciliation PoC;
-6. Northflank Control Plane feasibility;
-7. General/Godot Runner PoCs.
+The next normative vertical slice is **Stage 1 — Durable remote runtime and provider layer**:
 
-Do not build the Technical Director, broad multi-agent orchestration, web UI, or full coding worker before these assumptions are proven.
+```text
+client
+ -> remote API
+ -> durable Run/Task row
+ -> scheduler claims work
+ -> worker attempt lease
+ -> zero-cost Provider Governor admits an eligible free provider
+ -> real model request
+ -> normalized durable result/event
+ -> run completes
+ -> disconnected client reconnects and reads final state
+```
+
+Stage 1 must additionally prove control-plane restart recovery, worker-crash recovery, clean database migrations, malformed-provider protection, secret-safe events/logs, and free-quota exhaustion that waits/blocks instead of spending.
+
+Do not start Stage 2 coding-agent capabilities until the Stage 1 exit gate is green.
 
 ## License
 

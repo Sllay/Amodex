@@ -1,0 +1,11 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "amodex-p006b-control-plane",
+  "main": "src/index.js",
+  "compatibility_date": "2026-10-31",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "triggers": {
+    "crons": ["* * * * *"]
+  }
+}

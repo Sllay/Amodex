@@ -1,0 +1,237 @@
+name: stage0-general-runner
+
+on:
+  push:
+    branches:
+      - stage/0-feasibility
+    paths:
+      - 'research/p0-07-general-runner/**'
+      - '.github/workflows/stage0-general-runner.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  statuses: write
+
+jobs:
+  runner-a:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    outputs:
+      checkpoint_branch: ${{ steps.publish.outputs.checkpoint_branch }}
+      task_id: ${{ steps.publish.outputs.task_id }}
+      source_sha: ${{ steps.publish.outputs.source_sha }}
+      checkpoint_digest: ${{ steps.publish.outputs.checkpoint_digest }}
+    steps:
+      - name: Checkout exact Stage 0 source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 1
+
+      - name: Observe fresh runner resources and network
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "runner_os=$RUNNER_OS"
+          echo "runner_arch=$RUNNER_ARCH"
+          echo "cpu_count=$(nproc)"
+          free -m
+          df -m .
+          curl --fail --silent --show-error --max-time 15 https://api.github.com/zen >/dev/null
+
+      - name: Execute deterministic task and push SAFE checkpoint
+        id: publish
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TASK_ID="P0-07-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          BRANCH="p0-07-checkpoint-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          CHECKPOINT=".amodex-p007/checkpoint.json"
+          SENTINEL="/tmp/amodex-p007-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.sentinel"
+
+          heartbeat() {
+            local state="$1"
+            local description="$2"
+            python3 - "$state" "$description" >"$RUNNER_TEMP/status.json" <<'PY'
+          import json, sys
+          print(json.dumps({
+              "state": sys.argv[1],
+              "context": "amodex/p0-07/runner-a",
+              "description": sys.argv[2],
+          }))
+          PY
+            curl --fail --silent --show-error \
+              -X POST \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
+              --data-binary @"$RUNNER_TEMP/status.json" >/dev/null
+          }
+
+          heartbeat pending "runner A claimed task"
+
+          /usr/bin/time -v python3 research/p0-07-general-runner/runner_task.py phase-a \
+            --task-id "$TASK_ID" \
+            --source-sha "$GITHUB_SHA" \
+            --checkpoint "$CHECKPOINT" \
+            --sentinel "$SENTINEL"
+
+          DIGEST="$(python3 - <<'PY'
+          import json
+          print(json.load(open('.amodex-p007/checkpoint.json'))['result_digest'])
+          PY
+          )"
+
+          git config user.name 'amodex-stage0-runner'
+          git config user.email 'amodex-stage0-runner@users.noreply.github.com'
+          git switch -c "$BRANCH"
+          git add "$CHECKPOINT"
+          git commit -m "test(p0-07): persist SAFE runner checkpoint"
+          git push origin "HEAD:refs/heads/$BRANCH"
+
+          REMOTE_SHA="$(git ls-remote --heads origin "refs/heads/$BRANCH" | awk '{print $1}')"
+          test -n "$REMOTE_SHA"
+          heartbeat success "runner A checkpoint durable"
+
+          echo "checkpoint_branch=$BRANCH" >> "$GITHUB_OUTPUT"
+          echo "task_id=$TASK_ID" >> "$GITHUB_OUTPUT"
+          echo "source_sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          echo "checkpoint_digest=$DIGEST" >> "$GITHUB_OUTPUT"
+
+  runner-b:
+    needs: runner-a
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    outputs:
+      result_commit: ${{ steps.reconstruct.outputs.result_commit }}
+    steps:
+      - name: Checkout remote checkpoint on a new runner
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ needs.runner-a.outputs.checkpoint_branch }}
+          fetch-depth: 1
+
+      - name: Reconstruct task from remote checkpoint
+        id: reconstruct
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TASK_ID: ${{ needs.runner-a.outputs.task_id }}
+          SOURCE_SHA: ${{ needs.runner-a.outputs.source_sha }}
+          EXPECTED_DIGEST: ${{ needs.runner-a.outputs.checkpoint_digest }}
+        run: |
+          set -euo pipefail
+
+          heartbeat() {
+            local state="$1"
+            local description="$2"
+            python3 - "$state" "$description" >"$RUNNER_TEMP/status.json" <<'PY'
+          import json, sys
+          print(json.dumps({
+              "state": sys.argv[1],
+              "context": "amodex/p0-07/runner-b",
+              "description": sys.argv[2],
+          }))
+          PY
+            curl --fail --silent --show-error \
+              -X POST \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${SOURCE_SHA}" \
+              --data-binary @"$RUNNER_TEMP/status.json" >/dev/null
+          }
+
+          heartbeat pending "runner B reconstructing checkpoint"
+          echo "cpu_count=$(nproc)"
+          free -m
+          df -m .
+
+          /usr/bin/time -v python3 research/p0-07-general-runner/runner_task.py phase-b \
+            --task-id "$TASK_ID" \
+            --source-sha "$SOURCE_SHA" \
+            --checkpoint '.amodex-p007/checkpoint.json' \
+            --output '.amodex-p007/result.json'
+
+          ACTUAL_DIGEST="$(python3 - <<'PY'
+          import json
+          print(json.load(open('.amodex-p007/result.json'))['result_digest'])
+          PY
+          )"
+          test "$ACTUAL_DIGEST" = "$EXPECTED_DIGEST"
+
+          git config user.name 'amodex-stage0-runner'
+          git config user.email 'amodex-stage0-runner@users.noreply.github.com'
+          git add '.amodex-p007/result.json'
+          git commit -m "test(p0-07): persist reconstructed runner evidence"
+          git push origin HEAD
+          RESULT_COMMIT="$(git rev-parse HEAD)"
+          heartbeat success "runner B reconstruction durable"
+          echo "result_commit=$RESULT_COMMIT" >> "$GITHUB_OUTPUT"
+
+  audit:
+    needs: [runner-a, runner-b]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout exact result commit from checkpoint branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ needs.runner-b.outputs.result_commit }}
+          fetch-depth: 1
+
+      - name: Verify external heartbeats, evidence and cleanup checkpoint ref
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ needs.runner-a.outputs.source_sha }}
+          CHECKPOINT_BRANCH: ${{ needs.runner-a.outputs.checkpoint_branch }}
+          TASK_ID: ${{ needs.runner-a.outputs.task_id }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os
+          checkpoint = json.load(open('.amodex-p007/checkpoint.json'))
+          result = json.load(open('.amodex-p007/result.json'))
+          assert checkpoint['task_id'] == os.environ['TASK_ID']
+          assert result['task_id'] == os.environ['TASK_ID']
+          assert result['fresh_runner_proven'] is True
+          assert result['remote_checkpoint_reconstructed'] is True
+          assert result['local_sentinel_absent'] is True
+          print(json.dumps({
+              'checkpoint_kind': checkpoint['checkpoint_kind'],
+              'fresh_runner_proven': True,
+              'remote_checkpoint_reconstructed': True,
+              'result_digest': result['result_digest'],
+          }, sort_keys=True))
+          PY
+
+          curl --fail --silent --show-error \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "X-GitHub-Api-Version: 2026-03-10" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/commits/${SOURCE_SHA}/statuses?per_page=100" \
+            > "$RUNNER_TEMP/statuses.json"
+
+          python3 - <<'PY'
+          import json, os
+          statuses = json.load(open(os.environ['RUNNER_TEMP'] + '/statuses.json'))
+          contexts = {}
+          for status in statuses:
+              contexts.setdefault(status.get('context'), []).append(status.get('state'))
+          for required in ('amodex/p0-07/runner-a', 'amodex/p0-07/runner-b'):
+              states = contexts.get(required, [])
+              assert 'pending' in states, (required, states)
+              assert 'success' in states, (required, states)
+          print(json.dumps({'heartbeat_contexts_verified': 2}, sort_keys=True))
+          PY
+
+          git push origin --delete "$CHECKPOINT_BRANCH"
+          if git ls-remote --exit-code --heads origin "refs/heads/$CHECKPOINT_BRANCH" >/dev/null 2>&1; then
+            echo 'checkpoint branch still exists after cleanup' >&2
+            exit 1
+          fi
+          echo 'P0-07 normal lifecycle PASS: checkpoint reconstructed on fresh runner and namespaced ref cleaned.'
