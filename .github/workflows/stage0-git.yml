@@ -1,0 +1,49 @@
+name: stage0-git
+
+on:
+  push:
+    branches:
+      - stage/0-feasibility
+    paths:
+      - 'research/p0-05-git/**'
+      - '.github/workflows/stage0-git.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  git-reconciliation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Checkout exact Amodex revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+
+      - name: Configure fixture commit identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'Amodex Stage 0 Bot'
+          git config user.email 'amodex-stage0@users.noreply.github.com'
+
+      - name: Run expected-SHA and reconciliation probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 research/p0-05-git/probe.py \
+            --output "$RUNNER_TEMP/p0-05-result.json"
+          cat "$RUNNER_TEMP/p0-05-result.json"
+
+      - name: Assert main stayed unchanged locally and tracked files are clean
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          git status --porcelain=v1
