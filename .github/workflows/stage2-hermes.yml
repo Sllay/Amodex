@@ -59,9 +59,10 @@ jobs:
           python -m pip install --disable-pip-version-check pytest==9.0.2
           export PYTHONPATH="$GITHUB_WORKSPACE/src${PYTHONPATH:+:$PYTHONPATH}"
 
-          PYTEST_BIN="$(command -v pytest)"
-          test -n "$PYTEST_BIN"
-          HERMES_VENV_PYTHON="$(dirname "$PYTEST_BIN")/python"
+          PYTEST_LOCATION="$(python -m pip show pytest | awk -F': ' '/^Location:/{print $2}')"
+          test -n "$PYTEST_LOCATION"
+          HERMES_VENV_ROOT="$(dirname "$(dirname "$(dirname "$PYTEST_LOCATION")")")"
+          HERMES_VENV_PYTHON="$HERMES_VENV_ROOT/bin/python"
           test -x "$HERMES_VENV_PYTHON"
           "$HERMES_VENV_PYTHON" -c 'import pytest, pygments, sys; print(sys.executable)'
 
