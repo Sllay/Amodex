@@ -1,0 +1,12 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "amodex-stage1-control-plane",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-31",
+  "vars": {
+    "BUILD_ID": "local"
+  },
+  "secrets": {
+    "required": ["DATABASE_URL"]
+  }
+}
