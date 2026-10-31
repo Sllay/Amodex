@@ -1,8 +1,8 @@
 # P0-04 — PostgreSQL Job Claim, Lease, and Fencing
 
-Status: **IN_PROGRESS**
+Status: **ADAPT**
 
-P0-04 is a blocking Stage 0 experiment. It tests whether PostgreSQL alone can provide the initial durable coordination required by Amodex without Redis.
+P0-04 proved that PostgreSQL alone can provide the initial durable coordination semantics required by Amodex without introducing Redis. The coordination design is accepted; host-specific resource sizing remains a separate deployment concern to be revalidated on the actual free Control Plane/database environment in P0-06.
 
 ## Hypothesis
 
@@ -15,42 +15,67 @@ A real PostgreSQL instance can safely provide:
 - rejection of stale-worker writes;
 - atomic state transition + event append;
 - rollback after process death during an uncommitted transition;
-- deterministic recovery after the killed worker's lease expires;
-- acceptable baseline connection/resource behavior for the next hosting PoCs.
+- deterministic recovery after the killed worker's lease expires.
 
-## Probe implementation
+The hypothesis passed for coordination semantics.
 
-`probe.py` uses multiple OS processes against one real PostgreSQL instance.
+## Reproducible environment
 
-The test schema contains only two research tables:
+Clean confirmation run:
 
 ```text
-jobs
-events
+workflow: stage0-postgres
+run_id: 41183766448
+job_id: 124486382734
+Amodex commit: 98a92295590921696d756b014d3f4747929b974a
+result: success
 ```
 
-No production persistence package is introduced by this PoC.
+PostgreSQL image was pinned by digest:
 
-## Required scenarios
+```text
+postgres@sha256:1beaa3084eee2676f20a9cd9928f0bf2c5bf674f8e49f81017912183d377c61c
+```
 
-### 1. Concurrent claim race
+Observed server:
 
-Four worker processes begin together and attempt to claim the same queued job using:
+```text
+PostgreSQL 16.15 (Debian 16.15-1.pgdg13+2)
+psycopg 3.2.10
+```
+
+Relevant database settings:
+
+```text
+shared_buffers: 128MB
+work_mem: 4MB
+maintenance_work_mem: 64MB
+max_connections: 100
+```
+
+## Concurrent claim proof
+
+Four independent OS worker processes were released simultaneously against one queued job.
+
+Claim mechanism:
 
 ```sql
 FOR UPDATE SKIP LOCKED
 ```
 
-Expected:
+Observed:
 
 ```text
 workers: 4
-active winners: 1
+winners: 1
+first fencing token: 1
 ```
 
-### 2. Transactional heartbeat
+Exactly one process acquired active authority.
 
-The current worker extends its lease only when all authority fields still match:
+## Transactional heartbeat
+
+The current worker extended its lease only while all authority fields still matched:
 
 ```text
 job_id
@@ -60,113 +85,160 @@ state=RUNNING
 lease_not_expired
 ```
 
-The lease update and `HEARTBEAT` event append happen in the same transaction.
+The lease extension and `HEARTBEAT` event append were committed in one transaction.
 
-### 3. Lease expiry and reassignment
-
-The test expires the first lease, reclaims the same job with another worker, and requires:
+Observed:
 
 ```text
-new_fencing_token = old_fencing_token + 1
+heartbeat_transactional: true
 ```
 
-### 4. Stale-worker rejection
+## Lease expiry and reassignment
 
-After reassignment, the old worker attempts a protected update with the old fencing token.
+The first lease was deliberately expired and the same job was claimed by a replacement worker.
 
-Expected:
+Observed:
 
 ```text
-rows updated: 0
+old fencing token: 1
+new fencing token: 2
+lease_expiry_recoverable: true
 ```
 
-The current lease holder must still be able to update the protected state.
+The fencing token advanced on reassignment.
 
-### 5. State + event atomic commit/rollback
+## Stale-worker negative test
 
-One transition commits a state change and event together.
+After reassignment, the original worker attempted a protected mutation using its old lease owner/token tuple.
 
-A second transition intentionally raises after both SQL mutations but before commit.
-
-Expected after rollback:
+Observed:
 
 ```text
-state change persisted: false
+stale_worker_mutation_rejected: true
+current_worker_mutation_allowed: true
+```
+
+This satisfies the Stage 0 cross-PoC security probe requiring an old fencing token to lose authority after reassignment.
+
+## Atomic state + event proof
+
+A normal transition updated job state and appended its event in one transaction.
+
+Observed:
+
+```text
+state_and_event_atomic_commit: true
+```
+
+A second transition deliberately raised after both SQL mutations but before commit.
+
+Observed after rollback:
+
+```text
+state_and_event_atomic_rollback: true
+state mutation persisted: false
 event persisted: false
 ```
 
-### 6. Process kill during transaction
+## Hard process-kill proof
 
-A child process:
+A child worker opened an ordinary psycopg transaction, changed job state, appended an event, signaled the parent while still uncommitted, and was then hard-killed by the parent process.
 
-1. opens a transaction;
-2. mutates job state;
-3. appends an event;
-4. signals the parent while still uncommitted;
-5. is hard-killed by the parent.
-
-Expected PostgreSQL behavior:
+The clean confirmation run intentionally produced the PostgreSQL log event:
 
 ```text
-uncommitted state mutation: rolled back
-uncommitted event: rolled back
+unexpected EOF on client connection with an open transaction
 ```
 
-The parent then expires the abandoned lease and requires another worker to reclaim the job with a higher fencing token.
+There was no duplicate-`BEGIN` warning in the clean rerun.
 
-### 7. Advisory-lock dependence
-
-The PoC does not use advisory locks. The final observation queries `pg_locks` and requires zero advisory locks during the finished probe state.
-
-## Security/fault probe
-
-This PoC satisfies the cross-PoC negative test:
+Observed:
 
 ```text
-stale worker uses old fencing token
+process_kill_rollback: true
+uncommitted state mutation persisted: false
+uncommitted event persisted: false
 ```
 
-The stale worker must be unable to mutate protected state after reassignment.
-
-## Resource observations
-
-The probe records:
-
-- PostgreSQL server version;
-- `shared_buffers`;
-- `work_mem`;
-- `maintenance_work_mem`;
-- `max_connections`;
-- observed active database connections;
-- database size after the experiment;
-- advisory lock count.
-
-The workflow also records container memory/CPU from the CI service container where available.
-
-This CI measurement is a coordination/runtime proxy only. The intended free-host memory envelope is re-measured on the actual Northflank Control Plane/database PoC (P0-06).
-
-## Pass criteria
-
-P0-04 can be `ADOPT` only if all of these are demonstrated against real PostgreSQL:
+The abandoned job was then expired and reclaimed by a reconciler:
 
 ```text
-exactly one concurrent claim winner
-heartbeat transaction succeeds
-expired lease is reclaimable
-fencing token increments
-stale worker write is rejected
-current worker write succeeds
-state+event commit is atomic
-state+event rollback is atomic
-process-kill transaction rolls back
-killed job is recoverable after expiry
-no advisory-lock dependency
+old fencing token: 1
+new fencing token: 2
+post-kill recovery: true
 ```
 
-If coordination is correct but resource-envelope evidence is insufficient for the target host, the decision may be `ADAPT` with resource sizing explicitly deferred to P0-06 rather than pretending it was measured on Northflank.
+The new holder could mutate protected state successfully.
 
-## Current decision
+## Advisory-lock observation
 
-**IN_PROGRESS.**
+The coordination probe uses row locking/fencing rather than advisory locks.
 
-The probe is implemented. Closure requires a successful CI run against the real PostgreSQL service plus recorded resource observations.
+Observed:
+
+```text
+advisory_lock_count: 0
+advisory_locks_used: false
+```
+
+No hidden advisory-lock dependency was required for the demonstrated path.
+
+## Resource proxy observation
+
+At the end of the clean GitHub Actions probe:
+
+```text
+observed database connections: 1
+database size: 7,887,895 bytes
+container CPU snapshot: 0.02%
+container memory snapshot: 25.36 MiB
+container memory percentage on CI host: 0.16%
+container PIDs: 6
+```
+
+These numbers demonstrate that the PoC itself has a small idle/post-test footprint on the GitHub Actions service container. They are **not** treated as proof of the eventual Northflank free-host envelope because the host limits and service topology differ.
+
+The real deployment/resource decision remains part of P0-06.
+
+## Investigation history
+
+The first successful run (`41183453714`, job `124485444313`) already proved all coordination invariants, but its kill-test worker explicitly issued `BEGIN` on a connection for which psycopg had already opened a transaction. PostgreSQL therefore logged:
+
+```text
+WARNING: there is already a transaction in progress
+```
+
+Although rollback/recovery still passed, the probe was corrected instead of accepting noisy evidence.
+
+The clean rerun:
+
+- removed the redundant explicit `BEGIN`;
+- pinned the exact PostgreSQL image digest;
+- retained the intentional hard-kill/open-transaction EOF;
+- passed the same original acceptance criteria.
+
+## Decision
+
+**ADAPT**.
+
+Accepted for Amodex architecture:
+
+- PostgreSQL is sufficient for the initial durable claim/lease/fencing authority model;
+- Redis is not required for Stage 1 coordination;
+- job claims use transactional row locking with `SKIP LOCKED`-style semantics;
+- every reassignment advances a fencing token;
+- protected mutations must verify current lease ownership/token;
+- state transition and event append belong in the same transaction;
+- worker death relies on database rollback plus lease expiry/reconciliation, not worker-local truth.
+
+Adaptation retained:
+
+- connection-pool sizing, memory headroom, service limits and production PostgreSQL configuration must be measured on the actual selected free host in P0-06 before deployment assumptions become production constraints.
+
+This is not `RETEST`; the coordination uncertainty is retired and P0-05 may proceed.
+
+## Next gate
+
+```text
+P0-05 — Git/GitHub expected-SHA and crash reconciliation
+```
