@@ -1,0 +1,106 @@
+name: stage0-general-runner-cancel
+
+on:
+  push:
+    branches:
+      - stage/0-feasibility
+    paths:
+      - '.github/workflows/stage0-general-runner-cancel.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  statuses: write
+
+jobs:
+  cancellable-runner:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact Stage 0 source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 1
+
+      - name: Push SAFE checkpoint before long execution
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          BRANCH="p0-07-cancel-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          CHECKPOINT=".amodex-p007/cancel-checkpoint.json"
+          TASK_ID="P0-07-CANCEL-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+
+          mkdir -p .amodex-p007
+          python3 - "$TASK_ID" "$GITHUB_SHA" > "$CHECKPOINT" <<'PY'
+          import hashlib, json, pathlib, sys
+          task_id, source_sha = sys.argv[1:3]
+          boot_id = pathlib.Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+          print(json.dumps({
+              'schema_version': 1,
+              'task_id': task_id,
+              'source_sha': source_sha,
+              'state': 'SAFE_BEFORE_CANCEL',
+              'boot_fingerprint': hashlib.sha256(boot_id.encode()).hexdigest(),
+          }, indent=2, sort_keys=True))
+          PY
+
+          git config user.name 'amodex-stage0-runner'
+          git config user.email 'amodex-stage0-runner@users.noreply.github.com'
+          git switch -c "$BRANCH"
+          git add "$CHECKPOINT"
+          git commit -m 'test(p0-07): persist pre-cancel SAFE checkpoint'
+          git push origin "HEAD:refs/heads/$BRANCH"
+
+          python3 - > "$RUNNER_TEMP/status.json" <<'PY'
+          import json
+          print(json.dumps({
+              'state': 'pending',
+              'context': 'amodex/p0-07/cancel-runner',
+              'description': 'SAFE checkpoint pushed; runner cancellable',
+          }))
+          PY
+          curl --fail --silent --show-error \
+            -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "X-GitHub-Api-Version: 2026-03-10" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
+            --data-binary @"$RUNNER_TEMP/status.json" >/dev/null
+
+          echo "CHECKPOINT_BRANCH=$BRANCH" >> "$GITHUB_ENV"
+          echo "P0-07 READY_FOR_CANCEL branch=$BRANCH"
+
+      - name: Enter cancellable wait after durable checkpoint
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          trap 'echo "P0-07 CANCEL_SIGNAL_RECEIVED"; exit 130' INT TERM
+
+          for i in $(seq 1 60); do
+            echo "P0-07 cancellable heartbeat $i branch=$CHECKPOINT_BRANCH"
+            if [ $((i % 3)) -eq 0 ]; then
+              python3 - "$i" > "$RUNNER_TEMP/status.json" <<'PY'
+          import json, sys
+          print(json.dumps({
+              'state': 'pending',
+              'context': 'amodex/p0-07/cancel-runner',
+              'description': f'long execution heartbeat {sys.argv[1]}',
+          }))
+          PY
+              curl --fail --silent --show-error \
+                -X POST \
+                -H "Accept: application/vnd.github+json" \
+                -H "Authorization: Bearer $GH_TOKEN" \
+                -H "X-GitHub-Api-Version: 2026-03-10" \
+                "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
+                --data-binary @"$RUNNER_TEMP/status.json" >/dev/null
+            fi
+            sleep 10
+          done
+
+          echo 'runner unexpectedly completed without external cancellation' >&2
+          exit 1
