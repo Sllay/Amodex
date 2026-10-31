@@ -324,6 +324,16 @@ class ScopedWorkspaceTools:
         elif program != "pytest":
             raise CommandDenied(f"validator command shape is not allowed: {program}")
 
+    @staticmethod
+    def _trusted_validator_python() -> str:
+        if os.name == "nt":
+            candidate = Path(sys.prefix) / "Scripts" / "python.exe"
+        else:
+            candidate = Path(sys.prefix) / "bin" / "python"
+        if not candidate.is_file():
+            raise CommandDenied(f"trusted runner interpreter is unavailable: {candidate}")
+        return str(candidate)
+
     def run_validator(self, argv: Sequence[str], *, cwd: str = ".", timeout_seconds: int = 60) -> CommandResult:
         self._require_operation("run_tests")
         self._validate_validator_argv(argv)
@@ -339,9 +349,11 @@ class ScopedWorkspaceTools:
         safe_env = {key: value for key, value in os.environ.items() if key in self._SAFE_ENV_KEYS}
         safe_env["PYTHONNOUSERSITE"] = "1"
         program = Path(argv[0]).name
-        command = list(argv)
+        trusted_python = self._trusted_validator_python()
         if program.startswith("python"):
-            command[0] = sys.executable
+            command = [trusted_python, *argv[1:]]
+        else:
+            command = [trusted_python, "-m", "pytest", *argv[1:]]
         completed = subprocess.run(
             command,
             cwd=resolved_cwd,
