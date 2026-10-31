@@ -42,30 +42,21 @@ jobs:
             fi
           done
 
-      - name: Install root runtime toolchain
+      - name: Recreate frozen Python Stage 1 runtime
         run: |
           python3 -m pip install --disable-pip-version-check uv==0.10.0
           uv python install 3.13.5
-          uv --version
+          uv sync --python 3.13.5 --extra dev --frozen
 
-      - name: Recreate root Stage 1 environment from frozen lock
-        run: uv sync --python 3.13.5 --extra dev --frozen
-
-      - name: Switch only Cloudflare deployment tooling to pinned uv
+      - name: Recreate pinned Cloudflare edge adapter
         shell: bash
         run: |
           set -euo pipefail
-          python3 -m pip install --disable-pip-version-check --upgrade uv==0.13.5
-          hash -r
-          uv --version
-          test "$(uv --version | awk '{print $2}')" = "0.13.5"
-
-      - name: Resolve and recreate Cloudflare Python Worker environment
-        run: |
-          uv lock --project deploy/cloudflare --python 3.13.5
-          uv sync --project deploy/cloudflare --python 3.13.5 --group dev --frozen
-          rm -rf deploy/cloudflare/src/amodex
-          cp -R src/amodex deploy/cloudflare/src/amodex
+          cd deploy/cloudflare
+          npm install --package-lock-only --ignore-scripts
+          npm ci --ignore-scripts
+          node --version
+          npx --no-install wrangler --version
 
       - name: Execute real remote Stage 1 vertical slice
         run: .venv/bin/python scripts/stage1_remote_probe.py
@@ -75,22 +66,22 @@ jobs:
         run: |
           set -euo pipefail
           for secret in "$CLOUDFLARE_API_TOKEN" "$NEON_API_KEY" "$GEMINI_API_KEY"; do
-            if git grep -F -- "$secret" -- . ':!uv.lock' ':!deploy/cloudflare/uv.lock'; then
+            if git grep -F -- "$secret" -- . ':!uv.lock' ':!deploy/cloudflare/package-lock.json'; then
               echo 'configured secret value found in tracked content' >&2
               exit 1
             fi
           done
           echo 'tracked-secret scan PASS'
 
-      - name: Persist Cloudflare deployment lock
+      - name: Persist Cloudflare adapter dependency lock
         if: github.event_name == 'push' && github.ref_name == 'stage/1-durable-runtime'
         run: |
-          if git diff --quiet -- deploy/cloudflare/uv.lock && git ls-files --error-unmatch deploy/cloudflare/uv.lock >/dev/null 2>&1; then
-            echo 'Cloudflare uv.lock already tracked and unchanged'
+          if git diff --quiet -- deploy/cloudflare/package-lock.json && git ls-files --error-unmatch deploy/cloudflare/package-lock.json >/dev/null 2>&1; then
+            echo 'Cloudflare package-lock already tracked and unchanged'
             exit 0
           fi
           git config user.name 'amodex-stage1-ci'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add deploy/cloudflare/uv.lock
-          git commit -m 'chore(stage1): lock Cloudflare runtime dependencies'
+          git add deploy/cloudflare/package-lock.json
+          git commit -m 'chore(stage1): lock Cloudflare edge dependencies'
           git push origin HEAD:${GITHUB_REF_NAME}
