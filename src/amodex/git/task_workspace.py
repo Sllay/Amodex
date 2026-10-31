@@ -203,6 +203,11 @@ class GitTaskWorkspace:
             raise GitWorkspaceError("cannot create VALIDATED checkpoint from failing evidence")
         if evidence.subject_sha != safe.commit_sha:
             raise GitWorkspaceError("validation evidence does not bind to SAFE commit")
+        if self.current_sha() != safe.commit_sha:
+            raise GitWorkspaceError("workspace HEAD moved away from validated SAFE commit")
+        dirty = self.status_porcelain()
+        if dirty:
+            raise GitWorkspaceError(f"workspace is dirty after validation: {dirty!r}")
         self._git("push", "origin", f"{safe.commit_sha}:{self.validated_ref()}")
         return Checkpoint(
             checkpoint_id=new_uuid7(),

@@ -189,6 +189,15 @@ class ScopedWorkspaceTools:
             raise PathPolicyError(f"path resolves outside workspace: {relative}")
         return relative, resolved
 
+    def _canonical_relative(self, resolved: Path) -> str:
+        try:
+            relative = resolved.relative_to(self.workspace).as_posix()
+        except ValueError as exc:
+            raise PathPolicyError("resolved path escaped workspace") from exc
+        if relative in {"", "."}:
+            raise PathPolicyError("workspace root is not a file target")
+        return relative
+
     def _require_operation(self, operation: str) -> None:
         if operation not in self.task.scope.allowed_operations:
             raise ScopeViolation(f"operation not granted by TaskPackage: {operation}")
@@ -203,10 +212,24 @@ class ScopedWorkspaceTools:
         if not self._matches_scope(relative, self.task.scope.write):
             raise ScopeViolation(f"write outside authorized scope: {relative}")
 
+    def _authorize_read_target(self, logical: str, resolved: Path) -> str:
+        self._authorize_read(logical)
+        canonical = self._canonical_relative(resolved)
+        if canonical != logical:
+            self._authorize_read(canonical)
+        return canonical
+
+    def _authorize_write_target(self, logical: str, resolved: Path) -> str:
+        self._authorize_write(logical)
+        canonical = self._canonical_relative(resolved)
+        if canonical != logical:
+            self._authorize_write(canonical)
+        return canonical
+
     def read_file(self, path: str, *, max_bytes: int | None = None) -> str:
         self._require_operation("read_file")
         relative, resolved = self._resolve(path)
-        self._authorize_read(relative)
+        self._authorize_read_target(relative, resolved)
         if not resolved.is_file():
             raise FileNotFoundError(relative)
         limit = max_bytes or self._MAX_FILE_BYTES
@@ -230,14 +253,13 @@ class ScopedWorkspaceTools:
             if ".git" in candidate.parts or not candidate.is_file():
                 continue
             relative = candidate.relative_to(self.workspace).as_posix()
-            if not (self._matches_scope(relative, self.task.scope.read) or self._matches_scope(relative, self.task.scope.write)):
-                continue
             try:
                 _, resolved = self._resolve(relative)
+                self._authorize_read_target(relative, resolved)
                 if resolved.stat().st_size > self._MAX_FILE_BYTES:
                     continue
                 text = resolved.read_text(encoding="utf-8")
-            except (OSError, UnicodeDecodeError, PathPolicyError):
+            except (OSError, UnicodeDecodeError, PathPolicyError, ScopeViolation):
                 continue
             for line_no, line in enumerate(text.splitlines(), start=1):
                 if regex.search(line):
@@ -248,9 +270,9 @@ class ScopedWorkspaceTools:
 
     def acquire_write_lease(self, path: str, *, owner: str) -> PathLease:
         self._require_operation("patch_file")
-        relative, _ = self._resolve(path)
-        self._authorize_write(relative)
-        return self.leases.acquire(owner=owner, path=relative)
+        relative, resolved = self._resolve(path)
+        canonical = self._authorize_write_target(relative, resolved)
+        return self.leases.acquire(owner=owner, path=canonical)
 
     def release_write_lease(self, *, lease_id: str, owner: str) -> None:
         self.leases.release(lease_id=lease_id, owner=owner)
@@ -267,8 +289,8 @@ class ScopedWorkspaceTools:
     ) -> str:
         self._require_operation("patch_file")
         relative, resolved = self._resolve(path)
-        self._authorize_write(relative)
-        self.leases.require(lease_id=lease_id, owner=owner, path=relative)
+        canonical = self._authorize_write_target(relative, resolved)
+        self.leases.require(lease_id=lease_id, owner=owner, path=canonical)
         if not resolved.is_file():
             raise FileNotFoundError(relative)
         original = resolved.read_bytes()
@@ -289,20 +311,28 @@ class ScopedWorkspaceTools:
                 temp_path.unlink()
         return hashlib.sha256(updated.encode("utf-8")).hexdigest()
 
-    def run_validator(self, argv: Sequence[str], *, cwd: str = ".", timeout_seconds: int = 60) -> CommandResult:
-        self._require_operation("run_tests")
-        if not argv:
-            raise CommandDenied("validator argv cannot be empty")
+    def _validate_validator_argv(self, argv: Sequence[str]) -> None:
+        if not argv or any(not isinstance(item, str) or not item for item in argv):
+            raise CommandDenied("validator argv must contain non-empty strings")
         program = Path(argv[0]).name
         if program not in self.allowed_validator_programs:
             raise CommandDenied(f"validator program is not allowed: {program}")
+        if program.startswith("python"):
+            if len(argv) < 3 or tuple(argv[1:3]) != ("-m", "pytest"):
+                raise CommandDenied("Python validator is restricted to `python -m pytest ...`")
+        elif program != "pytest":
+            raise CommandDenied(f"validator command shape is not allowed: {program}")
+
+    def run_validator(self, argv: Sequence[str], *, cwd: str = ".", timeout_seconds: int = 60) -> CommandResult:
+        self._require_operation("run_tests")
+        self._validate_validator_argv(argv)
         if not 1 <= timeout_seconds <= 300:
             raise CommandDenied("validator timeout must be between 1 and 300 seconds")
         if cwd == ".":
             resolved_cwd = self.workspace
         else:
             relative_cwd, resolved_cwd = self._resolve(cwd)
-            self._authorize_read(relative_cwd)
+            self._authorize_read_target(relative_cwd, resolved_cwd)
             if not resolved_cwd.is_dir():
                 raise CommandDenied(f"validator cwd is not a directory: {cwd}")
         safe_env = {key: value for key, value in os.environ.items() if key in self._SAFE_ENV_KEYS}

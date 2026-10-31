@@ -6,9 +6,11 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
+
 from amodex.contracts.ids import new_uuid7
 from amodex.contracts.models import Authority, Objective, RepositoryAuthority, Scope, TaskPackage
-from amodex.git.task_workspace import GitTaskWorkspace
+from amodex.git.task_workspace import GitTaskWorkspace, GitWorkspaceError
 from amodex.tools.scoped_workspace import ScopedWorkspaceTools
 
 
@@ -28,6 +30,7 @@ def _create_fixture_remote(tmp_path: Path) -> tuple[Path, str]:
     _git(seed, "config", "user.email", "fixture@amodex.invalid")
     (seed / "src").mkdir()
     (seed / "tests").mkdir()
+    (seed / ".gitignore").write_text(".pytest_cache/\n__pycache__/\n*.pyc\n", encoding="utf-8")
     (seed / "src" / "__init__.py").write_text("", encoding="utf-8")
     (seed / "src" / "calculator.py").write_text(
         "def add(a: int, b: int) -> int:\n"
@@ -128,6 +131,15 @@ def test_safe_validated_checkpoint_survives_runner_destruction(tmp_path: Path) -
         stderr=result.stderr,
         passed=True,
     )
+
+    protected = runner_a / "README.md"
+    protected_original = protected.read_text(encoding="utf-8")
+    protected.write_text("tampered by validator\n", encoding="utf-8")
+    with pytest.raises(GitWorkspaceError, match="workspace is dirty"):
+        workspace.promote_validated_checkpoint(safe=safe, evidence=evidence)
+    protected.write_text(protected_original, encoding="utf-8")
+    assert workspace.status_porcelain() == ()
+
     validated = workspace.promote_validated_checkpoint(safe=safe, evidence=evidence)
     report = workspace.make_report(
         changed_files=changed, evidence=evidence, safe=safe, validated=validated

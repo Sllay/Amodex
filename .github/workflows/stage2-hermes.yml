@@ -1,0 +1,71 @@
+name: stage2-hermes-worker
+
+on:
+  push:
+    branches:
+      - stage/2-scoped-worker
+    paths:
+      - 'src/amodex/runtime/hermes_worker.py'
+      - 'src/amodex/tools/scoped_workspace.py'
+      - 'scripts/stage2_hermes_probe.py'
+      - '.github/workflows/stage2-hermes.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'src/amodex/runtime/hermes_worker.py'
+      - 'src/amodex/tools/scoped_workspace.py'
+      - 'scripts/stage2_hermes_probe.py'
+      - '.github/workflows/stage2-hermes.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  scoped-hermes-worker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout exact Amodex revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Fetch exact Hermes upstream commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          HERMES_DIR="$RUNNER_TEMP/hermes-agent"
+          git init "$HERMES_DIR"
+          git -C "$HERMES_DIR" remote add origin https://github.com/NousResearch/hermes-agent.git
+          git -C "$HERMES_DIR" fetch --depth=1 origin adecc4024456b387b1518813b90bd60c82b51287
+          git -C "$HERMES_DIR" checkout --detach FETCH_HEAD
+          test "$(git -C "$HERMES_DIR" rev-parse HEAD)" = "adecc4024456b387b1518813b90bd60c82b51287"
+          echo "HERMES_DIR=$HERMES_DIR" >> "$GITHUB_ENV"
+
+      - name: Bootstrap pinned Hermes environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$HERMES_DIR"
+          source ./activate
+          python --version
+          python -c 'from run_agent import AIAgent; print(AIAgent.__name__)'
+
+      - name: Run production adapter probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$HERMES_DIR"
+          source ./activate
+          python -m pip install --disable-pip-version-check pytest==9.0.2
+          export PYTHONPATH="$GITHUB_WORKSPACE/src${PYTHONPATH:+:$PYTHONPATH}"
+          python "$GITHUB_WORKSPACE/scripts/stage2_hermes_probe.py" \
+            --hermes-root "$HERMES_DIR" \
+            --output "$RUNNER_TEMP/stage2-hermes-result.json"
+          cat "$RUNNER_TEMP/stage2-hermes-result.json"
+
+      - name: Repository hygiene
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -C "$GITHUB_WORKSPACE" diff --exit-code
+          test -z "$(git -C "$GITHUB_WORKSPACE" status --porcelain)"

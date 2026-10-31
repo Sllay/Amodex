@@ -22,7 +22,7 @@ from amodex.tools.scoped_workspace import (
 )
 
 
-def _task_package() -> TaskPackage:
+def _task_package(*, write: tuple[str, ...] = ("src/calculator.py",)) -> TaskPackage:
     now = datetime.now(timezone.utc)
     return TaskPackage(
         package_id=new_uuid7(),
@@ -37,7 +37,7 @@ def _task_package() -> TaskPackage:
             task_branch="work/stage2/clamp",
         ),
         scope=Scope(
-            write=("src/calculator.py",),
+            write=write,
             read=("src/**", "tests/**", "README.md"),
             protected=("README.md",),
             allowed_operations=("read_file", "search_files", "patch_file", "run_tests"),
@@ -82,6 +82,7 @@ def fixture_workspace(tmp_path: Path) -> Path:
     outside.mkdir()
     (outside / "secret.txt").write_text("outside-secret\n", encoding="utf-8")
     (workspace / "src" / "outside-link").symlink_to(outside, target_is_directory=True)
+    (workspace / "src" / "protected-link").symlink_to("../README.md")
     return workspace
 
 
@@ -139,6 +140,8 @@ def test_scoped_coding_tools_solve_fixture_and_fail_closed(
         tools.read_file("src/outside-link/secret.txt")
     with pytest.raises(CommandDenied):
         tools.run_validator(("rm", "-rf", "."))
+    with pytest.raises(CommandDenied):
+        tools.run_validator((sys.executable, "-c", "print('validator bypass')"))
     with pytest.raises(SecretDenied):
         tools.read_secret("AMODEX_STAGE2_FORBIDDEN_SECRET")
     assert tools.read_secret("ALLOWED_TEST_TOKEN") == "granted"
@@ -150,6 +153,15 @@ def test_scoped_coding_tools_solve_fixture_and_fail_closed(
     assert os.environ["AMODEX_STAGE2_FORBIDDEN_SECRET"] == "must-not-leak"
     assert "must-not-leak" not in after.stdout
     assert "must-not-leak" not in after.stderr
+
+
+def test_internal_symlink_cannot_alias_protected_write(fixture_workspace: Path) -> None:
+    broad_tools = ScopedWorkspaceTools(
+        task=_task_package(write=("src/**",)),
+        workspace=fixture_workspace,
+    )
+    with pytest.raises(ScopeViolation, match="README.md"):
+        broad_tools.acquire_write_lease("src/protected-link", owner="alias-writer")
 
 
 def test_patch_requires_fresh_content_and_correct_writer_lease(fixture_workspace: Path) -> None:
