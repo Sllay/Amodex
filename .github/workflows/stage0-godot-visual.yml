@@ -78,7 +78,9 @@ jobs:
           echo "$NODE_HOME/bin" >> "$GITHUB_PATH"
 
           "$GODOT_BIN" --version
-          test "$(node --version)" = 'v22.23.4'
+          test "$("$NODE_HOME/bin/node" --version)" = 'v22.23.4'
+          "$NODE_HOME/bin/npm" --version
+          "$NODE_HOME/bin/npx" --version
 
       - name: Prepare isolated addon-enabled visual fixture
         shell: bash
