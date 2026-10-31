@@ -96,7 +96,9 @@ class GitTaskWorkspace:
                 f"command failed ({completed.returncode}): {' '.join(argv)}\n"
                 f"{completed.stderr[-4000:]}"
             )
-        return completed.stdout.strip()
+        # Preserve leading whitespace and NUL-delimited porcelain payloads.
+        # Only line terminators added by normal Git commands are removed.
+        return completed.stdout.rstrip("\r\n")
 
     def _git(self, *args: str) -> str:
         return self._run_external(("git", *args), cwd=self.path)
