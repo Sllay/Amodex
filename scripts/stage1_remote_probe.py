@@ -119,7 +119,7 @@ def deploy_worker(*, env: dict[str, str], name: str, build_id: str, secrets_file
     output = run_command([
         "uv", "run", "--project", str(DEPLOY_DIR), "--frozen", "pywrangler", "deploy",
         "--name", name, "--var", f"BUILD_ID:{build_id}", "--secrets-file", str(secrets_file),
-    ], env=env, cwd=Path.cwd(), timeout=420)
+    ], env=env, cwd=DEPLOY_DIR, timeout=420)
     matches = re.findall(r"https://[A-Za-z0-9._-]+\.workers\.dev", output)
     return matches[-1].rstrip("/") if matches else ""
 
