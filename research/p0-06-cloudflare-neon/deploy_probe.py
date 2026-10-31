@@ -24,6 +24,8 @@ from typing import Any
 NEON_API = "https://console.neon.tech/api/v2"
 CLOUDFLARE_API = "https://api.cloudflare.com/client/v4"
 WORKER_DIR = Path(__file__).resolve().parent / "worker"
+CRON_EXPRESSION = "* * * * *"
+CRON_PROPAGATION_TIMEOUT_SECONDS = 1020
 
 
 class ProbeFailure(RuntimeError):
@@ -253,14 +255,39 @@ def read_event(url: str, marker: str) -> dict[str, Any] | None:
     return event if isinstance(event, dict) else None
 
 
-def wait_cron(url: str, marker: str, timeout: int = 210) -> dict[str, Any]:
-    deadline = time.monotonic() + timeout
+def get_worker_schedules(token: str, account_id: str, worker_name: str) -> list[str]:
+    encoded = urllib.parse.quote(worker_name, safe="")
+    _, body = request_json(
+        "GET",
+        f"{CLOUDFLARE_API}/accounts/{account_id}/workers/scripts/{encoded}/schedules",
+        headers=cf_headers(token),
+    )
+    require(isinstance(body, dict) and body.get("success") is True, "Cloudflare schedule lookup failed")
+    result = body.get("result")
+    schedules = result.get("schedules") if isinstance(result, dict) else None
+    require(isinstance(schedules, list), "Cloudflare schedule list missing")
+    return [
+        str(item.get("cron"))
+        for item in schedules
+        if isinstance(item, dict) and item.get("cron")
+    ]
+
+
+def wait_cron(
+    url: str,
+    marker: str,
+    timeout: int = CRON_PROPAGATION_TIMEOUT_SECONDS,
+) -> tuple[dict[str, Any], float]:
+    started = time.monotonic()
+    deadline = started + timeout
     while time.monotonic() < deadline:
         event = read_event(url, marker)
         if event:
-            return event
-        time.sleep(10)
-    raise ProbeFailure("Cloudflare Cron Trigger did not persist its marker within timeout")
+            return event, round(time.monotonic() - started, 3)
+        time.sleep(15)
+    raise ProbeFailure(
+        f"Cloudflare Cron Trigger did not persist its marker within {timeout}s propagation window"
+    )
 
 
 def run_probe(output: Path | None) -> dict[str, Any]:
@@ -309,17 +336,23 @@ def run_probe(output: Path | None) -> dict[str, Any]:
         worker_created = True
         worker_url = resolve_worker_url(cf_token, account_id, worker_name, deploy_url)
 
+        schedules_a = get_worker_schedules(cf_token, account_id, worker_name)
+        require(CRON_EXPRESSION in schedules_a, f"expected Cron schedule not attached after first deploy: {schedules_a}")
+
         health_a = wait_health(worker_url, build_a)
         first_event = write_event(worker_url, durable_marker)
         require(first_event.get("writer_build") == build_a, "initial durable marker writer mismatch")
 
         deploy_worker(command_env, worker_name, build_b, schedule_seed, secrets_file)
+        schedules_b = get_worker_schedules(cf_token, account_id, worker_name)
+        require(CRON_EXPRESSION in schedules_b, f"expected Cron schedule missing after redeploy: {schedules_b}")
+
         health_b = wait_health(worker_url, build_b)
         persisted = read_event(worker_url, durable_marker)
         require(isinstance(persisted, dict), "durable marker missing after redeploy")
         require(persisted.get("writer_build") == build_a, "durable marker changed after redeploy")
 
-        cron_event = wait_cron(worker_url, cron_marker)
+        cron_event, cron_wait_seconds = wait_cron(worker_url, cron_marker)
         require(cron_event.get("writer_build") in {build_a, build_b}, "Cron marker writer invalid")
 
         require(health_a.get("database") is True and health_b.get("database") is True, "database health failed")
@@ -346,6 +379,12 @@ def run_probe(output: Path | None) -> dict[str, Any]:
                 "database": True,
                 "secret_injected": True,
                 "provider_egress": True,
+            },
+            "cron": {
+                "expression": CRON_EXPRESSION,
+                "schedule_attached_before_and_after_redeploy": True,
+                "propagation_wait_seconds": cron_wait_seconds,
+                "persisted_state": True,
             },
             "durable_state_survived_redeploy": True,
             "cron_trigger_persisted_state": True,
