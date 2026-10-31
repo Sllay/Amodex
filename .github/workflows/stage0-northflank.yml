@@ -38,8 +38,64 @@ jobs:
             echo 'P0-06 BLOCKED_EXTERNAL_CREDENTIAL: add NORTHFLANK_API_TOKEN as a repository Actions secret.'
           fi
 
-      - name: Execute real Northflank Control Plane probe
+      - name: Guard dedicated Northflank project slot
+        id: project_slot
         if: steps.credential.outputs.available == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -n "${NORTHFLANK_PROJECT_ID:-}" ]; then
+            echo 'ready=true' >> "$GITHUB_OUTPUT"
+            echo 'Using explicitly reserved NORTHFLANK_PROJECT_ID for Amodex.'
+            exit 0
+          fi
+
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          token = os.environ["NORTHFLANK_API_TOKEN"]
+          req = urllib.request.Request("https://api.northflank.com/v1/projects")
+          req.add_header("Authorization", f"Bearer {token}")
+          req.add_header("Content-Type", "application/json")
+          req.add_header("User-Agent", "amodex-p0-06-slot-guard")
+
+          with urllib.request.urlopen(req, timeout=30) as response:
+              body = json.load(response)
+
+          data = body.get("data") if isinstance(body, dict) else None
+          if isinstance(data, list):
+              projects = data
+          elif isinstance(data, dict):
+              projects = data.get("projects") or []
+          else:
+              projects = []
+
+          projects = [p for p in projects if isinstance(p, dict) and p.get("id")]
+
+          output = os.environ["GITHUB_OUTPUT"]
+          with open(output, "a", encoding="utf-8") as handle:
+              if projects:
+                  handle.write("ready=false\n")
+                  handle.write("reason=existing_project_requires_explicit_reservation\n")
+              else:
+                  handle.write("ready=true\n")
+                  handle.write("reason=free_project_slot_available\n")
+
+          if projects:
+              print(
+                  "P0-06 BLOCKED_PROJECT_SLOT: an existing Northflank project is present. "
+                  "Amodex will not reuse or modify it implicitly. Free a project slot or "
+                  "set NORTHFLANK_PROJECT_ID only for a project explicitly reserved for Amodex."
+              )
+          else:
+              print("No existing project detected; probe may create its dedicated Amodex Stage 0 project.")
+          PY
+
+      - name: Execute real Northflank Control Plane probe
+        if: steps.credential.outputs.available == 'true' && steps.project_slot.outputs.ready == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -48,7 +104,7 @@ jobs:
           cat "$RUNNER_TEMP/p0-06-result.json"
 
       - name: Assert credential did not enter tracked files
-        if: steps.credential.outputs.available == 'true'
+        if: steps.credential.outputs.available == 'true' && steps.project_slot.outputs.ready == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -59,9 +115,16 @@ jobs:
           fi
           git diff --exit-code
 
-      - name: Preserve blocked status without fabricating host evidence
+      - name: Preserve credential block without fabricating host evidence
         if: steps.credential.outputs.available != 'true'
         shell: bash
         run: |
           set -euo pipefail
           echo 'P0-06 remains BLOCKED_EXTERNAL_CREDENTIAL; no Northflank deployment was attempted.'
+
+      - name: Preserve project-slot block without touching existing project
+        if: steps.credential.outputs.available == 'true' && steps.project_slot.outputs.ready != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'P0-06 remains BLOCKED_PROJECT_SLOT; existing Northflank project was not modified.'
