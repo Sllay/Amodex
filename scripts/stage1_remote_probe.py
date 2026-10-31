@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Real Stage 1 Cloudflare + Neon + Gemini vertical-slice probe.
 
-Creates only namespaced temporary resources, deploys the actual Python Stage 1
-API, writes runs through the remote API, processes them with the production
+Creates only namespaced temporary resources, deploys the thin Cloudflare edge
+adapter, writes runs through the remote API, processes them with the production
 Stage1Worker against the same Neon database, redeploys the control plane, proves
 state survives, proves free-quota exhaustion waits instead of spending, then
 removes the temporary resources.
@@ -118,10 +118,9 @@ def run_command(args: list[str], *, env: dict[str, str], cwd: Path | None = None
 def deploy_worker(*, env: dict[str, str], name: str, build_id: str, secrets_file: Path) -> str:
     deploy_env = env.copy()
     deploy_env.pop("VIRTUAL_ENV", None)
-    deploy_env["UV_PYTHON"] = "3.13.5"
     output = run_command([
-        "uv", "run", "--project", str(DEPLOY_DIR), "--python", "3.13.5", "--frozen",
-        "pywrangler", "deploy", "--name", name, "--var", f"BUILD_ID:{build_id}",
+        "npx", "--no-install", "wrangler", "deploy",
+        "--name", name, "--var", f"BUILD_ID:{build_id}",
         "--secrets-file", str(secrets_file),
     ], env=deploy_env, cwd=DEPLOY_DIR, timeout=420)
     matches = re.findall(r"https://[A-Za-z0-9._-]+\.workers\.dev", output)
@@ -140,7 +139,7 @@ def resolve_worker_url(token: str, account_id: str, name: str, deployed_url: str
 
 def public_json(method: str, url: str, payload: dict[str, Any] | None = None) -> tuple[int, Any]:
     return request_json(method, url, headers={"Content-Type": "application/json", "User-Agent": "amodex-stage1-client"},
-                        payload=payload, timeout=60, allow={400, 404, 500, 502, 503, 504})
+                        payload=payload, timeout=60, allow={400, 404, 422, 500, 502, 503, 504})
 
 
 def wait_build(url: str, build_id: str, timeout: int = 300) -> None:
@@ -264,7 +263,7 @@ def run_probe() -> dict[str, Any]:
         return {
             "status": "PASS",
             "source_sha": source_sha,
-            "backend": "cloudflare-python-worker+neon-postgres+github-actions-runner",
+            "backend": "cloudflare-ts-neon-edge+neon-postgres+github-actions-runner",
             "worker_name": worker_name,
             "neon_project_name": project_name,
             "migrations": list(applied),
