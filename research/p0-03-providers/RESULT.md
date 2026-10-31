@@ -2,7 +2,7 @@
 
 Status: **BLOCKED_EXTERNAL_CREDENTIAL**
 
-P0-03 is prepared but cannot honestly be declared complete until Amodex exercises at least one real external provider using a real free-tier credential. No API key is stored in source, workflow logs, or result files.
+P0-03 is implemented and the branch-safe workflow has executed, but the provider capability cannot honestly be declared proven until Amodex makes at least one real external Free Tier request using a real credential. No API key is stored in source, workflow logs, or result files.
 
 ## Primary provider candidate
 
@@ -34,9 +34,9 @@ Production provider policy must expose this privacy property as provider metadat
 
 ## Credential boundary
 
-The Gemini API requires authentication through an API key. Current official documentation recommends an environment variable and accepts the key in the `x-goog-api-key` request header.
+The Gemini API requires authentication through an API key. Current official documentation accepts it in the `x-goog-api-key` request header and recommends secure environment configuration.
 
-The repository currently has no provider credential available to this workflow.
+The Stage 0 workflow currently has no provider credential available.
 
 Required external setup:
 
@@ -47,13 +47,11 @@ Required external setup:
 GEMINI_API_KEY
 ```
 
-3. manually dispatch the workflow:
-
-```text
-stage0-provider-gemini
-```
+3. re-run the existing `stage0-provider-gemini` workflow/job on the Stage 0 commit, or push the next P0-03-only change after the secret is configured.
 
 The key should **not** be pasted into chat, committed to Git, added to an issue/PR, or placed in a workflow input.
+
+`workflow_dispatch` is retained for normal use after the workflow exists on the default branch, but GitHub requires a `workflow_dispatch` workflow to exist on the default branch before manual dispatch can originate. During the pre-merge Stage 0 branch, the workflow therefore also has a narrow `push` trigger for its own P0-03 files.
 
 ## Probe implementation
 
@@ -124,7 +122,7 @@ other 4xx -> PROVIDER_CLIENT_ERROR
 
 Only safe response headers such as retry/rate-limit/request IDs may be recorded. The authentication header is never echoed.
 
-Current Gemini documentation says rate limits are generally tracked across RPM, TPM and RPD, per project, and a limit breach can return `429 RESOURCE_EXHAUSTED`. Actual account-specific limits must be observed rather than hardcoded as universal constants.
+Current Gemini documentation says rate limits are tracked across dimensions such as RPM, TPM and RPD, generally per project/tier/model. Actual account-specific limits must be observed rather than hardcoded as universal constants.
 
 ## Current external fact baseline — 2026-10-31
 
@@ -137,7 +135,7 @@ Verified from current official Gemini documentation before writing the probe:
 - Free Tier output: free of charge;
 - Gemini Free tier exists without upgrading to paid billing;
 - API requests require an API key;
-- rate limits vary by model/project/account state and are measured across dimensions such as RPM, TPM, and RPD.
+- rate limits vary by model/project/account state and are measured across multiple dimensions.
 
 These external facts must be revalidated when the provider adapter is productionized or when the probe model is changed.
 
@@ -147,19 +145,47 @@ GitHub Models is not a valid 2026 fallback for this PoC. GitHub retired the GitH
 
 ## Workflow behavior
 
-`.github/workflows/stage0-provider-gemini.yml` is manual (`workflow_dispatch`) so missing credentials do not create a failing workflow on every Stage 0 commit.
+`.github/workflows/stage0-provider-gemini.yml` currently supports:
+
+- a narrow `push` trigger on `stage/0-feasibility` only when the P0-03 probe/workflow files change;
+- `workflow_dispatch` for normal post-merge/manual use.
 
 The workflow:
 
 1. checks out the exact Amodex revision with the pinned checkout action;
-2. fails closed with `BLOCKED_EXTERNAL_CREDENTIAL` if `GEMINI_API_KEY` is absent;
-3. runs only the fixed free-tier Gemini probe;
-4. asserts the secret did not enter tracked content;
-5. refuses to modify repository files.
+2. detects whether `GEMINI_API_KEY` is available without printing it;
+3. when missing, records `BLOCKED_EXTERNAL_CREDENTIAL`, skips inference and secret-scan steps, and succeeds without fabricating evidence;
+4. when present, runs only the fixed free-tier Gemini probe;
+5. asserts the secret did not enter tracked content;
+6. refuses to modify repository files.
+
+## Executed blocked-state evidence
+
+The branch-safe workflow executed successfully on the Stage 0 branch:
+
+```text
+workflow: stage0-provider-gemini
+run_id: 41179911310
+job_id: 124475017307
+commit: 0eab4cfef64ab86d2faa3e9d6263841d292e06d4
+conclusion: success
+```
+
+Step results:
+
+```text
+Checkout exact Amodex revision                 success
+Detect external free-tier credential           success
+Execute fixed free-tier capability probe       skipped
+Assert no secret material entered tracked files skipped
+Preserve blocked status without fabricating provider evidence success
+```
+
+This is **not provider capability evidence**. It is evidence that the credential boundary fails closed exactly as designed and does not turn a missing secret into a fake green inference result.
 
 ## Closure criteria
 
-P0-03 becomes `ADOPT` or `ADAPT` only after a real manual workflow run records all of:
+P0-03 becomes `ADOPT` or `ADAPT` only after a real workflow run records all of:
 
 - external provider request success;
 - forced function call schema success;
@@ -177,6 +203,6 @@ If Free-tier access is unavailable for the configured project/key, the result re
 
 **BLOCKED_EXTERNAL_CREDENTIAL.**
 
-The implementation and workflow are ready. The only missing evidence is a real free-tier API key configured securely in GitHub Actions.
+The implementation, safety guard and workflow behavior are proven up to the external credential boundary. The only missing P0-03 evidence is a real free-tier provider call after `GEMINI_API_KEY` is configured securely in GitHub Actions.
 
 Because the Stage 0 PoC order is intentionally risk-driven, P0-04 is not being claimed complete ahead of this gate. The repository remains at P0-03 until external provider capability is actually proven or the provider strategy is explicitly revised.
