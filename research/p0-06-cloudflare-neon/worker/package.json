@@ -1,0 +1,11 @@
+{
+  "name": "amodex-p006b-worker",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@neondatabase/serverless": "1.2.0"
+  },
+  "devDependencies": {
+    "wrangler": "4.156.0"
+  }
+}
