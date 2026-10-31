@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools==82.0.1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "amodex"
+version = "0.0.1"
+description = "Amodex persistent engineering-agent control plane"
+requires-python = ">=3.13,<3.15"
+dependencies = [
+  "pydantic==2.13.5",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest==9.0.2",
+]
+
+[project.scripts]
+amodex-contract = "amodex.contracts.cli:main"
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
