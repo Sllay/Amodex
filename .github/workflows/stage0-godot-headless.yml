@@ -121,8 +121,16 @@ jobs:
         run: |
           set -euo pipefail
           if [ -n "${LSP_PID:-}" ] && kill -0 "$LSP_PID" 2>/dev/null; then
-            kill "$LSP_PID"
-            wait "$LSP_PID" || true
+            kill "$LSP_PID" || true
+            for _ in $(seq 1 40); do
+              if ! kill -0 "$LSP_PID" 2>/dev/null; then
+                break
+              fi
+              sleep 0.25
+            done
+            if kill -0 "$LSP_PID" 2>/dev/null; then
+              kill -9 "$LSP_PID" || true
+            fi
           fi
           if [ -f "$RUNNER_TEMP/godot-lsp.log" ]; then
             tail -n 80 "$RUNNER_TEMP/godot-lsp.log"
@@ -152,7 +160,25 @@ jobs:
             2>&1 | tee "$RUNNER_TEMP/godot-test.log"
           grep -q 'AMODEX_P0_08_HEADLESS_TEST_OK value=42' "$RUNNER_TEMP/godot-test.log"
 
-      - name: Verify exact Godot MCP pin and call godot_status over MCP stdio
+      - name: Install Godot MCP addon in isolated runtime copy
+        shell: bash
+        run: |
+          set -euo pipefail
+          MCP_FIXTURE="$RUNNER_TEMP/p008-mcp-fixture"
+          cp -a "$FIXTURE" "$MCP_FIXTURE"
+          export GODOT_PATH="$GODOT_BIN"
+          npx -y "$GODOT_MCP_PACKAGE" init \
+            --project "$MCP_FIXTURE" \
+            --yes \
+            --agents codex \
+            --no-agents-md \
+            --no-claude-md \
+            | tee "$RUNNER_TEMP/godot-mcp-init.log"
+          test -f "$MCP_FIXTURE/addons/godot_mcp/plugin.cfg"
+          grep -q 'godot_mcp' "$MCP_FIXTURE/project.godot"
+          echo "MCP_FIXTURE=$MCP_FIXTURE" >> "$GITHUB_ENV"
+
+      - name: Verify exact Godot MCP pin and addon-backed headless status
         shell: bash
         run: |
           set -euo pipefail
@@ -162,11 +188,17 @@ jobs:
           python3 research/p0-08-godot-headless/mcp_probe.py \
             --npx "$NODE_HOME/bin/npx" \
             --package "$GODOT_MCP_PACKAGE" \
-            --project "$FIXTURE" \
+            --project "$MCP_FIXTURE" \
             --godot "$GODOT_BIN" \
+            --require-addon \
+            --require-scene-backend \
             | tee "$RUNNER_TEMP/godot-mcp-probe.json"
           grep -q '"godot_status_call_succeeded": true' "$RUNNER_TEMP/godot-mcp-probe.json"
-          grep -q '"read_only": true' "$RUNNER_TEMP/godot-mcp-probe.json"
+          grep -q '"addon_installed": true' "$RUNNER_TEMP/godot-mcp-probe.json"
+          if grep -q '"scene_backend": "unavailable"' "$RUNNER_TEMP/godot-mcp-probe.json"; then
+            echo 'Godot MCP addon installed but headless scene backend unavailable' >&2
+            exit 1
+          fi
 
       - name: Record runner resource envelope and repository integrity
         shell: bash
@@ -177,7 +209,7 @@ jobs:
           echo '=== disk ==='
           df -h .
           echo '=== tool sizes ==='
-          du -sh "$RUNNER_TEMP/godot" "$NODE_HOME" "$RUNNER_TEMP/serena-venv" || true
+          du -sh "$RUNNER_TEMP/godot" "$NODE_HOME" "$RUNNER_TEMP/serena-venv" "$MCP_FIXTURE" || true
           echo '=== tracked diff ==='
           git diff --exit-code -- research/p0-08-godot-headless .github/workflows/stage0-godot-headless.yml
           echo 'P0-08 HEADLESS PROBE PASS'
