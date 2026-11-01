@@ -1,0 +1,130 @@
+name: postbaseline-web-workspace-connectors
+
+on:
+  push:
+    branches:
+      - postbaseline/web-workspace-connectors-v1
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'src/amodex/workspace/**'
+      - 'src/amodex/storage/workspace.py'
+      - 'src/amodex/api/workspace_*.py'
+      - 'migrations/postbaseline/0003_web_workspace.sql'
+      - 'migrations/postbaseline/0004_connectors.sql'
+      - 'src/amodex/connectors/**'
+      - 'src/amodex/storage/connectors.py'
+      - 'tests/integration/test_postbaseline_web_workspace.py'
+      - 'tests/integration/test_postbaseline_connectors.py'
+      - '.github/workflows/postbaseline-web-workspace-connectors.yml'
+      - 'docs/POST_BASELINE_WEB_WORKSPACE_CONNECTORS_V1.md'
+
+permissions:
+  contents: read
+
+env:
+  PYTHONNOUSERSITE: '1'
+
+jobs:
+  web-workspace-connectors:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres@sha256:1beaa3084eee2676f20a9cd9928f0bf2c5bf674f8e49f81017912183d377c61c
+        env:
+          POSTGRES_USER: amodex
+          POSTGRES_PASSWORD: amodex
+          POSTGRES_DB: amodex_web_workspace
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U amodex -d amodex_web_workspace"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      AMODEX_TEST_DATABASE_URL: postgresql://amodex:amodex@127.0.0.1:5432/amodex_web_workspace
+
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+
+      - name: Recreate isolated Python runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          BOOTSTRAP_VENV="$RUNNER_TEMP/amodex-uv-bootstrap"
+          env -u PYTHONPATH -u PYTHONHOME python3 -m venv "$BOOTSTRAP_VENV"
+          env -u PYTHONPATH -u PYTHONHOME "$BOOTSTRAP_VENV/bin/python" -m pip install --disable-pip-version-check uv==0.10.0
+          UV_BIN="$BOOTSTRAP_VENV/bin/uv"
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" python install 3.13.5
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" sync --python 3.13.5 --extra dev --frozen
+          echo "UV_BIN=$UV_BIN" >> "$GITHUB_ENV"
+
+      - name: Compile workspace surface
+        shell: bash
+        run: |
+          set -euo pipefail
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --frozen \
+            python -m compileall -q \
+              src/amodex/workspace \
+              src/amodex/storage/workspace.py \
+              src/amodex/api/workspace_app.py \
+              src/amodex/api/workspace_routes.py \
+              src/amodex/api/workspace_web.py
+
+      - name: Prove workspace does not import Hermes implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --frozen python - <<'PY'
+          import sys
+          import amodex.api.workspace_app
+          import amodex.api.workspace_routes
+          import amodex.storage.workspace
+          assert 'amodex.runtime.hermes_worker' not in sys.modules
+          print('WEB_WORKSPACE_HERMES_ISOLATION_OK')
+          PY
+
+      - name: Run web workspace PostgreSQL integration tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --extra dev --frozen pytest -q \
+            tests/integration/test_postbaseline_web_workspace.py
+
+      - name: Run environment product and Stage 6 compatibility regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --extra dev --frozen pytest -q \
+            tests/integration/test_postbaseline_environment_product.py \
+            tests/integration/test_stage6_product_surfaces.py \
+            tests/integration/test_stage6_termux_cli.py
+
+      - name: Prove workspace scope does not enable Step 3 or Step 4
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'GATED_BENCHMARK_PENDING' src/amodex/api/workspace_routes.py
+          grep -q 'DEFERRED_STEP_3' src/amodex/api/workspace_routes.py
+          if grep -R -E 'speech.?to.?text|transcrib|vision_provider|image_generation' src/amodex/workspace src/amodex/api/workspace_*.py; then
+            echo 'Step 3 capability leaked into Step 1/2 branch' >&2
+            exit 1
+          fi
+          echo 'STEP_SCOPE_BOUNDARY_OK'
+
+      - name: Repository hygiene
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          status="$(git status --porcelain)"
+          if [ -n "$status" ]; then
+            printf '%s\n' "$status" >&2
+            exit 1
+          fi
