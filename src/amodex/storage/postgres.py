@@ -1,4 +1,4 @@
-"""PostgreSQL durable state/event repository for Stage 1."""
+"""PostgreSQL durable state/event repository for Amodex runs."""
 
 from __future__ import annotations
 
@@ -34,6 +34,10 @@ class PostgresRunRepository:
         if not dsn:
             raise ValueError("PostgreSQL DSN is required")
         self._dsn = dsn
+
+    @property
+    def dsn(self) -> str:
+        return self._dsn
 
     def migrate(self, migration_path: str | Path) -> None:
         sql = Path(migration_path).read_text(encoding="utf-8")
@@ -75,19 +79,32 @@ class PostgresRunRepository:
                         applied.append(path.name)
         return tuple(applied)
 
-    def create_run(self, *, prompt: str) -> RunRecord:
+    def create_run(self, *, prompt: str, project_id: str | None = None) -> RunRecord:
         run_id = new_uuid7()
         with psycopg.connect(self._dsn, row_factory=dict_row) as conn:
             with conn.transaction():
                 with conn.cursor() as cur:
-                    cur.execute(
-                        """
-                        INSERT INTO amodex_runs (run_id, prompt, state, event_seq)
-                        VALUES (%s, %s, %s, 1)
-                        RETURNING *
-                        """,
-                        (run_id, prompt, RunState.QUEUED.value),
-                    )
+                    project_column = self._column_exists(cur, table="amodex_runs", column="project_id")
+                    if project_id is not None and not project_column:
+                        raise ValueError("project-aware runs require the Stage 6 migration")
+                    if project_column:
+                        cur.execute(
+                            """
+                            INSERT INTO amodex_runs (run_id, project_id, prompt, state, event_seq)
+                            VALUES (%s, %s, %s, %s, 1)
+                            RETURNING *
+                            """,
+                            (run_id, project_id, prompt, RunState.QUEUED.value),
+                        )
+                    else:
+                        cur.execute(
+                            """
+                            INSERT INTO amodex_runs (run_id, prompt, state, event_seq)
+                            VALUES (%s, %s, %s, 1)
+                            RETURNING *
+                            """,
+                            (run_id, prompt, RunState.QUEUED.value),
+                        )
                     row = cur.fetchone()
                     assert row is not None
                     self._insert_event(
@@ -95,7 +112,7 @@ class PostgresRunRepository:
                         run_id=run_id,
                         seq=1,
                         kind=EventKind.RUN_CREATED,
-                        payload={"prompt_length": len(prompt)},
+                        payload={"prompt_length": len(prompt), "project_id": project_id},
                     )
         return _run_from_row(row)
 
@@ -105,6 +122,19 @@ class PostgresRunRepository:
                 cur.execute("SELECT * FROM amodex_runs WHERE run_id = %s", (run_id,))
                 row = cur.fetchone()
         return _run_from_row(row) if row else None
+
+    def list_runs(self, *, project_id: str | None = None, limit: int = 100) -> tuple[RunRecord, ...]:
+        with psycopg.connect(self._dsn, row_factory=dict_row) as conn:
+            with conn.cursor() as cur:
+                if project_id is not None and self._column_exists(cur, table="amodex_runs", column="project_id"):
+                    cur.execute(
+                        "SELECT * FROM amodex_runs WHERE project_id=%s ORDER BY created_at DESC LIMIT %s",
+                        (project_id, limit),
+                    )
+                else:
+                    cur.execute("SELECT * FROM amodex_runs ORDER BY created_at DESC LIMIT %s", (limit,))
+                rows = cur.fetchall()
+        return tuple(_run_from_row(row) for row in rows)
 
     def list_events(self, run_id: str) -> tuple[RunEvent, ...]:
         with psycopg.connect(self._dsn, row_factory=dict_row) as conn:
@@ -116,20 +146,40 @@ class PostgresRunRepository:
                 rows = cur.fetchall()
         return tuple(_event_from_row(row) for row in rows)
 
+    def get_run_control_state(self, run_id: str) -> str:
+        with psycopg.connect(self._dsn) as conn:
+            with conn.cursor() as cur:
+                if not self._table_exists(cur, "amodex_run_controls"):
+                    return "ACTIVE"
+                cur.execute("SELECT desired_state FROM amodex_run_controls WHERE run_id=%s", (run_id,))
+                row = cur.fetchone()
+        return str(row[0]) if row else "ACTIVE"
+
     def claim_next(self, *, worker_id: str, lease_seconds: int = 30) -> RunRecord | None:
         expires_at = datetime.now(timezone.utc) + timedelta(seconds=lease_seconds)
         with psycopg.connect(self._dsn, row_factory=dict_row) as conn:
             with conn.transaction():
                 with conn.cursor() as cur:
+                    controls = self._table_exists(cur, "amodex_run_controls")
+                    control_filter = """
+                        AND NOT EXISTS (
+                            SELECT 1 FROM amodex_run_controls c
+                            WHERE c.run_id = amodex_runs.run_id
+                              AND c.desired_state IN ('PAUSED','CANCELLED')
+                        )
+                    """ if controls else ""
                     cur.execute(
-                        """
+                        f"""
                         SELECT * FROM amodex_runs
-                        WHERE state = %s
-                           OR (
-                               state IN (%s, %s)
-                               AND lease_expires_at IS NOT NULL
-                               AND lease_expires_at < NOW()
-                           )
+                        WHERE (
+                            state = %s
+                            OR (
+                                state IN (%s, %s)
+                                AND lease_expires_at IS NOT NULL
+                                AND lease_expires_at < NOW()
+                            )
+                        )
+                        {control_filter}
                         ORDER BY created_at, run_id
                         FOR UPDATE SKIP LOCKED
                         LIMIT 1
@@ -383,6 +433,24 @@ class PostgresRunRepository:
                     return _run_from_row(updated)
 
     @staticmethod
+    def _column_exists(cur: psycopg.Cursor[Any], *, table: str, column: str) -> bool:
+        cur.execute(
+            """
+            SELECT EXISTS(
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema='public' AND table_name=%s AND column_name=%s
+            )
+            """,
+            (table, column),
+        )
+        return bool(cur.fetchone()[0])
+
+    @staticmethod
+    def _table_exists(cur: psycopg.Cursor[Any], table: str) -> bool:
+        cur.execute("SELECT to_regclass(%s) IS NOT NULL", (f"public.{table}",))
+        return bool(cur.fetchone()[0])
+
+    @staticmethod
     def _lock_owned_run(
         cur: psycopg.Cursor[Any],
         *,
@@ -419,8 +487,10 @@ class PostgresRunRepository:
 def _run_from_row(row: dict[str, Any]) -> RunRecord:
     raw_request_key = row.get("provider_request_key")
     raw_request_state = row.get("provider_request_state") or ProviderRequestState.NONE.value
+    raw_project_id = row.get("project_id")
     return RunRecord(
         run_id=str(row["run_id"]),
+        project_id=str(raw_project_id) if raw_project_id is not None else None,
         prompt=row["prompt"],
         state=RunState(row["state"]),
         provider=row["provider"],
