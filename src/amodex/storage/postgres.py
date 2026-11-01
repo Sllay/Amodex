@@ -439,16 +439,16 @@ class PostgresRunRepository:
             SELECT EXISTS(
                 SELECT 1 FROM information_schema.columns
                 WHERE table_schema='public' AND table_name=%s AND column_name=%s
-            )
+            ) AS present
             """,
             (table, column),
         )
-        return bool(cur.fetchone()[0])
+        return _scalar_bool(cur.fetchone())
 
     @staticmethod
     def _table_exists(cur: psycopg.Cursor[Any], table: str) -> bool:
-        cur.execute("SELECT to_regclass(%s) IS NOT NULL", (f"public.{table}",))
-        return bool(cur.fetchone()[0])
+        cur.execute("SELECT to_regclass(%s) IS NOT NULL AS present", (f"public.{table}",))
+        return _scalar_bool(cur.fetchone())
 
     @staticmethod
     def _lock_owned_run(
@@ -482,6 +482,14 @@ class PostgresRunRepository:
             """,
             (new_uuid7(), run_id, seq, kind.value, json.dumps(payload, sort_keys=True)),
         )
+
+
+def _scalar_bool(row: Any) -> bool:
+    if row is None:
+        return False
+    if isinstance(row, dict):
+        return bool(row["present"])
+    return bool(row[0])
 
 
 def _run_from_row(row: dict[str, Any]) -> RunRecord:
