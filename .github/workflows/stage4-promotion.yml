@@ -1,0 +1,117 @@
+name: stage4-git-promotion-v1-safe
+
+on:
+  push:
+    branches:
+      - stage/4-git-promotion
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'src/amodex/contracts/**'
+      - 'src/amodex/director/**'
+      - 'src/amodex/git/**'
+      - 'src/amodex/storage/**'
+      - 'src/amodex/integrations/**'
+      - 'src/amodex/benchmarks/**'
+      - 'migrations/stage4/**'
+      - 'tests/integration/test_stage4_*.py'
+      - '.github/workflows/stage4-promotion.yml'
+
+permissions:
+  contents: read
+
+env:
+  PYTHONNOUSERSITE: '1'
+
+jobs:
+  promotion-v1-safe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres@sha256:1beaa3084eee2676f20a9cd9928f0bf2c5bf674f8e49f81017912183d377c61c
+        env:
+          POSTGRES_USER: amodex
+          POSTGRES_PASSWORD: amodex
+          POSTGRES_DB: amodex_stage4
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U amodex -d amodex_stage4"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      AMODEX_TEST_DATABASE_URL: postgresql://amodex:amodex@127.0.0.1:5432/amodex_stage4
+
+    steps:
+      - name: Checkout exact Amodex revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+
+      - name: Recreate runner-owned Python runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          BOOTSTRAP_VENV="$RUNNER_TEMP/amodex-uv-bootstrap"
+          env -u PYTHONPATH -u PYTHONHOME python3 -m venv "$BOOTSTRAP_VENV"
+          env -u PYTHONPATH -u PYTHONHOME "$BOOTSTRAP_VENV/bin/python" -m pip install --disable-pip-version-check uv==0.10.0
+          UV_BIN="$BOOTSTRAP_VENV/bin/uv"
+          test -x "$UV_BIN"
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" python install 3.13.5
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" sync --python 3.13.5 --extra dev --frozen
+          echo "UV_BIN=$UV_BIN" >> "$GITHUB_ENV"
+
+      - name: Prove Promotion Gate is independent from Hermes Python/runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --extra dev --frozen \
+            python -I -c 'import sys; import amodex.git.promotion; assert "amodex.runtime.hermes_worker" not in sys.modules; print("promotion-hermes-isolation=ok")'
+
+      - name: Run Stage 4 slices and Stage 0/1/2/3 deterministic regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --extra dev --frozen pytest -q \
+            tests/unit \
+            tests/contract \
+            tests/integration/test_stage1_vertical_slice.py \
+            tests/integration/test_stage1_crash_recovery.py \
+            tests/integration/test_stage1_migrations.py \
+            tests/integration/test_stage1_provider_failures.py \
+            tests/integration/test_stage2_scoped_tools.py \
+            tests/integration/test_stage2_checkpoint_lifecycle.py \
+            tests/integration/test_stage3_ingestion_context.py \
+            tests/integration/test_stage3_dag_orchestration.py \
+            tests/integration/test_stage4_promotion_lifecycle.py \
+            tests/integration/test_stage4_stale_crash.py \
+            tests/integration/test_stage4_engine_integration.py
+
+      - name: Black-Islands BI-0 and BI-1 live read-only benchmark
+        shell: bash
+        run: |
+          set -euo pipefail
+          BLACK_ISLANDS="$RUNNER_TEMP/black-islands"
+          git clone --depth 1 https://github.com/Sllay/Black-Islands.git "$BLACK_ISLANDS"
+          BEFORE_SHA="$(git -C "$BLACK_ISLANDS" rev-parse HEAD)"
+          BEFORE_BRANCH="$(git -C "$BLACK_ISLANDS" branch --show-current)"
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --extra dev --frozen \
+            python -m amodex.benchmarks.black_islands "$BLACK_ISLANDS" | tee "$RUNNER_TEMP/black-islands-bi01.json"
+          AFTER_SHA="$(git -C "$BLACK_ISLANDS" rev-parse HEAD)"
+          AFTER_BRANCH="$(git -C "$BLACK_ISLANDS" branch --show-current)"
+          test "$BEFORE_SHA" = "$AFTER_SHA"
+          test "$BEFORE_BRANCH" = "$AFTER_BRANCH"
+          test -z "$(git -C "$BLACK_ISLANDS" status --porcelain)"
+          test "$(git -C "$BLACK_ISLANDS" for-each-ref refs/heads --format='%(refname:short)' | wc -l)" -eq 1
+          echo "black-islands-read-only-sha=$AFTER_SHA"
+
+      - name: Repository hygiene
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          test -z "$(git status --porcelain)"
