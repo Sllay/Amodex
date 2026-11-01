@@ -21,6 +21,7 @@ dev = [
 ]
 
 [project.scripts]
+amodex = "amodex.cli:main"
 amodex-contract = "amodex.contracts.cli:main"
 amodex-worker = "amodex.runtime.worker:main"
 

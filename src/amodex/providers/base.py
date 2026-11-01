@@ -8,8 +8,15 @@ from typing import Protocol
 from amodex.runtime.models import ProviderResponse
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True)
 class ProviderFailure(Exception):
+    """Normalized provider failure that remains a normal mutable Exception.
+
+    Exceptions must allow Python/runtime machinery to assign traceback/context
+    attributes. Freezing an Exception dataclass breaks that behavior on Python
+    3.13 during timeout/error propagation.
+    """
+
     code: str
     message: str
     retry_after_seconds: float | None = None

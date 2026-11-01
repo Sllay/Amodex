@@ -1,4 +1,4 @@
-"""Stage 1 durable run/event models."""
+"""Durable run/event models used by the Amodex control plane."""
 
 from __future__ import annotations
 
@@ -17,8 +17,10 @@ class RunState(StrEnum):
     CLAIMED = "CLAIMED"
     RUNNING = "RUNNING"
     WAITING_PROVIDER = "WAITING_PROVIDER"
+    PAUSED = "PAUSED"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
     UNKNOWN_OUTCOME = "UNKNOWN_OUTCOME"
     BLOCKED = "BLOCKED"
 
@@ -39,12 +41,19 @@ class EventKind(StrEnum):
     PROVIDER_OUTCOME_UNKNOWN = "PROVIDER_OUTCOME_UNKNOWN"
     RUN_COMPLETED = "RUN_COMPLETED"
     RUN_FAILED = "RUN_FAILED"
+    RUN_PAUSE_REQUESTED = "RUN_PAUSE_REQUESTED"
+    RUN_PAUSED = "RUN_PAUSED"
+    RUN_RESUME_REQUESTED = "RUN_RESUME_REQUESTED"
+    RUN_RESUMED = "RUN_RESUMED"
+    RUN_CANCEL_REQUESTED = "RUN_CANCEL_REQUESTED"
+    RUN_CANCELLED = "RUN_CANCELLED"
     LEASE_EXPIRED_RECLAIMED = "LEASE_EXPIRED_RECLAIMED"
 
 
 class RunRecord(ContractModel):
     schema_version: int = 1
     run_id: UUIDv7Str
+    project_id: UUIDv7Str | None = None
     prompt: str = Field(min_length=1, max_length=20000)
     state: RunState
     provider: str | None = None
@@ -74,6 +83,7 @@ class RunEvent(ContractModel):
 class CreateRunRequest(ContractModel):
     schema_version: int = 1
     prompt: str = Field(min_length=1, max_length=20000)
+    project_id: UUIDv7Str | None = None
 
 
 class ProviderUsage(ContractModel):

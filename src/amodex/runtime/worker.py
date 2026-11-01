@@ -1,4 +1,4 @@
-"""Stage 1 worker vertical slice."""
+"""Durable run worker with cooperative Stage 6 controls."""
 
 from __future__ import annotations
 
@@ -20,10 +20,38 @@ class Stage1Worker:
     governor: ProviderGovernor
     worker_id: str
 
+    def _apply_control_if_requested(self, run: RunRecord) -> RunRecord | None:
+        desired = self.repository.get_run_control_state(run.run_id)
+        if desired == "PAUSED":
+            return self.repository.transition(
+                run_id=run.run_id,
+                worker_id=self.worker_id,
+                fencing_token=run.fencing_token,
+                state=RunState.PAUSED,
+                kind=EventKind.RUN_PAUSED,
+                payload={"reason": "durable owner pause applied before next provider side effect"},
+                release_lease=True,
+            )
+        if desired == "CANCELLED":
+            return self.repository.transition(
+                run_id=run.run_id,
+                worker_id=self.worker_id,
+                fencing_token=run.fencing_token,
+                state=RunState.CANCELLED,
+                kind=EventKind.RUN_CANCELLED,
+                payload={"reason": "durable owner cancellation applied before next provider side effect"},
+                release_lease=True,
+            )
+        return None
+
     def process_once(self, *, free_quota_available: bool = True) -> RunRecord | None:
         run = self.repository.claim_next(worker_id=self.worker_id)
         if run is None:
             return None
+
+        controlled = self._apply_control_if_requested(run)
+        if controlled is not None:
+            return controlled
 
         if run.provider_request_state == ProviderRequestState.STARTED:
             return self.repository.transition(
@@ -102,6 +130,10 @@ class Stage1Worker:
             model=route.model,
         )
 
+        controlled = self._apply_control_if_requested(run)
+        if controlled is not None:
+            return controlled
+
         request_key = new_uuid7()
         run = self.repository.mark_provider_request_started(
             run_id=run.run_id,
@@ -156,6 +188,23 @@ class Stage1Worker:
             request_key=request_key,
             response=response,
         )
+
+        if self.repository.get_run_control_state(run.run_id) == "CANCELLED":
+            return self.repository.transition(
+                run_id=run.run_id,
+                worker_id=self.worker_id,
+                fencing_token=run.fencing_token,
+                state=RunState.CANCELLED,
+                kind=EventKind.RUN_CANCELLED,
+                payload={
+                    "reason": "cancellation arrived after provider request started",
+                    "provider_result_persisted": True,
+                },
+                provider=response.provider,
+                model=response.model,
+                release_lease=True,
+            )
+
         return self.repository.transition(
             run_id=run.run_id,
             worker_id=self.worker_id,
