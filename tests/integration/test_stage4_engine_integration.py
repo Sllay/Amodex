@@ -96,6 +96,11 @@ def test_scope_filename_cannot_expand_implicit_context_topic(tmp_path: Path) -> 
         "# Water\nWater containers also participate in save migration.\n",
         encoding="utf-8",
     )
+    (tmp_path / "harness" / "evidence" / "water").mkdir(parents=True)
+    (tmp_path / "harness" / "evidence" / "water" / "README.md").write_text(
+        "# Water evidence\nHistorical runtime evidence for water simulation.\n",
+        encoding="utf-8",
+    )
     (tmp_path / "game" / "inventory").mkdir(parents=True)
     (tmp_path / "game" / "inventory" / "water_container.gd").write_text(
         "class_name WaterContainer\n",
@@ -120,7 +125,9 @@ def test_scope_filename_cannot_expand_implicit_context_topic(tmp_path: Path) -> 
     )
     task = PlannedTask(
         task_id="inventory-task",
-        objective="Update transactional inventory save migration behavior",
+        objective=(
+            "Update transactional inventory save migration behavior and evidence gates"
+        ),
         write_paths=("game/inventory/water_container.gd",),
         non_goals=("Do not redesign water systems",),
         acceptance_criteria=("Inventory tests pass",),
@@ -136,5 +143,6 @@ def test_scope_filename_cannot_expand_implicit_context_topic(tmp_path: Path) -> 
     assert "game/inventory/water_container.gd" in paths
     assert "docs/architecture/inventory.md" in paths
     assert "docs/architecture/water.md" not in paths
+    assert "harness/evidence/water/README.md" not in paths
     assert "game/water/water_domain.gd" not in paths
     assert "game/water/water_renderer.gd" not in paths
