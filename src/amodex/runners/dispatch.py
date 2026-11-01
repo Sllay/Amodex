@@ -44,7 +44,7 @@ class GitHubActionsDispatcher:
                 headers={
                     "accept": "application/vnd.github+json",
                     "authorization": f"Bearer {self.token}",
-                    "x-github-api-version": "2026-03-10",
+                    "x-github-api-version": "2022-11-28",
                 },
                 json={"ref": self.ref, "inputs": {"job_id": job_id}},
                 timeout=self.timeout_seconds,
