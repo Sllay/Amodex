@@ -146,15 +146,28 @@ class PlannedTask:
     required_capabilities: tuple[str, ...] = ()
     acceptance_criteria: tuple[str, ...] = ()
     reason_category: str | None = None
+    architecture_change: bool = False
+    architecture_decision_request: str | None = None
+    requires_paid_resources: bool = False
+    requests_promotion: bool = False
 
     def __post_init__(self) -> None:
         if not self.task_id.strip():
             raise ValueError("task_id must be non-empty")
         if not self.objective.strip():
             raise ValueError(f"{self.task_id}: objective must be non-empty")
+        if not self.non_goals:
+            raise ValueError(f"{self.task_id}: non_goals are required")
         if not self.acceptance_criteria:
             raise ValueError(f"{self.task_id}: acceptance_criteria are required")
-        for field_name in ("dependencies", "write_paths", "read_paths", "required_capabilities"):
+        for field_name in (
+            "dependencies",
+            "write_paths",
+            "read_paths",
+            "non_goals",
+            "required_capabilities",
+            "acceptance_criteria",
+        ):
             values = getattr(self, field_name)
             if len(values) != len(set(values)):
                 raise ValueError(f"{self.task_id}: duplicate {field_name} entries")
@@ -169,6 +182,12 @@ class TaskPlan:
     schema_version: int = 1
 
     def __post_init__(self) -> None:
+        if not self.project_id.strip():
+            raise ValueError("project_id must be non-empty")
+        if not self.objective.strip():
+            raise ValueError("plan objective must be non-empty")
+        if not self.tasks:
+            raise ValueError("task plan must contain at least one task")
         ids = [task.task_id for task in self.tasks]
         if len(ids) != len(set(ids)):
             raise ValueError("task IDs must be unique")
