@@ -20,6 +20,9 @@ class StaleContextError(RuntimeError):
 
 
 _TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]{2,}")
+_IDENTIFIER_PART_RE = re.compile(
+    r"[A-Z]+(?=[A-Z][a-z]|\d|$)|[A-Z]?[a-z]+|[A-Z]+|\d+"
+)
 _STOP = {
     "the",
     "and",
@@ -54,11 +57,25 @@ _STOP = {
 
 
 def _tokens(text: str) -> set[str]:
-    return {
-        token.lower()
-        for token in _TOKEN_RE.findall(text)
-        if token.lower() not in _STOP
-    }
+    """Tokenize prose plus common source-code identifier conventions.
+
+    ``BillingService`` and ``billing_api`` both expose ``billing`` while keeping
+    their full normalized token. This lets an objective reference a source symbol
+    and still anchor focused documentation without using unrelated scope paths as
+    global documentation topics.
+    """
+
+    result: set[str] = set()
+    for raw in _TOKEN_RE.findall(text):
+        normalized = raw.lower()
+        if normalized not in _STOP:
+            result.add(normalized)
+        for snake_part in raw.split("_"):
+            for part in _IDENTIFIER_PART_RE.findall(snake_part):
+                lowered = part.lower()
+                if len(lowered) >= 3 and lowered not in _STOP:
+                    result.add(lowered)
+    return result
 
 
 def _path_tokens(path: str) -> set[str]:
