@@ -66,6 +66,7 @@ def test_s3_v1_v2_ingestion_conflicts_selective_context_and_provenance(tmp_path:
         objective="Update BillingService charge behavior against billing_api v2",
         write_paths=("src/billing/service.py",),
         read_paths=("src/core/money.py",),
+        non_goals=("Do not rewrite unrelated modules",),
         acceptance_criteria=("billing tests pass",),
     )
     capsule = compile_context(snapshot, task, current_base_sha="a" * 40)
