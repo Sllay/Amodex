@@ -41,6 +41,13 @@ _TRANSIENT_PROBE_ERRORS = {
     "PROVIDER_SERVER_ERROR",
 }
 
+_LIVE_PROBE_EXPECTED_TEXT = "AMODEX_LIVE_OK"
+_LIVE_PROBE_PROMPT = (
+    'Return exactly one JSON object and no prose or markdown: '
+    '{"text":"AMODEX_LIVE_OK"}. '
+    'The JSON object must contain exactly one non-empty string field named "text".'
+)
+
 
 def _provider(name: str, key: str):
     if name == "groq":
@@ -56,11 +63,18 @@ def _probe_once(*, provider_name: str, model: str, client, attempt: int):
     started = time.perf_counter()
     response = client.generate(
         model=model,
-        prompt="Reply with a very short confirmation that this zero-cost Amodex provider probe works.",
+        prompt=_LIVE_PROBE_PROMPT,
         request_key=f"stage5-live-{provider_name}-attempt-{attempt}",
     )
     latency_ms = (time.perf_counter() - started) * 1000.0
     return response, latency_ms
+
+
+def test_live_probe_prompt_matches_openai_compatible_json_contract() -> None:
+    assert 'JSON object' in _LIVE_PROBE_PROMPT
+    assert '"text"' in _LIVE_PROBE_PROMPT
+    assert _LIVE_PROBE_EXPECTED_TEXT in _LIVE_PROBE_PROMPT
+    assert _LIVE_PROBE_PROMPT.count('{"text":"AMODEX_LIVE_OK"}') == 1
 
 
 @pytest.mark.parametrize("provider_name,key_env,billing_env,model_env,default_model", PROBES)
@@ -112,7 +126,7 @@ def test_configured_live_free_provider_probe(
 
     assert response.provider == provider_name
     assert response.model == model
-    assert response.text.strip()
+    assert response.text.strip() == _LIVE_PROBE_EXPECTED_TEXT
     print(
         f"stage5-live provider={provider_name} model={model} attempt={attempt} "
         f"latency_ms={latency_ms:.1f} tokens={response.usage.total_tokens}"
