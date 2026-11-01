@@ -62,7 +62,7 @@ def _tokens(text: str) -> set[str]:
     ``BillingService`` and ``billing_api`` both expose ``billing`` while keeping
     their full normalized token. This lets an objective reference a source symbol
     and still anchor focused documentation without using unrelated scope paths as
-    global documentation topics.
+    global context topics.
     """
 
     result: set[str] = set()
@@ -84,6 +84,13 @@ def _path_tokens(path: str) -> set[str]:
     )
 
 
+def _symbol_tokens(entry: RepositoryEntry) -> set[str]:
+    result: set[str] = set()
+    for symbol in entry.symbols:
+        result.update(_tokens(symbol))
+    return result
+
+
 def _provenance(entry: RepositoryEntry) -> Provenance:
     return Provenance(
         path=entry.path,
@@ -95,30 +102,25 @@ def _provenance(entry: RepositoryEntry) -> Provenance:
     )
 
 
-def _relevance(
-    entry: RepositoryEntry,
-    *,
-    objective_tokens: set[str],
-    scope_tokens: set[str],
-) -> int:
-    """Score implicit context without letting filenames widen documentation scope.
+def _relevance(entry: RepositoryEntry, *, objective_tokens: set[str]) -> int:
+    """Score implicit context strictly from the semantic task objective.
 
-    ``objective_tokens`` represent the Director's semantic task theme. Explicit
-    task paths contribute to ``scope_tokens`` only for implementation discovery.
-    A filename such as ``water_container.gd`` therefore cannot make the whole
-    water architecture relevant to an inventory task merely because that file is
-    inside the authorized implementation scope.
+    Exact task read/write paths are already admitted separately. They therefore
+    must not contribute their path words to the global relevance vocabulary:
+    authorizing ``water_container.gd`` for an inventory task may admit that exact
+    file, but it must not implicitly disclose every ``water_*`` source or the
+    water architecture. Structural neighbors enter through explicit scope,
+    one-hop imports, or adjacent tests rather than token spillover.
     """
+
+    path_overlap = len(_path_tokens(entry.path) & objective_tokens)
+    symbol_overlap = len(_symbol_tokens(entry) & objective_tokens)
 
     if entry.kind in {
         FileKind.DOCUMENTATION,
         FileKind.DECISION,
         FileKind.CONTRACT,
     }:
-        path_overlap = len(_path_tokens(entry.path) & objective_tokens)
-        symbol_overlap = len(
-            {symbol.lower() for symbol in entry.symbols} & objective_tokens
-        )
         if path_overlap == 0 and symbol_overlap == 0:
             return 0
         score = path_overlap * 4 + symbol_overlap * 8
@@ -131,8 +133,6 @@ def _relevance(
             score += 2
         return score
 
-    path_overlap = len(_path_tokens(entry.path) & scope_tokens)
-    symbol_overlap = len({symbol.lower() for symbol in entry.symbols} & scope_tokens)
     score = path_overlap * 4 + symbol_overlap * 8
     if entry.authority >= DocumentAuthority.FOCUSED_SPEC and score:
         score += 2
@@ -152,9 +152,6 @@ def compile_context(
         )
 
     objective_tokens = _tokens(task.objective)
-    scope_tokens = set(objective_tokens)
-    for path in (*task.write_paths, *task.read_paths):
-        scope_tokens.update(_path_tokens(path))
 
     by_path = snapshot.by_path
     selected: dict[str, tuple[RepositoryEntry, str]] = {}
@@ -181,11 +178,7 @@ def compile_context(
             or entry.kind == FileKind.SECRET
         ):
             continue
-        score = _relevance(
-            entry,
-            objective_tokens=objective_tokens,
-            scope_tokens=scope_tokens,
-        )
+        score = _relevance(entry, objective_tokens=objective_tokens)
         if score <= 0:
             continue
         if entry.kind in {
@@ -206,8 +199,8 @@ def compile_context(
             and score < 8
         ):
             continue
-        # High authority is not permission to preload. A focused spec or ADR is
-        # selected only when the task objective actually anchors its topic.
+        # High authority is not permission to preload. Focused context is
+        # selected only when the semantic objective actually anchors its topic.
         if score >= 4:
             include(entry, f"relevant project fact score={score}")
 
@@ -218,6 +211,7 @@ def compile_context(
     selected_imports: set[str] = set()
     for path in selected_paths:
         selected_imports.update(by_path[path].imports)
+
     for entry in snapshot.entries:
         if entry.path in selected or entry.safe_text is None:
             continue
@@ -245,6 +239,7 @@ def compile_context(
                 provenance=_provenance(entry),
             )
         )
+
     excluded = tuple(
         entry.path
         for entry in snapshot.entries
