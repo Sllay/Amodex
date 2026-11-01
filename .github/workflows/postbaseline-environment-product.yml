@@ -121,7 +121,7 @@ jobs:
             echo 'provider secret must never enter disposable project runner' >&2
             exit 1
           fi
-          grep -q 'TARGET_ENGINE == '\''godot'\''' "$workflow"
+          grep -Fq "TARGET_ENGINE == 'godot'" "$workflow"
           grep -q 'amodex.runners.client claim' "$workflow"
           grep -q 'amodex.runners.client report' "$workflow"
           echo 'RUNNER_WORKFLOW_BOUNDARY_OK'
