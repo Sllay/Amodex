@@ -82,7 +82,7 @@ return PlayerController
     assert GodotIntegrationAdapter().detect(str(tmp_path)) is None
 
 
-def test_scope_filename_cannot_expand_documentation_topic(tmp_path: Path) -> None:
+def test_scope_filename_cannot_expand_implicit_context_topic(tmp_path: Path) -> None:
     (tmp_path / "AGENTS.md").write_text(
         "# Contract\nRepository context uses progressive disclosure.\n",
         encoding="utf-8",
@@ -99,6 +99,15 @@ def test_scope_filename_cannot_expand_documentation_topic(tmp_path: Path) -> Non
     (tmp_path / "game" / "inventory").mkdir(parents=True)
     (tmp_path / "game" / "inventory" / "water_container.gd").write_text(
         "class_name WaterContainer\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "game" / "water").mkdir(parents=True)
+    (tmp_path / "game" / "water" / "water_domain.gd").write_text(
+        "class_name WaterDomain\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "game" / "water" / "water_renderer.gd").write_text(
+        "class_name WaterRenderer\n",
         encoding="utf-8",
     )
 
@@ -125,3 +134,5 @@ def test_scope_filename_cannot_expand_documentation_topic(tmp_path: Path) -> Non
     assert "game/inventory/water_container.gd" in paths
     assert "docs/architecture/inventory.md" in paths
     assert "docs/architecture/water.md" not in paths
+    assert "game/water/water_domain.gd" not in paths
+    assert "game/water/water_renderer.gd" not in paths
