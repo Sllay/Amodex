@@ -10,10 +10,12 @@ on:
     paths:
       - 'src/amodex/model_intelligence/**'
       - 'src/amodex/storage/model_intelligence.py'
+      - 'src/amodex/providers/routing.py'
       - 'src/amodex/api/model_intelligence_*.py'
       - 'src/amodex/api/workspace_app.py'
       - 'migrations/postbaseline/0006_model_intelligence.sql'
       - 'tests/integration/test_postbaseline_model_intelligence.py'
+      - 'tests/integration/test_postbaseline_model_intelligence_resilience.py'
       - '.github/workflows/postbaseline-model-intelligence.yml'
       - 'docs/POST_BASELINE_MODEL_INTELLIGENCE_V1.md'
 
@@ -70,6 +72,7 @@ jobs:
             python -m compileall -q \
               src/amodex/model_intelligence \
               src/amodex/storage/model_intelligence.py \
+              src/amodex/providers/routing.py \
               src/amodex/api/model_intelligence_routes.py \
               src/amodex/api/model_intelligence_web.py \
               src/amodex/api/workspace_app.py
@@ -84,6 +87,7 @@ jobs:
           import amodex.model_intelligence.benchmarks
           import amodex.model_intelligence.service
           import amodex.storage.model_intelligence
+          import amodex.providers.routing
           import amodex.api.model_intelligence_routes
           import amodex.api.model_intelligence_web
           import amodex.api.workspace_app
@@ -96,7 +100,8 @@ jobs:
         run: |
           set -euo pipefail
           env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --extra dev --frozen pytest -q \
-            tests/integration/test_postbaseline_model_intelligence.py
+            tests/integration/test_postbaseline_model_intelligence.py \
+            tests/integration/test_postbaseline_model_intelligence_resilience.py
 
       - name: Run Step 3 multimodal regression
         shell: bash
@@ -132,7 +137,7 @@ jobs:
             tests/integration/test_stage6_product_surfaces.py \
             tests/integration/test_stage6_termux_cli.py
 
-      - name: Prove zero-cost and bounded-fallback policy
+      - name: Prove zero-cost bounded-fallback and measured capability policy
         shell: bash
         run: |
           set -euo pipefail
@@ -141,7 +146,8 @@ jobs:
           grep -q 'paid_fallback.*DENIED' src/amodex/model_intelligence/service.py
           grep -q 'vision_success_rate=None' src/amodex/model_intelligence/service.py
           grep -q 'tool_calling_transport_measured.*False' src/amodex/model_intelligence/service.py
-          echo 'STEP4_ZERO_COST_BOUNDARY_OK'
+          grep -q 'tool-calling transport unmeasured' src/amodex/providers/routing.py
+          echo 'STEP4_ZERO_COST_AND_MEASUREMENT_BOUNDARY_OK'
 
       - name: Prove lifecycle cannot be forced through public API
         shell: bash
@@ -154,7 +160,7 @@ jobs:
           grep -q 'benchmark_route' src/amodex/api/model_intelligence_routes.py
           echo 'STEP4_MEASURED_PROMOTION_BOUNDARY_OK'
 
-      - name: Prove benchmark and decision storage excludes secrets and raw binary
+      - name: Prove benchmark decision and crash-recovery storage boundaries
         shell: bash
         run: |
           set -euo pipefail
@@ -166,7 +172,8 @@ jobs:
           grep -q 'owner_message_id UUID NOT NULL UNIQUE REFERENCES amodex_workspace_messages(message_id)' migrations/postbaseline/0006_model_intelligence.sql
           grep -q 'result_message_id UUID REFERENCES amodex_workspace_messages(message_id)' migrations/postbaseline/0006_model_intelligence.sql
           grep -q "attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count BETWEEN 0 AND 2)" migrations/postbaseline/0006_model_intelligence.sql
-          echo 'STEP4_STORAGE_BOUNDARY_OK'
+          grep -q "WHERE status='STARTED' AND updated_at < %s" src/amodex/storage/model_intelligence.py
+          echo 'STEP4_STORAGE_AND_RECOVERY_BOUNDARY_OK'
 
       - name: Repository hygiene
         shell: bash
