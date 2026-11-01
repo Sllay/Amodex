@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from amodex.director.context import compile_context
 from amodex.director.ingestion import ingest_repository
+from amodex.director.models import PlannedTask
 from amodex.integrations.godot import GodotIntegrationAdapter
 from amodex.integrations.models import IntegrationCapability
 
@@ -13,8 +15,12 @@ def test_godot_integration_profile_is_capability_based(tmp_path: Path) -> None:
         '[application]\nconfig/name="Fixture"\n', encoding="utf-8"
     )
     (tmp_path / "scripts" / "mcp").mkdir(parents=True)
-    (tmp_path / "scripts" / "mcp" / "godot_mcp.sh").write_text("#!/bin/sh\n", encoding="utf-8")
-    (tmp_path / "scripts" / "mcp" / "serena_mcp.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+    (tmp_path / "scripts" / "mcp" / "godot_mcp.sh").write_text(
+        "#!/bin/sh\n", encoding="utf-8"
+    )
+    (tmp_path / "scripts" / "mcp" / "serena_mcp.sh").write_text(
+        "#!/bin/sh\n", encoding="utf-8"
+    )
     (tmp_path / "AGENTS.md").write_text(
         """# Fixture contract
 The Godot project root is **`game/`**.
@@ -42,8 +48,12 @@ Two agents must not edit the same files concurrently.
     assert IntegrationCapability.DIAGNOSTICS in profile.capabilities
 
 
-def test_ingestion_recognizes_luau_without_granting_engine_authority(tmp_path: Path) -> None:
-    (tmp_path / "AGENTS.md").write_text("# Generic project contract\n", encoding="utf-8")
+def test_ingestion_recognizes_luau_without_granting_engine_authority(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "AGENTS.md").write_text(
+        "# Generic project contract\n", encoding="utf-8"
+    )
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "PlayerController.luau").write_text(
         """local PlayerController = {}
@@ -70,3 +80,48 @@ return PlayerController
     # Language recognition is not equivalent to claiming Roblox/Studio support.
     # A future Roblox adapter must be registered explicitly and prove its tools.
     assert GodotIntegrationAdapter().detect(str(tmp_path)) is None
+
+
+def test_scope_filename_cannot_expand_documentation_topic(tmp_path: Path) -> None:
+    (tmp_path / "AGENTS.md").write_text(
+        "# Contract\nRepository context uses progressive disclosure.\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "docs" / "architecture").mkdir(parents=True)
+    (tmp_path / "docs" / "architecture" / "inventory.md").write_text(
+        "# Inventory\nInventory transactions and save migration rules.\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "docs" / "architecture" / "water.md").write_text(
+        "# Water\nWater containers also participate in save migration.\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "game" / "inventory").mkdir(parents=True)
+    (tmp_path / "game" / "inventory" / "water_container.gd").write_text(
+        "class_name WaterContainer\n",
+        encoding="utf-8",
+    )
+
+    snapshot = ingest_repository(
+        tmp_path,
+        project_id="context-theme-fixture",
+        base_sha="b" * 40,
+    )
+    task = PlannedTask(
+        task_id="inventory-task",
+        objective="Update transactional inventory save migration behavior",
+        write_paths=("game/inventory/water_container.gd",),
+        non_goals=("Do not redesign water systems",),
+        acceptance_criteria=("Inventory tests pass",),
+    )
+    capsule = compile_context(
+        snapshot,
+        task,
+        current_base_sha="b" * 40,
+    )
+    paths = {section.path for section in capsule.sections}
+
+    assert "AGENTS.md" in paths
+    assert "game/inventory/water_container.gd" in paths
+    assert "docs/architecture/inventory.md" in paths
+    assert "docs/architecture/water.md" not in paths
