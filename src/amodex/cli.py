@@ -210,14 +210,14 @@ def execute(args: argparse.Namespace, client: AmodexClient) -> Any:
     if args.command == "run":
         if bool(args.environment) != bool(args.session):
             raise CliError("--environment and --session must be supplied together")
+        if args.environment and args.session and not args.project:
+            raise CliError("Environment runs require --project")
         run = client.request(
             "POST",
             "/v1/runs",
             payload={"prompt": args.objective, "project_id": args.project},
         )
         if args.environment and args.session:
-            if not args.project:
-                raise CliError("Environment runs require --project")
             binding = client.request(
                 "POST",
                 f"/v1/environments/{args.environment}/sessions/{args.session}/runs/{run['run_id']}",
