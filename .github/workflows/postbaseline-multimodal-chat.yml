@@ -140,6 +140,17 @@ jobs:
           grep -q 'env://' src/amodex/multimodal/clients.py
           echo 'MULTIMODAL_STORAGE_BOUNDARY_OK'
 
+      - name: Prove browser message text is not interpolated into inline handlers
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -q 'JSON.stringify(m.content)' src/amodex/api/multimodal_web.py; then
+            echo 'message content is interpolated into an inline browser handler' >&2
+            exit 1
+          fi
+          grep -q "addEventListener('click',()=>mmSpeak(m.content))" src/amodex/api/multimodal_web.py
+          echo 'MULTIMODAL_BROWSER_HANDLER_BOUNDARY_OK'
+
       - name: Repository hygiene
         shell: bash
         run: |
