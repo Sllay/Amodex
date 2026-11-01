@@ -162,7 +162,9 @@ jobs:
             echo 'secret or raw binary column leaked into Step 4 schema' >&2
             exit 1
           fi
-          grep -q 'owner_message_id TEXT NOT NULL UNIQUE' migrations/postbaseline/0006_model_intelligence.sql
+          grep -q 'chat_id UUID NOT NULL REFERENCES amodex_workspace_chats(chat_id)' migrations/postbaseline/0006_model_intelligence.sql
+          grep -q 'owner_message_id UUID NOT NULL UNIQUE REFERENCES amodex_workspace_messages(message_id)' migrations/postbaseline/0006_model_intelligence.sql
+          grep -q 'result_message_id UUID REFERENCES amodex_workspace_messages(message_id)' migrations/postbaseline/0006_model_intelligence.sql
           grep -q "attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count BETWEEN 0 AND 2)" migrations/postbaseline/0006_model_intelligence.sql
           echo 'STEP4_STORAGE_BOUNDARY_OK'
 
