@@ -376,7 +376,7 @@ class PostgresModelIntelligenceRepository:
     def reconcile_stale_decisions(self, *, cutoff: datetime) -> int:
         with psycopg.connect(self._dsn) as conn:
             with conn.transaction():
-                rows = conn.execute(
+                attempt_rows = conn.execute(
                     """
                     UPDATE amodex_model_route_attempts SET
                         status='UNKNOWN_OUTCOME',error_code='STALE_STARTED',
@@ -386,15 +386,18 @@ class PostgresModelIntelligenceRepository:
                     """,
                     (cutoff,),
                 ).fetchall()
-                decision_ids = sorted({str(row[0]) for row in rows})
-                for decision_id in decision_ids:
-                    conn.execute(
-                        """
-                        UPDATE amodex_model_route_decisions SET
-                            status='UNKNOWN_OUTCOME',error_code='STALE_STARTED',
-                            error_message='reconciled after local crash/interruption',updated_at=NOW()
-                        WHERE decision_id=%s AND status='STARTED'
-                        """,
-                        (decision_id,),
-                    )
+                decision_rows = conn.execute(
+                    """
+                    UPDATE amodex_model_route_decisions SET
+                        status='UNKNOWN_OUTCOME',error_code='STALE_STARTED',
+                        error_message='reconciled after local crash/interruption',updated_at=NOW()
+                    WHERE status='STARTED' AND updated_at < %s
+                    RETURNING decision_id
+                    """,
+                    (cutoff,),
+                ).fetchall()
+                decision_ids = {
+                    *(str(row[0]) for row in attempt_rows),
+                    *(str(row[0]) for row in decision_rows),
+                }
         return len(decision_ids)
