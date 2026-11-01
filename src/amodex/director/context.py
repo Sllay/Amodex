@@ -54,6 +54,25 @@ _STOP = {
     "behavior",
     "requirements",
 }
+_GENERIC_PATH_TOKENS = {
+    # Repository layout words describe where a fact lives, not what it is about.
+    # They must never turn phrases such as "evidence gates" into permission to
+    # preload every file below harness/evidence/.
+    "architecture",
+    "architectures",
+    "harness",
+    "evidence",
+    "context",
+    "build",
+    "game",
+    "scripts",
+    "script",
+    "source",
+    "sources",
+    "module",
+    "modules",
+    "readme",
+}
 _LOW_INFORMATION_SYMBOL_TOKENS = {
     # Common lifecycle/CRUD verbs occur across unrelated subsystems. They may
     # remain meaningful in an objective or document path, but they must not make
@@ -103,9 +122,10 @@ def _tokens(text: str) -> set[str]:
 
 
 def _path_tokens(path: str) -> set[str]:
-    return _tokens(
+    tokens = _tokens(
         PurePosixPath(path).as_posix().replace("/", " ").replace(".", " ")
     )
+    return tokens - _GENERIC_PATH_TOKENS
 
 
 def _symbol_tokens(entry: RepositoryEntry) -> set[str]:
