@@ -1,0 +1,151 @@
+name: postbaseline-multimodal-chat
+
+on:
+  push:
+    branches:
+      - postbaseline/multimodal-chat-v1
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'src/amodex/multimodal/**'
+      - 'src/amodex/storage/multimodal.py'
+      - 'src/amodex/api/multimodal_*.py'
+      - 'src/amodex/api/workspace_app.py'
+      - 'migrations/postbaseline/0005_multimodal_chat.sql'
+      - 'tests/integration/test_postbaseline_multimodal_chat.py'
+      - '.github/workflows/postbaseline-multimodal-chat.yml'
+      - 'docs/POST_BASELINE_MULTIMODAL_CHAT_V1.md'
+
+permissions:
+  contents: read
+
+env:
+  PYTHONNOUSERSITE: '1'
+
+jobs:
+  multimodal-chat:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres@sha256:1beaa3084eee2676f20a9cd9928f0bf2c5bf674f8e49f81017912183d377c61c
+        env:
+          POSTGRES_USER: amodex
+          POSTGRES_PASSWORD: amodex
+          POSTGRES_DB: amodex_multimodal
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U amodex -d amodex_multimodal"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      AMODEX_TEST_DATABASE_URL: postgresql://amodex:amodex@127.0.0.1:5432/amodex_multimodal
+
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+
+      - name: Recreate isolated Python runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          BOOTSTRAP_VENV="$RUNNER_TEMP/amodex-uv-bootstrap"
+          env -u PYTHONPATH -u PYTHONHOME python3 -m venv "$BOOTSTRAP_VENV"
+          env -u PYTHONPATH -u PYTHONHOME "$BOOTSTRAP_VENV/bin/python" -m pip install --disable-pip-version-check uv==0.10.0
+          UV_BIN="$BOOTSTRAP_VENV/bin/uv"
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" python install 3.13.5
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" sync --python 3.13.5 --extra dev --frozen
+          echo "UV_BIN=$UV_BIN" >> "$GITHUB_ENV"
+
+      - name: Compile Step 3 surface
+        shell: bash
+        run: |
+          set -euo pipefail
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --frozen \
+            python -m compileall -q \
+              src/amodex/multimodal \
+              src/amodex/storage/multimodal.py \
+              src/amodex/api/multimodal_routes.py \
+              src/amodex/api/multimodal_web.py \
+              src/amodex/api/workspace_app.py
+
+      - name: Prove Step 3 does not import Hermes implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --frozen python - <<'PY'
+          import sys
+          import amodex.api.multimodal_routes
+          import amodex.api.multimodal_web
+          import amodex.api.workspace_app
+          import amodex.multimodal.clients
+          import amodex.multimodal.object_store
+          import amodex.storage.multimodal
+          assert 'amodex.runtime.hermes_worker' not in sys.modules
+          print('MULTIMODAL_HERMES_ISOLATION_OK')
+          PY
+
+      - name: Run Step 3 PostgreSQL and multimodal integration tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --extra dev --frozen pytest -q \
+            tests/integration/test_postbaseline_multimodal_chat.py
+
+      - name: Run Step 1 and Step 2 checkpoint regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --extra dev --frozen pytest -q \
+            tests/integration/test_postbaseline_web_workspace.py \
+            tests/integration/test_postbaseline_connectors.py
+
+      - name: Run Environment Product and Stage 6 compatibility regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --extra dev --frozen pytest -q \
+            tests/integration/test_postbaseline_environment_product.py \
+            tests/integration/test_stage6_product_surfaces.py \
+            tests/integration/test_stage6_termux_cli.py
+
+      - name: Prove zero-cost and Step 4 boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'GATED_STEP_4' src/amodex/api/multimodal_routes.py
+          grep -q 'billing_class == "free"' src/amodex/multimodal/clients.py
+          if grep -R -E 'amodex\.providers\.routing|ModelLifecycle|promot(e|ion).*model|demot(e|ion).*model|leaderboard' \
+            src/amodex/multimodal src/amodex/api/multimodal_*.py src/amodex/storage/multimodal.py; then
+            echo 'Step 4 model intelligence leaked into Step 3' >&2
+            exit 1
+          fi
+          echo 'STEP4_BOUNDARY_OK'
+
+      - name: Prove media and secret reference boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -E '\bBYTEA\b|access_token[[:space:]]+(TEXT|VARCHAR)|refresh_token[[:space:]]+(TEXT|VARCHAR)' migrations/postbaseline/0005_multimodal_chat.sql; then
+            echo 'raw binary or provider credential leaked into multimodal PostgreSQL schema' >&2
+            exit 1
+          fi
+          grep -q 'media://sha256/' src/amodex/multimodal/object_store.py
+          grep -q 'env://' src/amodex/multimodal/clients.py
+          echo 'MULTIMODAL_STORAGE_BOUNDARY_OK'
+
+      - name: Repository hygiene
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          status="$(git status --porcelain)"
+          if [ -n "$status" ]; then
+            printf '%s\n' "$status" >&2
+            exit 1
+          fi
