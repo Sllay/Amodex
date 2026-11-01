@@ -56,15 +56,15 @@ jobs:
           set -euo pipefail
           cd "$HERMES_DIR"
           source ./activate
-          export PYTHONPATH="$GITHUB_WORKSPACE/src${PYTHONPATH:+:$PYTHONPATH}"
 
           VALIDATOR_VENV="$RUNNER_TEMP/amodex-validator-venv"
-          python -m venv "$VALIDATOR_VENV"
-          "$VALIDATOR_VENV/bin/python" -m pip install --disable-pip-version-check pytest==9.0.2
-          VALIDATOR_SITE="$($VALIDATOR_VENV/bin/python -c 'import site; print(site.getsitepackages()[0])')"
+          env -u PYTHONPATH python -m venv "$VALIDATOR_VENV"
+          env -u PYTHONPATH "$VALIDATOR_VENV/bin/python" -m pip install --disable-pip-version-check pytest==9.0.2
+          VALIDATOR_SITE="$(env -u PYTHONPATH "$VALIDATOR_VENV/bin/python" -c 'import site; print(site.getsitepackages()[0])')"
           test -d "$VALIDATOR_SITE"
-          PYTHONNOUSERSITE=1 "$VALIDATOR_VENV/bin/python" -c 'import pytest, pygments, sys; print(sys.prefix)'
+          PYTHONNOUSERSITE=1 env -u PYTHONPATH "$VALIDATOR_VENV/bin/python" -c 'import pytest, pygments, sys; print(sys.prefix)'
 
+          export PYTHONPATH="$GITHUB_WORKSPACE/src${PYTHONPATH:+:$PYTHONPATH}"
           python "$GITHUB_WORKSPACE/scripts/stage2_hermes_probe.py" \
             --hermes-root "$HERMES_DIR" \
             --validator-python "$VALIDATOR_VENV/bin/python" \
