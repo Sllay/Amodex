@@ -22,6 +22,24 @@ jobs:
   director-context-dag:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres@sha256:1beaa3084eee2676f20a9cd9928f0bf2c5bf674f8e49f81017912183d377c61c
+        env:
+          POSTGRES_USER: amodex
+          POSTGRES_PASSWORD: amodex
+          POSTGRES_DB: amodex_stage3
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U amodex -d amodex_stage3"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      AMODEX_TEST_DATABASE_URL: postgresql://amodex:amodex@127.0.0.1:5432/amodex_stage3
+
     steps:
       - name: Checkout exact revision
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
