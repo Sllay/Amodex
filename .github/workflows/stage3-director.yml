@@ -32,22 +32,27 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 -m pip install --disable-pip-version-check uv==0.10.0
-          env -u PYTHONPATH -u PYTHONHOME uv python install 3.13.5
-          env -u PYTHONPATH -u PYTHONHOME uv sync --python 3.13.5 --extra dev --frozen
+          BOOTSTRAP_VENV="$RUNNER_TEMP/amodex-uv-bootstrap"
+          env -u PYTHONPATH -u PYTHONHOME python3 -m venv "$BOOTSTRAP_VENV"
+          env -u PYTHONPATH -u PYTHONHOME "$BOOTSTRAP_VENV/bin/python" -m pip install --disable-pip-version-check uv==0.10.0
+          UV_BIN="$BOOTSTRAP_VENV/bin/uv"
+          test -x "$UV_BIN"
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" python install 3.13.5
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" sync --python 3.13.5 --extra dev --frozen
+          echo "UV_BIN=$UV_BIN" >> "$GITHUB_ENV"
 
       - name: Prove Director import is independent from Hermes runtime
         shell: bash
         run: |
           set -euo pipefail
-          env -u PYTHONPATH -u PYTHONHOME uv run --python 3.13.5 --extra dev --frozen \
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --extra dev --frozen \
             python -I -c 'import sys; import amodex.director; assert "amodex.runtime.hermes_worker" not in sys.modules; print("director-hermes-isolation=ok")'
 
       - name: Run Stage 3 slices and Stage 0/1/2 deterministic regression
         shell: bash
         run: |
           set -euo pipefail
-          env -u PYTHONPATH -u PYTHONHOME uv run --python 3.13.5 --extra dev --frozen pytest -q \
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --extra dev --frozen pytest -q \
             tests/unit \
             tests/contract \
             tests/integration/test_stage1_vertical_slice.py \
