@@ -21,6 +21,7 @@ class RunnerKind(StrEnum):
 class RunnerJobState(StrEnum):
     QUEUED = "QUEUED"
     DISPATCHED = "DISPATCHED"
+    DISPATCH_UNKNOWN = "DISPATCH_UNKNOWN"
     CLAIMED = "CLAIMED"
     RUNNING = "RUNNING"
     COMPLETED = "COMPLETED"
