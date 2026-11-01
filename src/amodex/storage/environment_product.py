@@ -93,7 +93,7 @@ class PostgresEnvironmentProductRepository:
                 engine = row["engine"]
                 runner_kind = runner_kind_for_engine(engine)
                 job_id = new_uuid7()
-                branch_name = f"amodex/{str(job_id)[:18]}"
+                branch_name = f"amodex/{job_id}"
                 created = conn.execute(
                     """
                     INSERT INTO amodex_environment_runner_jobs(
@@ -154,7 +154,38 @@ class PostgresEnvironmentProductRepository:
         return tuple(_runner_job_from_row(row) for row in rows)
 
     def mark_dispatched(self, *, job_id: str) -> RunnerJobRecord:
-        return self._transition(job_id=job_id, allowed={RunnerJobState.QUEUED}, target=RunnerJobState.DISPATCHED)
+        return self._transition(
+            job_id=job_id,
+            allowed={RunnerJobState.QUEUED},
+            target=RunnerJobState.DISPATCHED,
+        )
+
+    def mark_dispatch_unknown(self, *, job_id: str, summary: str) -> RunnerJobRecord:
+        with psycopg.connect(self._dsn, row_factory=dict_row) as conn:
+            with conn.transaction():
+                row = conn.execute(
+                    "SELECT state FROM amodex_environment_runner_jobs WHERE job_id=%s FOR UPDATE",
+                    (job_id,),
+                ).fetchone()
+                if row is None:
+                    raise KeyError(job_id)
+                current = RunnerJobState(row["state"])
+                if current != RunnerJobState.QUEUED:
+                    raise EnvironmentStateError(
+                        "RUNNER_JOB_STATE_CONFLICT",
+                        f"{job_id}:{current.value}->DISPATCH_UNKNOWN",
+                    )
+                updated = conn.execute(
+                    """
+                    UPDATE amodex_environment_runner_jobs
+                    SET state='DISPATCH_UNKNOWN',summary=%s,updated_at=NOW()
+                    WHERE job_id=%s
+                    RETURNING *
+                    """,
+                    (summary[:4000], job_id),
+                ).fetchone()
+        assert updated is not None
+        return _runner_job_from_row(updated)
 
     def claim_runner_job(self, *, job_id: str, github_run_id: str | None = None) -> dict[str, Any]:
         with psycopg.connect(self._dsn, row_factory=dict_row) as conn:
@@ -166,7 +197,11 @@ class PostgresEnvironmentProductRepository:
                 if row is None:
                     raise KeyError(job_id)
                 state = RunnerJobState(row["state"])
-                if state not in {RunnerJobState.QUEUED, RunnerJobState.DISPATCHED}:
+                if state not in {
+                    RunnerJobState.QUEUED,
+                    RunnerJobState.DISPATCHED,
+                    RunnerJobState.DISPATCH_UNKNOWN,
+                }:
                     raise EnvironmentStateError("RUNNER_JOB_NOT_CLAIMABLE", f"{job_id}:{state.value}")
                 row = conn.execute(
                     """
@@ -200,7 +235,11 @@ class PostgresEnvironmentProductRepository:
         }
 
     def mark_running(self, *, job_id: str) -> RunnerJobRecord:
-        return self._transition(job_id=job_id, allowed={RunnerJobState.CLAIMED}, target=RunnerJobState.RUNNING)
+        return self._transition(
+            job_id=job_id,
+            allowed={RunnerJobState.CLAIMED},
+            target=RunnerJobState.RUNNING,
+        )
 
     def report_runner_job(
         self,
@@ -214,25 +253,34 @@ class PostgresEnvironmentProductRepository:
         if state not in {RunnerJobState.COMPLETED, RunnerJobState.FAILED, RunnerJobState.CANCELLED}:
             raise ValueError("terminal runner state required")
         with psycopg.connect(self._dsn, row_factory=dict_row) as conn:
-            row = conn.execute(
-                "SELECT state FROM amodex_environment_runner_jobs WHERE job_id=%s",
-                (job_id,),
-            ).fetchone()
-            if row is None:
-                raise KeyError(job_id)
-            current = RunnerJobState(row["state"])
-            if current not in {RunnerJobState.CLAIMED, RunnerJobState.RUNNING, RunnerJobState.DISPATCHED}:
-                raise EnvironmentStateError("RUNNER_JOB_TERMINAL_CONFLICT", f"{job_id}:{current.value}")
-            updated = conn.execute(
-                """
-                UPDATE amodex_environment_runner_jobs
-                SET state=%s,summary=%s,result_commit=%s,
-                    github_run_id=COALESCE(%s,github_run_id),completed_at=NOW(),updated_at=NOW()
-                WHERE job_id=%s
-                RETURNING *
-                """,
-                (state.value, summary, result_commit, github_run_id, job_id),
-            ).fetchone()
+            with conn.transaction():
+                row = conn.execute(
+                    "SELECT state FROM amodex_environment_runner_jobs WHERE job_id=%s FOR UPDATE",
+                    (job_id,),
+                ).fetchone()
+                if row is None:
+                    raise KeyError(job_id)
+                current = RunnerJobState(row["state"])
+                if current not in {
+                    RunnerJobState.CLAIMED,
+                    RunnerJobState.RUNNING,
+                    RunnerJobState.DISPATCHED,
+                    RunnerJobState.DISPATCH_UNKNOWN,
+                }:
+                    raise EnvironmentStateError(
+                        "RUNNER_JOB_TERMINAL_CONFLICT",
+                        f"{job_id}:{current.value}",
+                    )
+                updated = conn.execute(
+                    """
+                    UPDATE amodex_environment_runner_jobs
+                    SET state=%s,summary=%s,result_commit=%s,
+                        github_run_id=COALESCE(%s,github_run_id),completed_at=NOW(),updated_at=NOW()
+                    WHERE job_id=%s
+                    RETURNING *
+                    """,
+                    (state.value, summary, result_commit, github_run_id, job_id),
+                ).fetchone()
         assert updated is not None
         return _runner_job_from_row(updated)
 
@@ -288,28 +336,29 @@ class PostgresEnvironmentProductRepository:
         target: RunnerJobState,
     ) -> RunnerJobRecord:
         with psycopg.connect(self._dsn, row_factory=dict_row) as conn:
-            row = conn.execute(
-                "SELECT state FROM amodex_environment_runner_jobs WHERE job_id=%s FOR UPDATE",
-                (job_id,),
-            ).fetchone()
-            if row is None:
-                raise KeyError(job_id)
-            current = RunnerJobState(row["state"])
-            if current not in allowed:
-                raise EnvironmentStateError(
-                    "RUNNER_JOB_STATE_CONFLICT",
-                    f"{job_id}:{current.value}->{target.value}",
-                )
-            updated = conn.execute(
-                """
-                UPDATE amodex_environment_runner_jobs
-                SET state=%s,updated_at=NOW(),
-                    dispatched_at=CASE WHEN %s='DISPATCHED' THEN NOW() ELSE dispatched_at END
-                WHERE job_id=%s
-                RETURNING *
-                """,
-                (target.value, target.value, job_id),
-            ).fetchone()
+            with conn.transaction():
+                row = conn.execute(
+                    "SELECT state FROM amodex_environment_runner_jobs WHERE job_id=%s FOR UPDATE",
+                    (job_id,),
+                ).fetchone()
+                if row is None:
+                    raise KeyError(job_id)
+                current = RunnerJobState(row["state"])
+                if current not in allowed:
+                    raise EnvironmentStateError(
+                        "RUNNER_JOB_STATE_CONFLICT",
+                        f"{job_id}:{current.value}->{target.value}",
+                    )
+                updated = conn.execute(
+                    """
+                    UPDATE amodex_environment_runner_jobs
+                    SET state=%s,updated_at=NOW(),
+                        dispatched_at=CASE WHEN %s='DISPATCHED' THEN NOW() ELSE dispatched_at END
+                    WHERE job_id=%s
+                    RETURNING *
+                    """,
+                    (target.value, target.value, job_id),
+                ).fetchone()
         assert updated is not None
         return _runner_job_from_row(updated)
 
