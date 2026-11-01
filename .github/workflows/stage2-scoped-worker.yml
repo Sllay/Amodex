@@ -1,0 +1,70 @@
+name: stage2-scoped-worker
+
+on:
+  push:
+    branches:
+      - stage/2-scoped-worker
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'src/amodex/tools/**'
+      - 'src/amodex/git/**'
+      - 'tests/integration/test_stage2_*.py'
+      - '.github/workflows/stage2-scoped-worker.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  scoped-worker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres@sha256:1beaa3084eee2676f20a9cd9928f0bf2c5bf674f8e49f81017912183d377c61c
+        env:
+          POSTGRES_USER: amodex
+          POSTGRES_PASSWORD: amodex
+          POSTGRES_DB: amodex_stage2
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U amodex -d amodex_stage2"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      AMODEX_TEST_DATABASE_URL: postgresql://amodex:amodex@127.0.0.1:5432/amodex_stage2
+
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+
+      - name: Recreate frozen Python runtime
+        run: |
+          python3 -m pip install --disable-pip-version-check uv==0.10.0
+          uv python install 3.13.5
+          uv sync --python 3.13.5 --extra dev --frozen
+
+      - name: Run deterministic Stage 0/1 regression plus Stage 2 slices
+        run: >-
+          uv run --python 3.13.5 --extra dev --frozen pytest -q
+          tests/unit
+          tests/contract
+          tests/integration/test_stage1_vertical_slice.py
+          tests/integration/test_stage1_crash_recovery.py
+          tests/integration/test_stage1_migrations.py
+          tests/integration/test_stage1_provider_failures.py
+          tests/integration/test_stage2_scoped_tools.py
+          tests/integration/test_stage2_checkpoint_lifecycle.py
+
+      - name: Repository hygiene
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          test -z "$(git status --porcelain)"
