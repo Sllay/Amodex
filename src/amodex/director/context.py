@@ -67,6 +67,8 @@ def _relevance(entry: RepositoryEntry, task_tokens: set[str]) -> int:
         sample_tokens = _tokens(entry.safe_text[:12000])
         score += min(6, len(sample_tokens & task_tokens))
     if entry.authority >= DocumentAuthority.FOCUSED_SPEC:
+        # Authority breaks ties among relevant documents; it must never make an
+        # unrelated high-authority document relevant by itself.
         score += 2
     return score
 
@@ -117,7 +119,9 @@ def compile_context(
     for score, entry in sorted(candidates, key=lambda item: (-item[0], -int(item[1].authority), item[1].path)):
         if entry.kind == FileKind.DOCUMENTATION and len(entry.safe_text or "") > max_document_chars and score < 8:
             continue
-        if score >= 4 or entry.authority >= DocumentAuthority.FOCUSED_SPEC:
+        # High authority is not permission to preload. A focused spec or ADR is
+        # selected only when the task actually overlaps its path/content/symbols.
+        if score >= 4:
             include(entry, f"relevant project fact score={score}")
 
     selected_paths = list(selected)
