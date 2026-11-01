@@ -20,6 +20,9 @@ class StaleContextError(RuntimeError):
 
 
 _TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]{2,}")
+_IDENTIFIER_PART_RE = re.compile(
+    r"[A-Z]+(?=[A-Z][a-z]|\d|$)|[A-Z]?[a-z]+|[A-Z]+|\d+"
+)
 _STOP = {
     "the",
     "and",
@@ -36,15 +39,100 @@ _STOP = {
     "test",
     "src",
     "docs",
+    # Planning prose appears in almost every architecture document. These words
+    # carry too little information to justify disclosure on their own.
+    "plan",
+    "domain",
+    "change",
+    "changes",
+    "safe",
+    "historical",
+    "foundation",
+    "ownership",
+    "system",
+    "systems",
+    "behavior",
+    "requirements",
+}
+_GENERIC_PATH_TOKENS = {
+    # Repository layout words describe where a fact lives, not what it is about.
+    # They must never turn phrases such as "evidence gates" into permission to
+    # preload every file below harness/evidence/.
+    "architecture",
+    "architectures",
+    "harness",
+    "evidence",
+    "context",
+    "build",
+    "game",
+    "scripts",
+    "script",
+    "source",
+    "sources",
+    "module",
+    "modules",
+    "readme",
+}
+_LOW_INFORMATION_SYMBOL_TOKENS = {
+    # Common lifecycle/CRUD verbs occur across unrelated subsystems. They may
+    # remain meaningful in an objective or document path, but they must not make
+    # an arbitrary source file relevant merely because it exposes e.g. open_save.
+    "save",
+    "load",
+    "open",
+    "close",
+    "read",
+    "write",
+    "get",
+    "set",
+    "create",
+    "delete",
+    "remove",
+    "add",
+    "start",
+    "stop",
+    "update",
+    "process",
+    "configure",
+    "flush",
+    "reset",
 }
 
 
 def _tokens(text: str) -> set[str]:
-    return {token.lower() for token in _TOKEN_RE.findall(text) if token.lower() not in _STOP}
+    """Tokenize prose plus common source-code identifier conventions.
+
+    ``BillingService`` and ``billing_api`` both expose ``billing`` while keeping
+    their full normalized token. This lets an objective reference a source symbol
+    and still anchor focused documentation without using unrelated scope paths as
+    global context topics.
+    """
+
+    result: set[str] = set()
+    for raw in _TOKEN_RE.findall(text):
+        normalized = raw.lower()
+        if normalized not in _STOP:
+            result.add(normalized)
+        for snake_part in raw.split("_"):
+            for part in _IDENTIFIER_PART_RE.findall(snake_part):
+                lowered = part.lower()
+                if len(lowered) >= 3 and lowered not in _STOP:
+                    result.add(lowered)
+    return result
 
 
 def _path_tokens(path: str) -> set[str]:
-    return _tokens(PurePosixPath(path).as_posix().replace("/", " ").replace(".", " "))
+    tokens = _tokens(
+        PurePosixPath(path).as_posix().replace("/", " ").replace(".", " ")
+    )
+    return tokens - _GENERIC_PATH_TOKENS
+
+
+def _symbol_tokens(entry: RepositoryEntry) -> set[str]:
+    result: set[str] = set()
+    for symbol in entry.symbols:
+        result.update(_tokens(symbol))
+    return result - _LOW_INFORMATION_SYMBOL_TOKENS
 
 
 def _provenance(entry: RepositoryEntry) -> Provenance:
@@ -58,15 +146,39 @@ def _provenance(entry: RepositoryEntry) -> Provenance:
     )
 
 
-def _relevance(entry: RepositoryEntry, task_tokens: set[str]) -> int:
-    score = 0
-    path_overlap = len(_path_tokens(entry.path) & task_tokens)
-    symbol_overlap = len({symbol.lower() for symbol in entry.symbols} & task_tokens)
-    score += path_overlap * 4 + symbol_overlap * 8
-    if entry.safe_text and entry.kind in {FileKind.DOCUMENTATION, FileKind.DECISION, FileKind.CONTRACT}:
-        sample_tokens = _tokens(entry.safe_text[:12000])
-        score += min(6, len(sample_tokens & task_tokens))
-    if entry.authority >= DocumentAuthority.FOCUSED_SPEC:
+def _relevance(entry: RepositoryEntry, *, objective_tokens: set[str]) -> int:
+    """Score implicit context strictly from the semantic task objective.
+
+    Exact task read/write paths are already admitted separately. They therefore
+    must not contribute their path words to the global relevance vocabulary:
+    authorizing ``water_container.gd`` for an inventory task may admit that exact
+    file, but it must not implicitly disclose every ``water_*`` source or the
+    water architecture. Structural neighbors enter through explicit scope,
+    one-hop imports, or adjacent tests rather than token spillover.
+    """
+
+    path_overlap = len(_path_tokens(entry.path) & objective_tokens)
+    symbol_overlap = len(_symbol_tokens(entry) & objective_tokens)
+
+    if entry.kind in {
+        FileKind.DOCUMENTATION,
+        FileKind.DECISION,
+        FileKind.CONTRACT,
+    }:
+        if path_overlap == 0 and symbol_overlap == 0:
+            return 0
+        score = path_overlap * 4 + symbol_overlap * 8
+        if entry.safe_text:
+            content_overlap = len(
+                _tokens(entry.safe_text[:12000]) & objective_tokens
+            )
+            score += min(6, content_overlap)
+        if entry.authority >= DocumentAuthority.FOCUSED_SPEC:
+            score += 2
+        return score
+
+    score = path_overlap * 4 + symbol_overlap * 8
+    if entry.authority >= DocumentAuthority.FOCUSED_SPEC and score:
         score += 2
     return score
 
@@ -83,9 +195,7 @@ def compile_context(
             f"context base {snapshot.project.base_sha} does not match repository {current_base_sha}"
         )
 
-    task_tokens = _tokens(task.objective)
-    for path in (*task.write_paths, *task.read_paths):
-        task_tokens.update(_path_tokens(path))
+    objective_tokens = _tokens(task.objective)
 
     by_path = snapshot.by_path
     selected: dict[str, tuple[RepositoryEntry, str]] = {}
@@ -106,33 +216,60 @@ def compile_context(
 
     candidates: list[tuple[int, RepositoryEntry]] = []
     for entry in snapshot.entries:
-        if entry.path in selected or entry.safe_text is None or entry.kind == FileKind.SECRET:
+        if (
+            entry.path in selected
+            or entry.safe_text is None
+            or entry.kind == FileKind.SECRET
+        ):
             continue
-        score = _relevance(entry, task_tokens)
+        score = _relevance(entry, objective_tokens=objective_tokens)
         if score <= 0:
             continue
-        if entry.kind in {FileKind.DOCUMENTATION, FileKind.DECISION, FileKind.SOURCE, FileKind.TEST}:
+        if entry.kind in {
+            FileKind.DOCUMENTATION,
+            FileKind.DECISION,
+            FileKind.SOURCE,
+            FileKind.TEST,
+        }:
             candidates.append((score, entry))
 
-    for score, entry in sorted(candidates, key=lambda item: (-item[0], -int(item[1].authority), item[1].path)):
-        if entry.kind == FileKind.DOCUMENTATION and len(entry.safe_text or "") > max_document_chars and score < 8:
+    for score, entry in sorted(
+        candidates,
+        key=lambda item: (-item[0], -int(item[1].authority), item[1].path),
+    ):
+        if (
+            entry.kind == FileKind.DOCUMENTATION
+            and len(entry.safe_text or "") > max_document_chars
+            and score < 8
+        ):
             continue
-        if score >= 4 or entry.authority >= DocumentAuthority.FOCUSED_SPEC:
+        # High authority is not permission to preload. Focused context is
+        # selected only when the semantic objective actually anchors its topic.
+        if score >= 4:
             include(entry, f"relevant project fact score={score}")
 
     selected_paths = list(selected)
-    selected_stems = {PurePosixPath(path).stem.lower() for path in selected_paths}
+    selected_stems = {
+        PurePosixPath(path).stem.lower() for path in selected_paths
+    }
     selected_imports: set[str] = set()
     for path in selected_paths:
         selected_imports.update(by_path[path].imports)
+
     for entry in snapshot.entries:
         if entry.path in selected or entry.safe_text is None:
             continue
         stem = PurePosixPath(entry.path).stem.lower()
-        if entry.kind == FileKind.TEST and any(token in stem for token in selected_stems if token):
+        if entry.kind == FileKind.TEST and any(
+            token in stem for token in selected_stems if token
+        ):
             include(entry, "test adjacent to selected implementation")
             continue
-        dotted = entry.path.removeprefix("src/").removesuffix(".py").replace("/", ".")
+        dotted = (
+            entry.path.removeprefix("src/")
+            .removesuffix(".py")
+            .replace("/", ".")
+        )
         if dotted in selected_imports:
             include(entry, "one-hop imported interface")
 
@@ -146,10 +283,13 @@ def compile_context(
                 provenance=_provenance(entry),
             )
         )
+
     excluded = tuple(
         entry.path
         for entry in snapshot.entries
-        if entry.safe_text is not None and entry.path not in selected and entry.kind != FileKind.SECRET
+        if entry.safe_text is not None
+        and entry.path not in selected
+        and entry.kind != FileKind.SECRET
     )
     selected_chars = sum(len(section.content) for section in sections)
     return ContextCapsule(

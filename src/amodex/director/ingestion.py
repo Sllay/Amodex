@@ -47,6 +47,10 @@ _ADR_STATUS_RE = re.compile(r"^\s*Status\s*:\s*(.+?)\s*$", re.IGNORECASE | re.MU
 _ADR_SUPERSEDES_RE = re.compile(r"^\s*Supersedes\s*:\s*(.+?)\s*$", re.IGNORECASE | re.MULTILINE)
 _GD_SYMBOL_RE = re.compile(r"^\s*(?:class_name\s+([A-Za-z_]\w*)|func\s+([A-Za-z_]\w*)\s*\()", re.MULTILINE)
 _JS_SYMBOL_RE = re.compile(r"\b(?:class|function)\s+([A-Za-z_$][\w$]*)")
+_LUAU_SYMBOL_RE = re.compile(
+    r"^\s*(?:local\s+)?function\s+([A-Za-z_][\w.:]*)|^\s*local\s+([A-Za-z_]\w*)\s*=\s*{}",
+    re.MULTILINE,
+)
 
 
 class IngestionError(RuntimeError):
@@ -70,6 +74,10 @@ def _authority_for(path: PurePosixPath) -> DocumentAuthority:
     lower = path.as_posix().lower()
     if path.as_posix() == "AGENTS.md":
         return DocumentAuthority.ROOT_CONTRACT
+    if lower.startswith("harness/context/"):
+        return DocumentAuthority.PHASE
+    if lower.startswith(("harness/build/", "harness/evidence/")):
+        return DocumentAuthority.HISTORICAL
     if "/decisions/" in f"/{lower}" or path.name.lower().startswith("adr-"):
         return DocumentAuthority.ADR
     if any(part in lower for part in ("architecture", "contract", "spec")) and path.suffix.lower() in {".md", ".txt"}:
@@ -80,7 +88,7 @@ def _authority_for(path: PurePosixPath) -> DocumentAuthority:
         return DocumentAuthority.OVERVIEW
     if "history" in lower or "archive" in lower or "research/" in lower:
         return DocumentAuthority.HISTORICAL
-    if path.suffix.lower() in {".py", ".gd", ".ts", ".tsx", ".js", ".jsx", ".rs", ".go", ".java", ".cs"}:
+    if path.suffix.lower() in {".py", ".gd", ".luau", ".lua", ".ts", ".tsx", ".js", ".jsx", ".rs", ".go", ".java", ".cs"}:
         return DocumentAuthority.SOURCE
     return DocumentAuthority.UNCLASSIFIED
 
@@ -99,7 +107,7 @@ def _kind_for(path: PurePosixPath) -> FileKind:
         return FileKind.INFRA
     if path.suffix.lower() in {".md", ".txt", ".rst"}:
         return FileKind.DOCUMENTATION
-    if path.suffix.lower() in {".py", ".gd", ".ts", ".tsx", ".js", ".jsx", ".rs", ".go", ".java", ".cs"}:
+    if path.suffix.lower() in {".py", ".gd", ".luau", ".lua", ".ts", ".tsx", ".js", ".jsx", ".rs", ".go", ".java", ".cs"}:
         return FileKind.SOURCE
     return FileKind.OTHER
 
@@ -108,6 +116,8 @@ def _language_for(path: PurePosixPath) -> str | None:
     return {
         ".py": "python",
         ".gd": "gdscript",
+        ".luau": "luau",
+        ".lua": "lua",
         ".ts": "typescript",
         ".tsx": "typescript",
         ".js": "javascript",
@@ -143,6 +153,9 @@ def _symbol_observations(path: PurePosixPath, text: str) -> tuple[tuple[str, ...
         return _python_observations(text)
     if language == "gdscript":
         symbols = {left or right for left, right in _GD_SYMBOL_RE.findall(text) if left or right}
+        return tuple(sorted(symbols)), ()
+    if language in {"luau", "lua"}:
+        symbols = {left or right for left, right in _LUAU_SYMBOL_RE.findall(text) if left or right}
         return tuple(sorted(symbols)), ()
     if language in {"typescript", "javascript"}:
         return tuple(sorted(set(_JS_SYMBOL_RE.findall(text)))), ()

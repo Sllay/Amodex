@@ -44,6 +44,28 @@ class EvidenceResult(StrEnum):
     SKIPPED = "SKIPPED"
 
 
+class CandidateStatus(StrEnum):
+    READY = "READY"
+    STALE = "STALE"
+    BLOCKED = "BLOCKED"
+    PROMOTED = "PROMOTED"
+
+
+class PromotionStatus(StrEnum):
+    INTENT_PERSISTED = "INTENT_PERSISTED"
+    INTEGRATION_VALIDATED = "INTEGRATION_VALIDATED"
+    REMOTE_APPLIED = "REMOTE_APPLIED"
+    UNKNOWN_OUTCOME = "UNKNOWN_OUTCOME"
+    PROMOTED = "PROMOTED"
+    BLOCKED = "BLOCKED"
+
+
+class PromotionMethod(StrEnum):
+    MERGE = "MERGE"
+    FAST_FORWARD = "FAST_FORWARD"
+    REVERT = "REVERT"
+
+
 class Objective(ContractModel):
     statement: NonEmptyStr
     non_goals: tuple[str, ...] = ()
@@ -222,10 +244,109 @@ class Checkpoint(ContractModel):
         return self
 
 
+class Candidate(ContractModel):
+    """Durable promotion candidate bound to a VALIDATED source SHA and target SHA."""
+
+    IDENTITY_FIELDS: ClassVar[frozenset[str]] = frozenset(
+        {"candidate_id", "task_id", "validated_checkpoint_id", "source_sha"}
+    )
+
+    schema_version: SchemaV1 = 1
+    candidate_id: UUIDv7Str
+    task_id: UUIDv7Str
+    validated_checkpoint_id: UUIDv7Str
+    source_sha: Sha40
+    expected_target_ref: NonEmptyStr
+    expected_target_sha: Sha40
+    changed_paths: tuple[NonEmptyStr, ...]
+    dependency_paths: tuple[NonEmptyStr, ...] = ()
+    evidence_ids: tuple[UUIDv7Str, ...]
+    status: CandidateStatus = CandidateStatus.READY
+    created_at: datetime
+
+    @field_validator("created_at")
+    @classmethod
+    def normalize_datetime(cls, value: datetime):
+        return require_utc(value, field_name="created_at")
+
+    @field_validator("changed_paths", "dependency_paths", "evidence_ids")
+    @classmethod
+    def reject_duplicates(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if len(value) != len(set(value)):
+            raise ValueError("duplicate candidate entries are not allowed")
+        return value
+
+    @model_validator(mode="after")
+    def require_source_proof(self) -> "Candidate":
+        if not self.changed_paths:
+            raise ValueError("Candidate requires at least one changed path")
+        if not self.evidence_ids:
+            raise ValueError("Candidate requires source validation evidence")
+        return self
+
+
+class Promotion(ContractModel):
+    """Durable promotion intent/result. PROMOTED is not a checkpoint class."""
+
+    IDENTITY_FIELDS: ClassVar[frozenset[str]] = frozenset(
+        {"promotion_id", "candidate_id", "idempotency_key"}
+    )
+
+    schema_version: SchemaV1 = 1
+    promotion_id: UUIDv7Str
+    candidate_id: UUIDv7Str
+    idempotency_key: NonEmptyStr
+    target_ref: NonEmptyStr
+    expected_target_sha: Sha40
+    method: PromotionMethod = PromotionMethod.MERGE
+    status: PromotionStatus = PromotionStatus.INTENT_PERSISTED
+    integration_sha: Sha40 | None = None
+    target_post_sha: Sha40 | None = None
+    integration_evidence_ids: tuple[UUIDv7Str, ...] = ()
+    created_at: datetime
+    updated_at: datetime
+    reconciled_at: datetime | None = None
+    detail: str | None = None
+
+    @field_validator("created_at", "updated_at", "reconciled_at")
+    @classmethod
+    def normalize_datetime(cls, value: datetime | None, info):
+        if value is None:
+            return None
+        return require_utc(value, field_name=info.field_name)
+
+    @field_validator("integration_evidence_ids")
+    @classmethod
+    def reject_evidence_duplicates(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if len(value) != len(set(value)):
+            raise ValueError("duplicate promotion evidence is not allowed")
+        return value
+
+    @model_validator(mode="after")
+    def validate_result_shape(self) -> "Promotion":
+        if self.updated_at < self.created_at:
+            raise ValueError("updated_at cannot predate created_at")
+        if self.status in {
+            PromotionStatus.INTEGRATION_VALIDATED,
+            PromotionStatus.REMOTE_APPLIED,
+            PromotionStatus.PROMOTED,
+        }:
+            if self.integration_sha is None:
+                raise ValueError(f"{self.status.value} requires integration_sha")
+            if not self.integration_evidence_ids:
+                raise ValueError(f"{self.status.value} requires integration validation evidence")
+        if self.status in {PromotionStatus.REMOTE_APPLIED, PromotionStatus.PROMOTED}:
+            if self.target_post_sha is None:
+                raise ValueError(f"{self.status.value} requires target_post_sha")
+        return self
+
+
 CONTRACT_TYPES: dict[str, type[ContractModel]] = {
     "task-package": TaskPackage,
     "worker-lease": WorkerLease,
     "tool-call": ToolCall,
     "checkpoint": Checkpoint,
     "validation-evidence": ValidationEvidence,
+    "candidate": Candidate,
+    "promotion": Promotion,
 }
