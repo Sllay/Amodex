@@ -180,8 +180,9 @@ def test_candidate_exact_sha_promotion_idempotency_and_revert(
     assert outcome.promotion.integration_evidence_ids
     assert promotion_repository.count_promotions_for_idempotency("promotion/change-value") == 1
 
-    repeated = gate.promote(
-        candidate_id=str(candidate.candidate_id),
+    # Once a Candidate is terminal, retries enter the explicit reconciliation
+    # path instead of trying to start a second promotion from a promoted Candidate.
+    repeated = gate.reconcile(
         idempotency_key="promotion/change-value",
         validator=VALIDATOR,
     )
