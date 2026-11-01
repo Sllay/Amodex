@@ -16,15 +16,18 @@ from amodex.director import (
 )
 
 
-def _task(task_id: str, *, deps=(), writes=(), capability="python") -> PlannedTask:
-    return PlannedTask(
-        task_id=task_id,
-        objective=f"Implement {task_id}",
-        dependencies=tuple(deps),
-        write_paths=tuple(writes),
-        required_capabilities=(capability,),
-        acceptance_criteria=(f"{task_id} focused validation passes",),
-    )
+def _task(task_id: str, *, deps=(), writes=(), capability="python", **overrides) -> PlannedTask:
+    values = {
+        "task_id": task_id,
+        "objective": f"Implement {task_id}",
+        "dependencies": tuple(deps),
+        "write_paths": tuple(writes),
+        "non_goals": ("Do not rewrite unrelated components",),
+        "required_capabilities": (capability,),
+        "acceptance_criteria": (f"{task_id} focused validation passes",),
+    }
+    values.update(overrides)
+    return PlannedTask(**values)
 
 
 def _plan() -> TaskPlan:
@@ -122,3 +125,56 @@ def test_director_rejects_parallel_write_conflict_and_missing_capability() -> No
     )
     with pytest.raises(PlanRejected, match="unavailable capabilities"):
         validate_director_plan(missing_capability, available_capabilities={"python"})
+
+
+def test_director_cannot_bypass_cost_promotion_or_hide_architecture_change() -> None:
+    paid = TaskPlan(
+        project_id="fixture",
+        base_sha="1" * 40,
+        objective="paid bypass",
+        tasks=(_task("PAID", writes=("src/p.py",), requires_paid_resources=True),),
+    )
+    with pytest.raises(PlanRejected, match="cannot authorize paid resources"):
+        validate_director_plan(paid, available_capabilities={"python"})
+
+    promotion = TaskPlan(
+        project_id="fixture",
+        base_sha="2" * 40,
+        objective="promotion bypass",
+        tasks=(_task("PROMOTE", writes=("src/p.py",), requests_promotion=True),),
+    )
+    with pytest.raises(PlanRejected, match="cannot grant promotion authority"):
+        validate_director_plan(promotion, available_capabilities={"python"})
+
+    hidden_architecture = TaskPlan(
+        project_id="fixture",
+        base_sha="3" * 40,
+        objective="hidden architecture change",
+        tasks=(_task("ARCH", writes=("src/p.py",), architecture_change=True),),
+    )
+    with pytest.raises(PlanRejected, match="must be surfaced as a decision request"):
+        validate_director_plan(hidden_architecture, available_capabilities={"python"})
+
+    explicit_architecture = TaskPlan(
+        project_id="fixture",
+        base_sha="4" * 40,
+        objective="explicit architecture request",
+        tasks=(
+            _task(
+                "ARCH-OK",
+                writes=("src/p.py",),
+                architecture_change=True,
+                architecture_decision_request="ADR required: replace storage interface",
+            ),
+        ),
+    )
+    validate_director_plan(explicit_architecture, available_capabilities={"python"})
+
+
+def test_planned_task_requires_explicit_non_goals() -> None:
+    with pytest.raises(ValueError, match="non_goals are required"):
+        PlannedTask(
+            task_id="NO-NONGOALS",
+            objective="bad incomplete task",
+            acceptance_criteria=("must pass",),
+        )
