@@ -72,7 +72,7 @@ class PostgresEnvironmentProductRepository:
                     LEFT JOIN amodex_environment_projects ep ON ep.project_id=r.project_id
                     LEFT JOIN amodex_session_runs sr ON sr.run_id=r.run_id
                     WHERE e.environment_id=%s
-                    FOR SHARE
+                    FOR SHARE OF e,s,r,p
                     """,
                     (session_id, run_id, environment_id),
                 ).fetchone()
