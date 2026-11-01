@@ -1,0 +1,133 @@
+name: stage5-specialized-routing
+
+on:
+  push:
+    branches:
+      - stage/5-capability-routing
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'src/amodex/providers/**'
+      - 'src/amodex/runtime/specialized.py'
+      - 'src/amodex/director/**'
+      - 'src/amodex/storage/routing.py'
+      - 'src/amodex/benchmarks/stage5_routing.py'
+      - 'migrations/stage5/**'
+      - 'tests/integration/test_stage5_*.py'
+      - 'docs/STAGE5_ROUTING.md'
+      - '.github/workflows/stage5-routing.yml'
+
+permissions:
+  contents: read
+
+env:
+  PYTHONNOUSERSITE: '1'
+
+jobs:
+  specialized-routing:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres@sha256:1beaa3084eee2676f20a9cd9928f0bf2c5bf674f8e49f81017912183d377c61c
+        env:
+          POSTGRES_USER: amodex
+          POSTGRES_PASSWORD: amodex
+          POSTGRES_DB: amodex_stage5
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U amodex -d amodex_stage5"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      AMODEX_TEST_DATABASE_URL: postgresql://amodex:amodex@127.0.0.1:5432/amodex_stage5
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+      AMODEX_GROQ_BILLING_CLASS: ${{ vars.AMODEX_GROQ_BILLING_CLASS }}
+      AMODEX_OPENROUTER_BILLING_CLASS: ${{ vars.AMODEX_OPENROUTER_BILLING_CLASS }}
+      AMODEX_NVIDIA_BILLING_CLASS: ${{ vars.AMODEX_NVIDIA_BILLING_CLASS }}
+      AMODEX_GROQ_MODEL: ${{ vars.AMODEX_GROQ_MODEL }}
+      AMODEX_OPENROUTER_MODEL: ${{ vars.AMODEX_OPENROUTER_MODEL }}
+      AMODEX_NVIDIA_MODEL: ${{ vars.AMODEX_NVIDIA_MODEL }}
+
+    steps:
+      - name: Checkout exact Amodex revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+
+      - name: Recreate runner-owned Python runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          BOOTSTRAP_VENV="$RUNNER_TEMP/amodex-uv-bootstrap"
+          env -u PYTHONPATH -u PYTHONHOME python3 -m venv "$BOOTSTRAP_VENV"
+          env -u PYTHONPATH -u PYTHONHOME "$BOOTSTRAP_VENV/bin/python" -m pip install --disable-pip-version-check uv==0.10.0
+          UV_BIN="$BOOTSTRAP_VENV/bin/uv"
+          test -x "$UV_BIN"
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" python install 3.13.5
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" sync --python 3.13.5 --extra dev --frozen
+          echo "UV_BIN=$UV_BIN" >> "$GITHUB_ENV"
+
+      - name: Prove Stage 5 routing is independent from Hermes runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --extra dev --frozen \
+            python -I -c 'import sys; import amodex.providers.routing; import amodex.runtime.specialized; assert "amodex.runtime.hermes_worker" not in sys.modules; print("stage5-hermes-isolation=ok")'
+
+      - name: Run Stage 5 and Stage 0/1/2/3/4 deterministic regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --extra dev --frozen pytest -q \
+            tests/unit \
+            tests/contract \
+            tests/integration/test_stage1_vertical_slice.py \
+            tests/integration/test_stage1_crash_recovery.py \
+            tests/integration/test_stage1_migrations.py \
+            tests/integration/test_stage1_provider_failures.py \
+            tests/integration/test_stage2_scoped_tools.py \
+            tests/integration/test_stage2_checkpoint_lifecycle.py \
+            tests/integration/test_stage3_ingestion_context.py \
+            tests/integration/test_stage3_dag_orchestration.py \
+            tests/integration/test_stage4_promotion_lifecycle.py \
+            tests/integration/test_stage4_stale_crash.py \
+            tests/integration/test_stage4_engine_integration.py \
+            tests/integration/test_stage5_capability_routing.py \
+            tests/integration/test_stage5_provider_adapters.py \
+            tests/integration/test_stage5_routing_persistence.py \
+            tests/integration/test_stage5_specialized_vertical_slice.py
+
+      - name: Probe explicitly free configured Stage 5 providers
+        shell: bash
+        run: |
+          set -euo pipefail
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --extra dev --frozen pytest -q -s \
+            tests/integration/test_stage5_live_providers.py
+
+      - name: Scan tracked files for configured provider secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in GEMINI_API_KEY GROQ_API_KEY OPENROUTER_API_KEY NVIDIA_API_KEY; do
+            value="${!name:-}"
+            if [ -n "$value" ] && git grep -F -- "$value" -- . ':!uv.lock'; then
+              echo "Configured provider secret from $name found in tracked content" >&2
+              exit 1
+            fi
+          done
+          echo 'tracked-provider-secret scan PASS'
+
+      - name: Repository hygiene
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          test -z "$(git status --porcelain)"

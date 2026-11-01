@@ -145,6 +145,7 @@ class PlannedTask:
     non_goals: tuple[str, ...] = ()
     required_capabilities: tuple[str, ...] = ()
     acceptance_criteria: tuple[str, ...] = ()
+    worker_profile: str | None = None
     reason_category: str | None = None
     architecture_change: bool = False
     architecture_decision_request: str | None = None
@@ -156,6 +157,8 @@ class PlannedTask:
             raise ValueError("task_id must be non-empty")
         if not self.objective.strip():
             raise ValueError(f"{self.task_id}: objective must be non-empty")
+        if self.worker_profile is not None and not self.worker_profile.strip():
+            raise ValueError(f"{self.task_id}: worker_profile cannot be blank")
         if not self.non_goals:
             raise ValueError(f"{self.task_id}: non_goals are required")
         if not self.acceptance_criteria:
