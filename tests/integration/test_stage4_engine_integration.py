@@ -103,7 +103,9 @@ def test_scope_filename_cannot_expand_implicit_context_topic(tmp_path: Path) -> 
     )
     (tmp_path / "game" / "water").mkdir(parents=True)
     (tmp_path / "game" / "water" / "water_domain.gd").write_text(
-        "class_name WaterDomain\n",
+        "class_name WaterDomain\n"
+        "func open_save(directory: String) -> int:\n"
+        "    return OK\n",
         encoding="utf-8",
     )
     (tmp_path / "game" / "water" / "water_renderer.gd").write_text(
