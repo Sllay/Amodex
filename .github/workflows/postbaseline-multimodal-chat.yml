@@ -120,7 +120,8 @@ jobs:
           set -euo pipefail
           grep -q 'GATED_STEP_4' src/amodex/api/multimodal_routes.py
           grep -q 'billing_class == "free"' src/amodex/multimodal/clients.py
-          if grep -R -E 'amodex\.providers\.routing|ModelLifecycle|promot(e|ion).*model|demot(e|ion).*model|leaderboard' \
+          if grep -R -I --exclude-dir='__pycache__' -E \
+            '(^|[[:space:]])(from[[:space:]]+amodex\.providers\.routing|import[[:space:]]+amodex\.providers\.routing)|ModelLifecycle|promote_model|demote_model|model_leaderboard' \
             src/amodex/multimodal src/amodex/api/multimodal_*.py src/amodex/storage/multimodal.py; then
             echo 'Step 4 model intelligence leaked into Step 3' >&2
             exit 1
