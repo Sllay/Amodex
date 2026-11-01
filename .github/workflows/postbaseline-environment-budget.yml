@@ -121,6 +121,15 @@ jobs:
           echo "NODE_HOME=$NODE_HOME" >> "$GITHUB_ENV"
           echo "$NODE_HOME/bin" >> "$GITHUB_PATH"
 
+      - name: Copy tracked Godot fixture into disposable runtime workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          GODOT_FIXTURE="$RUNNER_TEMP/postbaseline-godot-fixture"
+          rm -rf "$GODOT_FIXTURE"
+          cp -a "$FIXTURE" "$GODOT_FIXTURE"
+          echo "GODOT_FIXTURE=$GODOT_FIXTURE" >> "$GITHUB_ENV"
+
       - name: Verify engine identity and import fixture
         shell: bash
         run: |
@@ -128,7 +137,7 @@ jobs:
           "$GODOT_BIN" --version | tee "$RUNNER_TEMP/godot-version.txt"
           grep -E '^4\.7\.2' "$RUNNER_TEMP/godot-version.txt"
           test "$(node --version)" = 'v22.23.4'
-          timeout 90 "$GODOT_BIN" --headless --editor --path "$FIXTURE" --quit-after 2 \
+          timeout 90 "$GODOT_BIN" --headless --editor --path "$GODOT_FIXTURE" --quit-after 2 \
             2>&1 | tee "$RUNNER_TEMP/godot-import.log"
           if grep -E 'SCRIPT ERROR|Parse Error' "$RUNNER_TEMP/godot-import.log"; then
             echo 'Godot import/parser diagnostics failed' >&2
@@ -139,11 +148,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          export GODOT_BIN FIXTURE RUNNER_TEMP
+          export GODOT_BIN GODOT_FIXTURE RUNNER_TEMP
           seq 1 16 | xargs -P4 -I{} bash -c '
             set -euo pipefail
             log="$RUNNER_TEMP/godot-stress-{}.log"
-            timeout 60 "$GODOT_BIN" --headless --path "$FIXTURE" \
+            timeout 60 "$GODOT_BIN" --headless --path "$GODOT_FIXTURE" \
               --script res://tests/headless_test.gd >"$log" 2>&1
             grep -q "AMODEX_P0_08_HEADLESS_TEST_OK value=42" "$log"
           '
@@ -154,7 +163,7 @@ jobs:
         run: |
           set -euo pipefail
           MCP_FIXTURE="$RUNNER_TEMP/postbaseline-mcp-fixture"
-          cp -a "$FIXTURE" "$MCP_FIXTURE"
+          cp -a "$GODOT_FIXTURE" "$MCP_FIXTURE"
           export GODOT_PATH="$GODOT_BIN"
           npx -y "$GODOT_MCP_PACKAGE" init \
             --project "$MCP_FIXTURE" \
@@ -199,4 +208,8 @@ jobs:
         run: |
           set -euo pipefail
           git diff --exit-code
-          test -z "$(git status --porcelain)"
+          status="$(git status --porcelain)"
+          if [ -n "$status" ]; then
+            printf "%s\n" "$status" >&2
+            exit 1
+          fi
