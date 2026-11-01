@@ -1,7 +1,7 @@
 """Preferred web-first Amodex application composition.
 
 The existing Control Plane app remains the authority owner. This module layers
-workspace/connectors routes and replaces only the default root projection.
+workspace/connectors/media routes and replaces only the default root projection.
 """
 
 from __future__ import annotations
@@ -14,16 +14,25 @@ from fastapi.responses import HTMLResponse
 from amodex.api.app import create_app as create_control_plane_app
 from amodex.api.connector_routes import build_connector_router
 from amodex.api.connector_web import CONNECTOR_HTML
+from amodex.api.multimodal_routes import build_multimodal_router
+from amodex.api.multimodal_web import augment_workspace_html
 from amodex.api.web import DASHBOARD_HTML
 from amodex.api.workspace_routes import build_workspace_router
 from amodex.api.workspace_web import WORKSPACE_HTML
 from amodex.connectors.clients import GitHubAppConnector, RobloxOAuthConnector
 from amodex.connectors.oauth import GitHubAppConfig, RobloxOAuthConfig
 from amodex.connectors.vault import CredentialVault, vault_from_environment
+from amodex.multimodal.clients import MultimodalClients, multimodal_clients_from_environment
+from amodex.multimodal.object_store import (
+    MediaObjectStore,
+    max_upload_bytes_from_environment,
+    media_store_from_environment,
+)
 from amodex.storage.connectors import PostgresConnectorRepository
+from amodex.storage.multimodal import PostgresMultimodalRepository
 from amodex.storage.workspace import PostgresWorkspaceRepository
 
-_RELEASE = "0.4-web-connectors"
+_RELEASE = "0.5-multimodal-chat"
 
 
 def create_workspace_app(
@@ -34,6 +43,10 @@ def create_workspace_app(
     connector_vault: CredentialVault | None = None,
     github_connector: GitHubAppConnector | None = None,
     roblox_connector: RobloxOAuthConnector | None = None,
+    multimodal_repository: PostgresMultimodalRepository | None = None,
+    media_store: MediaObjectStore | None = None,
+    multimodal_clients: MultimodalClients | None = None,
+    max_upload_bytes: int | None = None,
     dsn: str | None = None,
 ) -> FastAPI:
     """Compose the web-first surface without creating a second control plane."""
@@ -49,6 +62,11 @@ def create_workspace_app(
         if not database_url:
             database_url = workspace_repository.dsn
         connector_repository = PostgresConnectorRepository(database_url)
+    if multimodal_repository is None:
+        if not database_url:
+            database_url = workspace_repository.dsn
+        multimodal_repository = PostgresMultimodalRepository(database_url)
+
     connector_vault = connector_vault or vault_from_environment()
     github_connector = github_connector or GitHubAppConnector(
         config=GitHubAppConfig.from_environment(),
@@ -60,6 +78,9 @@ def create_workspace_app(
         repository=connector_repository,
         vault=connector_vault,
     )
+    media_store = media_store or media_store_from_environment()
+    multimodal_clients = multimodal_clients or multimodal_clients_from_environment()
+    max_upload_bytes = max_upload_bytes or max_upload_bytes_from_environment()
 
     # The legacy control-plane root is a projection only. Every pre-existing API
     # authority remains on this same FastAPI object.
@@ -81,16 +102,25 @@ def create_workspace_app(
             vault=connector_vault,
         )
     )
+    base_app.include_router(
+        build_multimodal_router(
+            workspace_repository=workspace_repository,
+            repository=multimodal_repository,
+            media_store=media_store,
+            clients=multimodal_clients,
+            max_upload_bytes=max_upload_bytes,
+        )
+    )
 
     @base_app.get("/", response_class=HTMLResponse, include_in_schema=False)
     async def workspace_page() -> str:
-        # Keep Step 1 HTML immutable while exposing Step 2 as a visible product action.
         marker = '<div class="section"><h3>Sistema</h3>'
         connector_action = (
             '<div class="section"><h3>Connections</h3>'
             '<button class="item" onclick="location.href=\'/connections\'">GitHub / Roblox Resources</button></div>'
         )
-        return WORKSPACE_HTML.replace(marker, connector_action + marker)
+        html = WORKSPACE_HTML.replace(marker, connector_action + marker)
+        return augment_workspace_html(html)
 
     @base_app.get("/connections", response_class=HTMLResponse, include_in_schema=False)
     async def connector_page() -> str:
