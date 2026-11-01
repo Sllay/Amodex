@@ -80,6 +80,12 @@ def validate_director_plan(
         missing = set(task.required_capabilities) - capabilities
         if missing:
             raise PlanRejected(f"{task.task_id}: unavailable capabilities {sorted(missing)!r}")
+        if task.requires_paid_resources:
+            raise PlanRejected(f"{task.task_id}: Director cannot authorize paid resources")
+        if task.requests_promotion:
+            raise PlanRejected(f"{task.task_id}: Director cannot grant promotion authority")
+        if task.architecture_change and not (task.architecture_decision_request or "").strip():
+            raise PlanRejected(f"{task.task_id}: architecture change must be surfaced as a decision request")
         if any(_patterns_overlap(write, protected) for write in task.write_paths for protected in frozen):
             if task.reason_category not in _ALLOWED_REASON_CATEGORIES:
                 raise PlanRejected(f"{task.task_id}: frozen path change lacks accepted reason category")
