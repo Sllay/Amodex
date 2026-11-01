@@ -45,7 +45,13 @@ class AmodexClient:
             if isinstance(detail, dict):
                 message = detail.get("message") or detail.get("code") or json.dumps(detail, ensure_ascii=False)
                 recovery = detail.get("recovery")
-                raise CliError(f"{message}" + (f"\nRecovery: {recovery}" if recovery else ""))
+                job_id = detail.get("job_id")
+                suffix = f"\nJob: {job_id}" if job_id else ""
+                raise CliError(
+                    f"{message}"
+                    + (f"\nRecovery: {recovery}" if recovery else "")
+                    + suffix
+                )
             raise CliError(str(detail))
         return body
 
@@ -62,9 +68,50 @@ def build_parser() -> argparse.ArgumentParser:
     project_add.add_argument("--name")
     project_sub.add_parser("list")
 
+    env = sub.add_parser("env", help="isolated Environment operations")
+    env_sub = env.add_subparsers(dest="env_command", required=True)
+    env_create = env_sub.add_parser("create")
+    env_create.add_argument("name")
+    env_create.add_argument("--engine", help="godot, roblox, or another engine label")
+    env_sub.add_parser("list")
+    env_show = env_sub.add_parser("show")
+    env_show.add_argument("environment_id")
+    env_use = env_sub.add_parser("use", help="validate an Environment and print shell export guidance")
+    env_use.add_argument("environment_id")
+    env_bind = env_sub.add_parser("bind-project")
+    env_bind.add_argument("environment_id")
+    env_bind.add_argument("project_id")
+
+    session = env_sub.add_parser("session", help="Environment session operations")
+    session_sub = session.add_subparsers(dest="env_session_command", required=True)
+    session_create = session_sub.add_parser("create")
+    session_create.add_argument("environment_id")
+    session_create.add_argument("title")
+    session_create.add_argument("--domain")
+    session_list = session_sub.add_parser("list")
+    session_list.add_argument("environment_id")
+
+    env_usage = env_sub.add_parser("usage")
+    env_usage.add_argument("environment_id")
+    env_jobs = env_sub.add_parser("jobs")
+    env_jobs.add_argument("environment_id")
+    env_dispatch = env_sub.add_parser("dispatch", help="queue the correct runner for an Environment")
+    env_dispatch.add_argument("environment_id")
+    env_dispatch.add_argument("run_id")
+    env_dispatch.add_argument("session_id")
+    env_dispatch.add_argument("--profile", default="implementation")
+    env_dispatch.add_argument(
+        "--task-class",
+        choices=("MICRO", "ROUTINE", "STANDARD", "COMPLEX", "CRITICAL"),
+        default="STANDARD",
+    )
+    env_dispatch.add_argument("--write", action="append", default=[], metavar="PATH")
+
     run = sub.add_parser("run", help="start a durable remote run")
     run.add_argument("objective")
     run.add_argument("--project")
+    run.add_argument("--environment", default=os.environ.get("AMODEX_ENVIRONMENT_ID"))
+    run.add_argument("--session", default=os.environ.get("AMODEX_SESSION_ID"))
 
     status = sub.add_parser("status", help="show durable run state")
     status.add_argument("run_id")
@@ -106,8 +153,77 @@ def execute(args: argparse.Namespace, client: AmodexClient) -> Any:
         if args.project_command == "add":
             return client.request("POST", "/v1/projects", payload={"repo_url": args.repo, "name": args.name})
         return client.request("GET", "/v1/projects")
+
+    if args.command == "env":
+        if args.env_command == "create":
+            return client.request(
+                "POST",
+                "/v1/environments",
+                payload={"name": args.name, "engine": args.engine},
+            )
+        if args.env_command == "list":
+            return client.request("GET", "/v1/environments")
+        if args.env_command == "show":
+            return client.request("GET", f"/v1/environments/{args.environment_id}")
+        if args.env_command == "use":
+            item = client.request("GET", f"/v1/environments/{args.environment_id}")
+            return {
+                "environment": item,
+                "shell": f"export AMODEX_ENVIRONMENT_ID={args.environment_id}",
+                "note": "CLI remains stateless; export this variable in the current shell if desired.",
+            }
+        if args.env_command == "bind-project":
+            return client.request(
+                "POST",
+                f"/v1/environments/{args.environment_id}/projects",
+                payload={"project_id": args.project_id},
+            )
+        if args.env_command == "session":
+            if args.env_session_command == "create":
+                return client.request(
+                    "POST",
+                    f"/v1/environments/{args.environment_id}/sessions",
+                    payload={"title": args.title, "domain_key": args.domain},
+                )
+            return client.request(
+                "GET",
+                f"/v1/environments/{args.environment_id}/sessions",
+            )
+        if args.env_command == "usage":
+            return client.request("GET", f"/v1/environments/{args.environment_id}/usage")
+        if args.env_command == "jobs":
+            return client.request("GET", f"/v1/environments/{args.environment_id}/runner-jobs")
+        if args.env_command == "dispatch":
+            return client.request(
+                "POST",
+                f"/v1/environments/{args.environment_id}/runner-jobs",
+                payload={
+                    "run_id": args.run_id,
+                    "session_id": args.session_id,
+                    "worker_profile": args.profile,
+                    "task_class": args.task_class,
+                    "write_paths": args.write,
+                },
+            )
+        raise CliError(f"unsupported env command: {args.env_command}")
+
     if args.command == "run":
-        return client.request("POST", "/v1/runs", payload={"prompt": args.objective, "project_id": args.project})
+        if bool(args.environment) != bool(args.session):
+            raise CliError("--environment and --session must be supplied together")
+        if args.environment and args.session and not args.project:
+            raise CliError("Environment runs require --project")
+        run = client.request(
+            "POST",
+            "/v1/runs",
+            payload={"prompt": args.objective, "project_id": args.project},
+        )
+        if args.environment and args.session:
+            binding = client.request(
+                "POST",
+                f"/v1/environments/{args.environment}/sessions/{args.session}/runs/{run['run_id']}",
+            )
+            return {"run": run, "environment_binding": binding}
+        return run
     if args.command == "status":
         return client.request("GET", f"/v1/runs/{args.run_id}")
     if args.command == "attach":

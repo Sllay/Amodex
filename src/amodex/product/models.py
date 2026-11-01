@@ -1,7 +1,7 @@
-"""Stage 6 product-facing contracts.
+"""Product-facing contracts.
 
 These objects project authoritative runtime state into CLI/web surfaces. They do
-not grant repository/provider/promotion authority by themselves.
+not grant repository/provider/promotion/runner authority by themselves.
 """
 
 from __future__ import annotations
@@ -235,7 +235,7 @@ class CheckpointView(ContractModel):
 
 
 class DashboardSnapshot(ContractModel):
-    schema_version: int = 1
+    schema_version: int = 2
     generated_at: datetime
     release: str
     zero_cost_mode: bool
@@ -251,6 +251,10 @@ class DashboardSnapshot(ContractModel):
     approvals: list[dict[str, Any]] = Field(default_factory=list)
     blockers: list[dict[str, Any]] = Field(default_factory=list)
     timeline: list[dict[str, Any]] = Field(default_factory=list)
+    environments: list[dict[str, Any]] = Field(default_factory=list)
+    environment_sessions: list[dict[str, Any]] = Field(default_factory=list)
+    environment_usage: list[dict[str, Any]] = Field(default_factory=list)
+    environment_runner_jobs: list[dict[str, Any]] = Field(default_factory=list)
 
     @field_validator("generated_at")
     @classmethod

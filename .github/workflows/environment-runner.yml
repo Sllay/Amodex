@@ -1,0 +1,246 @@
+name: environment-runner
+
+on:
+  workflow_dispatch:
+    inputs:
+      job_id:
+        description: Durable Environment runner job ID
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  PYTHONNOUSERSITE: '1'
+  GODOT_VERSION: '4.7.2'
+  GODOT_URL: 'https://github.com/godotengine/godot-builds/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip'
+  GODOT_SHA256: 'cadd3204e728a35d3f13adb7fd0d7902636b79f6b95c40c265eb73b6c35329e4'
+  NODE_VERSION: '22.23.4'
+  NODE_SHA256: '1805bcd35e6815559bd2eb97db438d3fdb0eb3a5e6a977b7c1badca76337e9ce'
+  GODOT_MCP_PACKAGE: '@shin2344234/godot-mcp@0.1.2'
+
+jobs:
+  run-environment-job:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      AMODEX_CONTROL_PLANE_URL: ${{ secrets.AMODEX_CONTROL_PLANE_URL }}
+      AMODEX_RUNNER_CONTROL_TOKEN: ${{ secrets.AMODEX_RUNNER_CONTROL_TOKEN }}
+      AMODEX_JOB_ID: ${{ inputs.job_id }}
+    steps:
+      - name: Require Control Plane runner credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$AMODEX_CONTROL_PLANE_URL"
+          test -n "$AMODEX_RUNNER_CONTROL_TOKEN"
+
+      - name: Checkout exact Amodex runner implementation
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+
+      - name: Recreate isolated Python runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          BOOTSTRAP_VENV="$RUNNER_TEMP/amodex-uv-bootstrap"
+          env -u PYTHONPATH -u PYTHONHOME python3 -m venv "$BOOTSTRAP_VENV"
+          env -u PYTHONPATH -u PYTHONHOME "$BOOTSTRAP_VENV/bin/python" -m pip install --disable-pip-version-check uv==0.10.0
+          UV_BIN="$BOOTSTRAP_VENV/bin/uv"
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" python install 3.13.5
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" sync --python 3.13.5 --extra dev --frozen
+          echo "UV_BIN=$UV_BIN" >> "$GITHUB_ENV"
+
+      - name: Claim exact durable runner job
+        shell: bash
+        run: |
+          set -euo pipefail
+          CLAIM="$RUNNER_TEMP/claim.json"
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --frozen \
+            python -m amodex.runners.client claim "$AMODEX_JOB_ID" \
+              --github-run-id "$GITHUB_RUN_ID" --output "$CLAIM"
+          python3 - "$CLAIM" "$GITHUB_ENV" <<'PY'
+          import json, re, sys
+          body=json.load(open(sys.argv[1],encoding='utf-8'))
+          job=body['job']
+          if job['runner_kind'] != 'ACTIONS_HEADLESS':
+              raise SystemExit(f"job requires {job['runner_kind']}, not Linux Actions")
+          repo=body['repo_url'].strip()
+          match=re.fullmatch(r'https://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?',repo)
+          if not match:
+              raise SystemExit('runner only clones scoped HTTPS github.com repositories')
+          clean=f"https://github.com/{match.group(1)}/{match.group(2)}.git"
+          engine=(job.get('engine') or '').strip().lower()
+          with open(sys.argv[2],'a',encoding='utf-8') as out:
+              out.write(f"TARGET_REPO={clean}\n")
+              out.write(f"TARGET_ENGINE={engine}\n")
+              out.write(f"TARGET_BRANCH={job.get('branch_name') or ''}\n")
+              out.write(f"TARGET_RUN_ID={job['run_id']}\n")
+          print(json.dumps({
+              'job_id':job['job_id'],
+              'environment_id':job['environment_id'],
+              'engine':engine,
+              'runner_kind':job['runner_kind'],
+              'capabilities':body.get('capabilities',[]),
+          },sort_keys=True))
+          PY
+
+      - name: Clone only the scoped project
+        shell: bash
+        env:
+          AMODEX_PROJECTS_TOKEN: ${{ secrets.AMODEX_PROJECTS_TOKEN }}
+        run: |
+          set -euo pipefail
+          PROJECT="$RUNNER_TEMP/project"
+          if [ -n "${AMODEX_PROJECTS_TOKEN:-}" ]; then
+            ASKPASS="$RUNNER_TEMP/amodex-git-askpass.sh"
+            cat >"$ASKPASS" <<'SH'
+          #!/usr/bin/env sh
+          case "$1" in
+            *Username*) printf '%s\n' 'x-access-token' ;;
+            *Password*) printf '%s\n' "$AMODEX_PROJECTS_TOKEN" ;;
+            *) printf '%s\n' '' ;;
+          esac
+          SH
+            chmod 700 "$ASKPASS"
+            GIT_ASKPASS="$ASKPASS" GIT_TERMINAL_PROMPT=0 git clone --depth 1 "$TARGET_REPO" "$PROJECT"
+            rm -f "$ASKPASS"
+          else
+            GIT_TERMINAL_PROMPT=0 git clone --depth 1 "$TARGET_REPO" "$PROJECT"
+          fi
+          unset AMODEX_PROJECTS_TOKEN
+          echo "TARGET_PROJECT=$PROJECT" >> "$GITHUB_ENV"
+          git -C "$PROJECT" rev-parse HEAD | tee "$RUNNER_TEMP/source-sha.txt"
+
+      - name: Mark runner job active
+        shell: bash
+        run: |
+          set -euo pipefail
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --frozen \
+            python -m amodex.runners.client running "$AMODEX_JOB_ID"
+
+      - name: Install Godot and Node only for Godot Environments
+        if: ${{ env.TARGET_ENGINE == 'godot' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 --output "$RUNNER_TEMP/godot.zip" "$GODOT_URL"
+          printf '%s  %s\n' "$GODOT_SHA256" "$RUNNER_TEMP/godot.zip" | sha256sum --check --strict
+          mkdir -p "$RUNNER_TEMP/godot"
+          unzip -q "$RUNNER_TEMP/godot.zip" -d "$RUNNER_TEMP/godot"
+          GODOT_BIN="$RUNNER_TEMP/godot/Godot_v4.7.2-stable_linux.x86_64"
+          chmod +x "$GODOT_BIN"
+
+          NODE_ARCHIVE="node-v${NODE_VERSION}-linux-x64.tar.xz"
+          curl --fail --location --retry 3 --output "$RUNNER_TEMP/$NODE_ARCHIVE" \
+            "https://nodejs.org/dist/v${NODE_VERSION}/${NODE_ARCHIVE}"
+          printf '%s  %s\n' "$NODE_SHA256" "$RUNNER_TEMP/$NODE_ARCHIVE" | sha256sum --check --strict
+          tar -xJf "$RUNNER_TEMP/$NODE_ARCHIVE" -C "$RUNNER_TEMP"
+          NODE_HOME="$RUNNER_TEMP/node-v${NODE_VERSION}-linux-x64"
+          echo "GODOT_BIN=$GODOT_BIN" >> "$GITHUB_ENV"
+          echo "NODE_HOME=$NODE_HOME" >> "$GITHUB_ENV"
+          echo "$NODE_HOME/bin" >> "$GITHUB_PATH"
+
+      - name: Validate Godot project headlessly
+        if: ${{ env.TARGET_ENGINE == 'godot' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "$TARGET_PROJECT/project.godot"
+          timeout 120 "$GODOT_BIN" --headless --editor --path "$TARGET_PROJECT" --quit-after 2 \
+            2>&1 | tee "$RUNNER_TEMP/godot-import.log"
+          if grep -E 'SCRIPT ERROR|Parse Error' "$RUNNER_TEMP/godot-import.log"; then
+            echo 'Godot parser/import validation failed' >&2
+            exit 1
+          fi
+          if [ -f "$TARGET_PROJECT/tests/headless_test.gd" ]; then
+            timeout 90 "$GODOT_BIN" --headless --path "$TARGET_PROJECT" \
+              --script res://tests/headless_test.gd | tee "$RUNNER_TEMP/godot-project-test.log"
+          fi
+
+      - name: Probe Godot MCP against a disposable project copy
+        if: ${{ env.TARGET_ENGINE == 'godot' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          MCP_PROJECT="$RUNNER_TEMP/mcp-project"
+          cp -a "$TARGET_PROJECT" "$MCP_PROJECT"
+          rm -rf "$MCP_PROJECT/.godot"
+          export GODOT_PATH="$GODOT_BIN"
+          npx -y "$GODOT_MCP_PACKAGE" init \
+            --project "$MCP_PROJECT" --yes --agents codex --no-agents-md --no-claude-md \
+            | tee "$RUNNER_TEMP/godot-mcp-init.log"
+          python3 research/p0-08-godot-headless/mcp_probe.py \
+            --npx "$NODE_HOME/bin/npx" \
+            --package "$GODOT_MCP_PACKAGE" \
+            --project "$MCP_PROJECT" \
+            --godot "$GODOT_BIN" \
+            --require-addon --require-scene-backend \
+            | tee "$RUNNER_TEMP/godot-mcp-probe.json"
+          grep -q '"status": "PASS"' "$RUNNER_TEMP/godot-mcp-probe.json"
+
+      - name: Validate generic repository envelope
+        if: ${{ env.TARGET_ENGINE != 'godot' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -C "$TARGET_PROJECT" fsck --no-progress
+
+      - name: Build validation evidence
+        if: ${{ success() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - "$RUNNER_TEMP/evidence.json" <<'PY'
+          import json, os, pathlib, sys
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])
+          evidence={
+              'runner':'github-actions',
+              'github_run_id':os.environ.get('GITHUB_RUN_ID'),
+              'engine':os.environ.get('TARGET_ENGINE') or 'generic',
+              'source_sha':(root/'source-sha.txt').read_text().strip(),
+              'godot_import':(root/'godot-import.log').exists(),
+              'godot_mcp_probe':(root/'godot-mcp-probe.json').exists(),
+          }
+          pathlib.Path(sys.argv[1]).write_text(json.dumps(evidence,sort_keys=True),encoding='utf-8')
+          PY
+
+      - name: Report successful validation
+        if: ${{ success() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          SOURCE_SHA="$(cat "$RUNNER_TEMP/source-sha.txt")"
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --frozen \
+            python -m amodex.runners.client report "$AMODEX_JOB_ID" \
+              --state COMPLETED \
+              --summary "Disposable runner reconstructed and validated the scoped project" \
+              --result-commit "$SOURCE_SHA" \
+              --github-run-id "$GITHUB_RUN_ID" \
+              --evidence-json "$RUNNER_TEMP/evidence.json"
+
+      - name: Report runner failure
+        if: ${{ failure() }}
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${UV_BIN:-}" ]; then
+            env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --frozen \
+              python -m amodex.runners.client report "$AMODEX_JOB_ID" \
+                --state FAILED \
+                --summary "Disposable runner failed; inspect GitHub Actions evidence" \
+                --github-run-id "$GITHUB_RUN_ID"
+          fi
+
+      - name: Prove project repository was never pushed or credential-persisted
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -d "${TARGET_PROJECT:-}/.git" ]; then
+            git -C "$TARGET_PROJECT" remote -v
+            test -z "$(git -C "$TARGET_PROJECT" config --local --get-regexp 'http\..*\.extraheader' || true)"
+          fi
