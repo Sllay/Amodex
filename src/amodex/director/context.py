@@ -54,6 +54,30 @@ _STOP = {
     "behavior",
     "requirements",
 }
+_LOW_INFORMATION_SYMBOL_TOKENS = {
+    # Common lifecycle/CRUD verbs occur across unrelated subsystems. They may
+    # remain meaningful in an objective or document path, but they must not make
+    # an arbitrary source file relevant merely because it exposes e.g. open_save.
+    "save",
+    "load",
+    "open",
+    "close",
+    "read",
+    "write",
+    "get",
+    "set",
+    "create",
+    "delete",
+    "remove",
+    "add",
+    "start",
+    "stop",
+    "update",
+    "process",
+    "configure",
+    "flush",
+    "reset",
+}
 
 
 def _tokens(text: str) -> set[str]:
@@ -88,7 +112,7 @@ def _symbol_tokens(entry: RepositoryEntry) -> set[str]:
     result: set[str] = set()
     for symbol in entry.symbols:
         result.update(_tokens(symbol))
-    return result
+    return result - _LOW_INFORMATION_SYMBOL_TOKENS
 
 
 def _provenance(entry: RepositoryEntry) -> Provenance:
