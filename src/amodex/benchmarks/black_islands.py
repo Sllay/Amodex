@@ -80,7 +80,10 @@ def _relevant_gdscript_paths(snapshot) -> tuple[tuple[str, ...], tuple[str, ...]
         for entry in snapshot.entries
         if entry.language == "gdscript"
         and entry.path.startswith("game/")
-        and any(token in entry.path.lower() for token in ("inventory", "craft", "recipe", "spoil", "container"))
+        and any(
+            token in entry.path.lower()
+            for token in ("inventory", "craft", "recipe", "spoil", "container")
+        )
     ]
     domain: list[str] = []
     ux: list[str] = []
@@ -104,18 +107,51 @@ def _focused_docs(snapshot) -> tuple[str, ...]:
         for entry in snapshot.entries
         if entry.safe_text is not None
         and entry.path.startswith("docs/")
-        and any(token in entry.path.lower() for token in ("inventory", "craft", "save", "transaction"))
+        and any(
+            token in entry.path.lower()
+            for token in ("inventory", "craft", "save", "transaction")
+        )
     ]
     return tuple(sorted(docs)[:10])
+
+
+def _is_intentional_inventory_bridge(snapshot, task: PlannedTask, path: str) -> bool:
+    """Recognize a real cross-domain inventory boundary instead of folder names.
+
+    Black-Islands keeps some inventory-owned item-instance behavior under another
+    subsystem directory. Such a file is relevant to inventory planning only when
+    the live source proves it directly consumes ``InventoryState`` and performs
+    inventory mutation/commit behavior. This keeps the benchmark strict against
+    water simulation internals while avoiding a false positive for the watering
+    can's finite inventory instance module.
+    """
+
+    if not task.task_id.startswith("bi1-inventory"):
+        return False
+    entry = snapshot.by_path.get(path)
+    if entry is None or entry.safe_text is None:
+        return False
+    text = entry.safe_text
+    return (
+        "InventoryState" in text
+        and "item_id" in text
+        and any(marker in text for marker in ("_commit()", "record_by_uid", "_by_uid"))
+    )
 
 
 def run_bi0_bi1(repository_root: Path) -> BlackIslandsBenchmarkReport:
     root = repository_root.resolve()
     base_sha = _git_sha(root)
-    snapshot = ingest_repository(root, project_id="Sllay/Black-Islands", base_sha=base_sha)
+    snapshot = ingest_repository(
+        root,
+        project_id="Sllay/Black-Islands",
+        base_sha=base_sha,
+    )
     profile = GodotIntegrationAdapter().detect(str(root))
     if profile is None:
-        raise BlackIslandsBenchmarkError("BI-0 failed to detect Godot integration profile")
+        raise BlackIslandsBenchmarkError(
+            "BI-0 failed to detect Godot integration profile"
+        )
 
     agents = (root / "AGENTS.md").read_text(encoding="utf-8")
     required_paths = (
@@ -130,36 +166,66 @@ def run_bi0_bi1(repository_root: Path) -> BlackIslandsBenchmarkReport:
     )
     missing = [path for path in required_paths if not (root / path).is_file()]
     if missing:
-        raise BlackIslandsBenchmarkError(f"BI-0 required live paths missing: {missing!r}")
+        raise BlackIslandsBenchmarkError(
+            f"BI-0 required live paths missing: {missing!r}"
+        )
     if profile.runtime_root != "game":
-        raise BlackIslandsBenchmarkError(f"BI-0 runtime root drifted: {profile.runtime_root!r}")
+        raise BlackIslandsBenchmarkError(
+            f"BI-0 runtime root drifted: {profile.runtime_root!r}"
+        )
     if profile.project_descriptor != "game/project.godot":
         raise BlackIslandsBenchmarkError(
             f"BI-0 project descriptor drifted: {profile.project_descriptor!r}"
         )
     if profile.engine_version != "4.7.2":
-        raise BlackIslandsBenchmarkError(f"BI-0 Godot version drifted: {profile.engine_version!r}")
+        raise BlackIslandsBenchmarkError(
+            f"BI-0 Godot version drifted: {profile.engine_version!r}"
+        )
     if snapshot.project.root_contracts != ("AGENTS.md",):
         raise BlackIslandsBenchmarkError(
             f"BI-0 root authority mismatch: {snapshot.project.root_contracts!r}"
         )
     phase = snapshot.by_path["harness/context/S01-RC0-R3.md"]
     if phase.authority != DocumentAuthority.PHASE:
-        raise BlackIslandsBenchmarkError("BI-0 harness phase contract lost PHASE authority")
+        raise BlackIslandsBenchmarkError(
+            "BI-0 harness phase contract lost PHASE authority"
+        )
 
     tool_names = tuple(sorted(tool.name for tool in profile.tools))
     if "serena" not in tool_names or "godot-mcp" not in tool_names:
-        raise BlackIslandsBenchmarkError(f"BI-0 tooling detection incomplete: {tool_names!r}")
+        raise BlackIslandsBenchmarkError(
+            f"BI-0 tooling detection incomplete: {tool_names!r}"
+        )
     if IntegrationCapability.SYMBOL_NAVIGATION not in profile.capabilities:
-        raise BlackIslandsBenchmarkError("BI-0 Serena semantic capability not detected")
+        raise BlackIslandsBenchmarkError(
+            "BI-0 Serena semantic capability not detected"
+        )
     if IntegrationCapability.PLAYTEST_CONTROL not in profile.capabilities:
-        raise BlackIslandsBenchmarkError("BI-0 Godot runtime capability not detected")
+        raise BlackIslandsBenchmarkError(
+            "BI-0 Godot runtime capability not detected"
+        )
 
     assertions = (
-        _must_contain(agents, "Do not preload the whole repository into context", "progressive disclosure"),
-        _must_contain(agents, "main` represents validated work", "validated-only main"),
-        _must_contain(agents, "Never silently upgrade Godot", "no silent toolchain upgrade"),
-        _must_contain(agents, "two agents must not edit the same files concurrently", "one writer policy"),
+        _must_contain(
+            agents,
+            "Do not preload the whole repository into context",
+            "progressive disclosure",
+        ),
+        _must_contain(
+            agents,
+            "main` represents validated work",
+            "validated-only main",
+        ),
+        _must_contain(
+            agents,
+            "Never silently upgrade Godot",
+            "no silent toolchain upgrade",
+        ),
+        _must_contain(
+            agents,
+            "two agents must not edit the same files concurrently",
+            "one writer policy",
+        ),
         _must_contain(agents, "Serena", "Serena preference"),
         _must_contain(agents, "Godot MCP", "Godot MCP role"),
         _must_contain(agents, "Definition of done", "phase definition of done"),
@@ -176,7 +242,9 @@ def run_bi0_bi1(repository_root: Path) -> BlackIslandsBenchmarkReport:
 
     domain_paths, ux_paths, crafting_paths = _relevant_gdscript_paths(snapshot)
     if not (domain_paths or ux_paths or crafting_paths):
-        raise BlackIslandsBenchmarkError("BI-1 could not discover inventory/crafting implementation scope")
+        raise BlackIslandsBenchmarkError(
+            "BI-1 could not discover inventory/crafting implementation scope"
+        )
     focused_docs = _focused_docs(snapshot)
     common_reads = (
         "harness/context/S01-RC0-R3.md",
@@ -186,7 +254,10 @@ def run_bi0_bi1(repository_root: Path) -> BlackIslandsBenchmarkReport:
     tasks = (
         PlannedTask(
             task_id="bi1-inventory-domain",
-            objective="Plan transactional inventory, spoilage, save migration, and ownership-safe domain changes for historical Foundation C02.",
+            objective=(
+                "Plan transactional inventory, spoilage, save migration, and "
+                "ownership-safe domain changes for historical Foundation C02."
+            ),
             write_paths=domain_paths,
             read_paths=common_reads,
             non_goals=(
@@ -203,7 +274,10 @@ def run_bi0_bi1(repository_root: Path) -> BlackIslandsBenchmarkReport:
         ),
         PlannedTask(
             task_id="bi1-inventory-ux",
-            objective="Plan production inventory gesture and paired-container UX without moving authority into widgets.",
+            objective=(
+                "Plan production inventory gesture and paired-container UX "
+                "without moving authority into widgets."
+            ),
             dependencies=("bi1-inventory-domain",),
             write_paths=ux_paths,
             read_paths=common_reads,
@@ -220,7 +294,10 @@ def run_bi0_bi1(repository_root: Path) -> BlackIslandsBenchmarkReport:
         ),
         PlannedTask(
             task_id="bi1-crafting-domain",
-            objective="Plan five-slot crafting queue, atomic resource consumption, workbench scope, overflow, and save behavior for Foundation C02.",
+            objective=(
+                "Plan five-slot crafting queue, atomic resource consumption, "
+                "workbench scope, overflow, and save behavior for Foundation C02."
+            ),
             dependencies=("bi1-inventory-domain",),
             write_paths=crafting_paths,
             read_paths=common_reads,
@@ -237,7 +314,10 @@ def run_bi0_bi1(repository_root: Path) -> BlackIslandsBenchmarkReport:
         ),
         PlannedTask(
             task_id="bi1-acceptance",
-            objective="Plan integrated C02 regression, save, Godot runtime, and evidence gates without changing product scope.",
+            objective=(
+                "Plan integrated C02 regression, save, Godot runtime, and "
+                "evidence gates without changing product scope."
+            ),
             dependencies=("bi1-inventory-ux", "bi1-crafting-domain"),
             read_paths=common_reads,
             non_goals=(
@@ -255,10 +335,15 @@ def run_bi0_bi1(repository_root: Path) -> BlackIslandsBenchmarkReport:
     plan = TaskPlan(
         project_id="Sllay/Black-Islands",
         base_sha=base_sha,
-        objective="Dry-run historical S01-RC0-R3 C02 inventory/crafting planning benchmark.",
+        objective=(
+            "Dry-run historical S01-RC0-R3 C02 inventory/crafting planning benchmark."
+        ),
         tasks=tasks,
     )
-    validate_director_plan(plan, available_capabilities={"serena", "godot-mcp"})
+    validate_director_plan(
+        plan,
+        available_capabilities={"serena", "godot-mcp"},
+    )
 
     capsule_paths: dict[str, tuple[str, ...]] = {}
     capsule_reduction: dict[str, float] = {}
@@ -266,19 +351,28 @@ def run_bi0_bi1(repository_root: Path) -> BlackIslandsBenchmarkReport:
         capsule = compile_context(snapshot, task, current_base_sha=base_sha)
         paths = tuple(section.path for section in capsule.sections)
         if "AGENTS.md" not in paths:
-            raise BlackIslandsBenchmarkError(f"BI-1 {task.task_id} capsule omitted root contract")
+            raise BlackIslandsBenchmarkError(
+                f"BI-1 {task.task_id} capsule omitted root contract"
+            )
         if "harness/context/S01-RC0-R3.md" not in paths:
-            raise BlackIslandsBenchmarkError(f"BI-1 {task.task_id} capsule omitted current phase contract")
+            raise BlackIslandsBenchmarkError(
+                f"BI-1 {task.task_id} capsule omitted current phase contract"
+            )
         unrelated = tuple(
             path
             for path in paths
-            if any(token in path.lower() for token in ("water", "cave", "biome", "npc"))
+            if any(
+                token in path.lower()
+                for token in ("water", "cave", "biome", "npc")
+            )
             and path not in task.read_paths
             and path not in task.write_paths
+            and not _is_intentional_inventory_bridge(snapshot, task, path)
         )
         if unrelated:
             raise BlackIslandsBenchmarkError(
-                f"BI-1 {task.task_id} context drifted into unrelated systems: {unrelated[:5]!r}"
+                f"BI-1 {task.task_id} context drifted into unrelated systems: "
+                f"{unrelated[:5]!r}"
             )
         capsule_paths[task.task_id] = paths
         capsule_reduction[task.task_id] = capsule.reduction_ratio
@@ -317,7 +411,10 @@ def run_bi0_bi1(repository_root: Path) -> BlackIslandsBenchmarkReport:
             "before destructive/manual test sessions",
             "before Runner teardown when meaningful progress exists",
         ),
-        expected_branch_policy="season/<season-name> + codex/<season>-<phase>-<scope>; never worker->main",
+        expected_branch_policy=(
+            "season/<season-name> + codex/<season>-<phase>-<scope>; "
+            "never worker->main"
+        ),
         known_limits=(
             "BI-1 is dry-run and creates no Black-Islands repository state.",
             "Desktop/windowed evidence cannot prove physical-mobile ergonomics or performance.",
@@ -347,7 +444,10 @@ def _jsonable_report(report: BlackIslandsBenchmarkReport) -> dict[str, object]:
 def main(argv: list[str] | None = None) -> int:
     args = argv if argv is not None else sys.argv[1:]
     if len(args) != 1:
-        print("usage: python -m amodex.benchmarks.black_islands <Black-Islands checkout>", file=sys.stderr)
+        print(
+            "usage: python -m amodex.benchmarks.black_islands <Black-Islands checkout>",
+            file=sys.stderr,
+        )
         return 2
     report = run_bi0_bi1(Path(args[0]))
     print(json.dumps(_jsonable_report(report), indent=2, sort_keys=True))
