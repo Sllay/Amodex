@@ -34,7 +34,7 @@ body{margin:0}.shell{max-width:1580px;margin:auto;padding:20px}.top{display:flex
 <section class="card"><h2>Runs</h2><div id="runs" class="scroll"></div></section>
 <section class="card"><h2>Task DAG / status</h2><div id="tasks" class="scroll"></div></section>
 <section class="card"><h2>Provider availability / quota</h2><div id="providers" class="scroll"></div></section>
-<section class="card"><h2>Runner heartbeat</h2><div id="runners" class="scroll"></div></section>
+<section class="card"><h2>Runner status / heartbeat</h2><div id="runners" class="scroll"></div></section>
 <section class="card"><h2>Approvals / blockers</h2><div id="approvals" class="scroll"></div><div id="blockers" class="scroll"></div></section>
 <section class="card"><h2>Checkpoints / candidates / promotions</h2><div id="gitstate" class="scroll"></div></section>
 <section class="card"><h2>Validation evidence / artifacts</h2><div id="evidence" class="scroll"></div></section>
