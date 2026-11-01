@@ -56,20 +56,19 @@ jobs:
           set -euo pipefail
           cd "$HERMES_DIR"
           source ./activate
-          python -m pip install --disable-pip-version-check pytest==9.0.2
           export PYTHONPATH="$GITHUB_WORKSPACE/src${PYTHONPATH:+:$PYTHONPATH}"
 
-          PYTEST_LOCATION="$(python -m pip show pytest | awk -F': ' '/^Location:/{print $2}')"
-          test -n "$PYTEST_LOCATION"
-          HERMES_VENV_ROOT="$(dirname "$(dirname "$(dirname "$PYTEST_LOCATION")")")"
-          HERMES_VENV_PYTHON="$HERMES_VENV_ROOT/bin/python"
-          test -x "$HERMES_VENV_PYTHON"
-          "$HERMES_VENV_PYTHON" -c 'import pytest, pygments, sys; print(sys.executable)'
+          VALIDATOR_VENV="$RUNNER_TEMP/amodex-validator-venv"
+          python -m venv "$VALIDATOR_VENV"
+          "$VALIDATOR_VENV/bin/python" -m pip install --disable-pip-version-check pytest==9.0.2
+          VALIDATOR_SITE="$($VALIDATOR_VENV/bin/python -c 'import site; print(site.getsitepackages()[0])')"
+          test -d "$VALIDATOR_SITE"
+          PYTHONNOUSERSITE=1 "$VALIDATOR_VENV/bin/python" -c 'import pytest, pygments, sys; print(sys.prefix)'
 
-          "$HERMES_VENV_PYTHON" "$GITHUB_WORKSPACE/scripts/stage2_hermes_probe.py" \
+          python "$GITHUB_WORKSPACE/scripts/stage2_hermes_probe.py" \
             --hermes-root "$HERMES_DIR" \
-            --validator-python "$HERMES_VENV_PYTHON" \
-            --validator-pythonpath "$PYTEST_LOCATION" \
+            --validator-python "$VALIDATOR_VENV/bin/python" \
+            --validator-pythonpath "$VALIDATOR_SITE" \
             --output "$RUNNER_TEMP/stage2-hermes-result.json"
           cat "$RUNNER_TEMP/stage2-hermes-result.json"
 
