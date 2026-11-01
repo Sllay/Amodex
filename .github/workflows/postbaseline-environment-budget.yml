@@ -1,0 +1,202 @@
+name: postbaseline-environment-budget-stress
+
+on:
+  push:
+    branches:
+      - postbaseline/environment-isolation-budget-v1
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'src/amodex/environments/**'
+      - 'src/amodex/providers/budget.py'
+      - 'src/amodex/storage/environment.py'
+      - 'src/amodex/benchmarks/environment_budget_stress.py'
+      - 'migrations/postbaseline/**'
+      - 'tests/unit/test_postbaseline_*.py'
+      - 'tests/integration/test_postbaseline_*.py'
+      - 'docs/POST_BASELINE_ENVIRONMENT_BUDGET_V1.md'
+      - '.github/workflows/postbaseline-environment-budget.yml'
+
+permissions:
+  contents: read
+
+env:
+  PYTHONNOUSERSITE: '1'
+  GODOT_VERSION: '4.7.2'
+  GODOT_URL: 'https://github.com/godotengine/godot-builds/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip'
+  GODOT_SHA256: 'cadd3204e728a35d3f13adb7fd0d7902636b79f6b95c40c265eb73b6c35329e4'
+  NODE_VERSION: '22.23.4'
+  NODE_SHA256: '1805bcd35e6815559bd2eb97db438d3fdb0eb3a5e6a977b7c1badca76337e9ce'
+  GODOT_MCP_PACKAGE: '@shin2344234/godot-mcp@0.1.2'
+  FIXTURE: 'research/p0-08-godot-headless/fixture'
+
+jobs:
+  environment-budget-godot-stress:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    services:
+      postgres:
+        image: postgres@sha256:1beaa3084eee2676f20a9cd9928f0bf2c5bf674f8e49f81017912183d377c61c
+        env:
+          POSTGRES_USER: amodex
+          POSTGRES_PASSWORD: amodex
+          POSTGRES_DB: amodex_postbaseline
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U amodex -d amodex_postbaseline"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      AMODEX_TEST_DATABASE_URL: postgresql://amodex:amodex@127.0.0.1:5432/amodex_postbaseline
+
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+
+      - name: Recreate isolated Python runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          BOOTSTRAP_VENV="$RUNNER_TEMP/amodex-uv-bootstrap"
+          env -u PYTHONPATH -u PYTHONHOME python3 -m venv "$BOOTSTRAP_VENV"
+          env -u PYTHONPATH -u PYTHONHOME "$BOOTSTRAP_VENV/bin/python" -m pip install --disable-pip-version-check uv==0.10.0
+          UV_BIN="$BOOTSTRAP_VENV/bin/uv"
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" python install 3.13.5
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" sync --python 3.13.5 --extra dev --frozen
+          echo "UV_BIN=$UV_BIN" >> "$GITHUB_ENV"
+
+      - name: Run environment isolation, budget and routing regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --extra dev --frozen pytest -q \
+            tests/unit \
+            tests/integration/test_stage5_capability_routing.py \
+            tests/integration/test_postbaseline_environment_storage.py
+
+      - name: Run deterministic 600-task quota stress
+        shell: bash
+        run: |
+          set -euo pipefail
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --extra dev --frozen \
+            python -m amodex.benchmarks.environment_budget_stress | tee "$RUNNER_TEMP/environment-budget-stress.json"
+          python3 - "$RUNNER_TEMP/environment-budget-stress.json" <<'PY'
+          import json
+          import sys
+          body = json.load(open(sys.argv[1], encoding="utf-8"))
+          assert body["requested_tasks"] == 600, body
+          assert body["completed_tasks"] == 600, body
+          assert body["blocked_tasks"] == 0, body
+          assert body["cross_environment_blocks"] == 600, body
+          assert body["paid_route_selections"] == 0, body
+          assert body["provider_failover_events"] == 2, body
+          print("POSTBASELINE_ROUTING_STRESS_OK")
+          PY
+
+      - name: Install exact Godot and Node pins
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 --output "$RUNNER_TEMP/godot.zip" "$GODOT_URL"
+          printf '%s  %s\n' "$GODOT_SHA256" "$RUNNER_TEMP/godot.zip" | sha256sum --check --strict
+          mkdir -p "$RUNNER_TEMP/godot"
+          unzip -q "$RUNNER_TEMP/godot.zip" -d "$RUNNER_TEMP/godot"
+          GODOT_BIN="$RUNNER_TEMP/godot/Godot_v4.7.2-stable_linux.x86_64"
+          chmod +x "$GODOT_BIN"
+
+          NODE_ARCHIVE="node-v${NODE_VERSION}-linux-x64.tar.xz"
+          curl --fail --location --retry 3 --output "$RUNNER_TEMP/$NODE_ARCHIVE" \
+            "https://nodejs.org/dist/v${NODE_VERSION}/${NODE_ARCHIVE}"
+          printf '%s  %s\n' "$NODE_SHA256" "$RUNNER_TEMP/$NODE_ARCHIVE" | sha256sum --check --strict
+          tar -xJf "$RUNNER_TEMP/$NODE_ARCHIVE" -C "$RUNNER_TEMP"
+          NODE_HOME="$RUNNER_TEMP/node-v${NODE_VERSION}-linux-x64"
+
+          echo "GODOT_BIN=$GODOT_BIN" >> "$GITHUB_ENV"
+          echo "NODE_HOME=$NODE_HOME" >> "$GITHUB_ENV"
+          echo "$NODE_HOME/bin" >> "$GITHUB_PATH"
+
+      - name: Verify engine identity and import fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$GODOT_BIN" --version | tee "$RUNNER_TEMP/godot-version.txt"
+          grep -E '^4\.7\.2' "$RUNNER_TEMP/godot-version.txt"
+          test "$(node --version)" = 'v22.23.4'
+          timeout 90 "$GODOT_BIN" --headless --editor --path "$FIXTURE" --quit-after 2 \
+            2>&1 | tee "$RUNNER_TEMP/godot-import.log"
+          if grep -E 'SCRIPT ERROR|Parse Error' "$RUNNER_TEMP/godot-import.log"; then
+            echo 'Godot import/parser diagnostics failed' >&2
+            exit 1
+          fi
+
+      - name: Stress 16 real Godot headless executions with bounded parallelism
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GODOT_BIN FIXTURE RUNNER_TEMP
+          seq 1 16 | xargs -P4 -I{} bash -c '
+            set -euo pipefail
+            log="$RUNNER_TEMP/godot-stress-{}.log"
+            timeout 60 "$GODOT_BIN" --headless --path "$FIXTURE" \
+              --script res://tests/headless_test.gd >"$log" 2>&1
+            grep -q "AMODEX_P0_08_HEADLESS_TEST_OK value=42" "$log"
+          '
+          echo 'GODOT_PARALLEL_STRESS_OK runs=16 max_parallel=4'
+
+      - name: Probe the already-proven pinned Godot MCP in headless Actions
+        shell: bash
+        run: |
+          set -euo pipefail
+          MCP_FIXTURE="$RUNNER_TEMP/postbaseline-mcp-fixture"
+          cp -a "$FIXTURE" "$MCP_FIXTURE"
+          export GODOT_PATH="$GODOT_BIN"
+          npx -y "$GODOT_MCP_PACKAGE" init \
+            --project "$MCP_FIXTURE" \
+            --yes \
+            --agents codex \
+            --no-agents-md \
+            --no-claude-md \
+            | tee "$RUNNER_TEMP/godot-mcp-init.log"
+          test -f "$MCP_FIXTURE/addons/godot_mcp/plugin.cfg"
+
+          python3 research/p0-08-godot-headless/mcp_probe.py \
+            --npx "$NODE_HOME/bin/npx" \
+            --package "$GODOT_MCP_PACKAGE" \
+            --project "$MCP_FIXTURE" \
+            --godot "$GODOT_BIN" \
+            --require-addon \
+            --require-scene-backend \
+            | tee "$RUNNER_TEMP/godot-mcp-probe.json"
+          grep -q '"godot_status_call_succeeded": true' "$RUNNER_TEMP/godot-mcp-probe.json"
+          grep -q '"addon_installed": true' "$RUNNER_TEMP/godot-mcp-probe.json"
+          if grep -q '"scene_backend": "unavailable"' "$RUNNER_TEMP/godot-mcp-probe.json"; then
+            echo 'Godot MCP headless scene backend unavailable' >&2
+            exit 1
+          fi
+          echo 'GODOT_MCP_ACTIONS_OK'
+
+      - name: Record runner resource envelope
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '=== memory ==='
+          free -m
+          echo '=== disk ==='
+          df -h .
+          echo '=== process count ==='
+          ps -e --no-headers | wc -l
+          echo '=== stress artifact ==='
+          cat "$RUNNER_TEMP/environment-budget-stress.json"
+
+      - name: Repository hygiene
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          test -z "$(git status --porcelain)"
