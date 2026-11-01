@@ -13,6 +13,7 @@ from fastapi.responses import HTMLResponse
 
 from amodex.api.app import create_app as create_control_plane_app
 from amodex.api.connector_routes import build_connector_router
+from amodex.api.connector_web import CONNECTOR_HTML
 from amodex.api.web import DASHBOARD_HTML
 from amodex.api.workspace_routes import build_workspace_router
 from amodex.api.workspace_web import WORKSPACE_HTML
@@ -83,7 +84,17 @@ def create_workspace_app(
 
     @base_app.get("/", response_class=HTMLResponse, include_in_schema=False)
     async def workspace_page() -> str:
-        return WORKSPACE_HTML
+        # Keep Step 1 HTML immutable while exposing Step 2 as a visible product action.
+        marker = '<div class="section"><h3>Sistema</h3>'
+        connector_action = (
+            '<div class="section"><h3>Connections</h3>'
+            '<button class="item" onclick="location.href=\'/connections\'">GitHub / Roblox Resources</button></div>'
+        )
+        return WORKSPACE_HTML.replace(marker, connector_action + marker)
+
+    @base_app.get("/connections", response_class=HTMLResponse, include_in_schema=False)
+    async def connector_page() -> str:
+        return CONNECTOR_HTML
 
     @base_app.get("/legacy", response_class=HTMLResponse, include_in_schema=False)
     async def legacy_dashboard() -> str:
