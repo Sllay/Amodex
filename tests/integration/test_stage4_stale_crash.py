@@ -194,6 +194,10 @@ def test_stale_non_overlapping_candidate_reintegrates_but_contract_change_blocks
         assert "a1" in (checkout / "a.py").read_text(encoding="utf-8")
         assert "b1" in (checkout / "b.py").read_text(encoding="utf-8")
 
+    # The original authoring clone predates the integration commits. Refresh its
+    # object database before creating the next task from the promoted target SHA.
+    _git(fixture.work, "fetch", "origin", "main")
+
     source_consumer = _commit_branch(
         fixture,
         branch="task/consumer",
@@ -215,7 +219,6 @@ def test_stale_non_overlapping_candidate_reintegrates_but_contract_change_blocks
         dependency_paths=("contract.py",),
     )
 
-    # Target moves through a contract file the candidate explicitly depends on.
     source_contract = _commit_branch(
         fixture,
         branch="task/contract-doc-compatible",
