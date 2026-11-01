@@ -1,0 +1,187 @@
+name: postbaseline-model-intelligence
+
+on:
+  push:
+    branches:
+      - postbaseline/model-intelligence-v1
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'src/amodex/model_intelligence/**'
+      - 'src/amodex/storage/model_intelligence.py'
+      - 'src/amodex/providers/routing.py'
+      - 'src/amodex/api/model_intelligence_*.py'
+      - 'src/amodex/api/workspace_app.py'
+      - 'migrations/postbaseline/0006_model_intelligence.sql'
+      - 'tests/integration/test_postbaseline_model_intelligence.py'
+      - 'tests/integration/test_postbaseline_model_intelligence_resilience.py'
+      - '.github/workflows/postbaseline-model-intelligence.yml'
+      - 'docs/POST_BASELINE_MODEL_INTELLIGENCE_V1.md'
+
+permissions:
+  contents: read
+
+env:
+  PYTHONNOUSERSITE: '1'
+
+jobs:
+  model-intelligence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres@sha256:1beaa3084eee2676f20a9cd9928f0bf2c5bf674f8e49f81017912183d377c61c
+        env:
+          POSTGRES_USER: amodex
+          POSTGRES_PASSWORD: amodex
+          POSTGRES_DB: amodex_model_intelligence
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U amodex -d amodex_model_intelligence"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      AMODEX_TEST_DATABASE_URL: postgresql://amodex:amodex@127.0.0.1:5432/amodex_model_intelligence
+
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+
+      - name: Recreate isolated Python runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          BOOTSTRAP_VENV="$RUNNER_TEMP/amodex-uv-bootstrap"
+          env -u PYTHONPATH -u PYTHONHOME python3 -m venv "$BOOTSTRAP_VENV"
+          env -u PYTHONPATH -u PYTHONHOME "$BOOTSTRAP_VENV/bin/python" -m pip install --disable-pip-version-check uv==0.10.0
+          UV_BIN="$BOOTSTRAP_VENV/bin/uv"
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" python install 3.13.5
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" sync --python 3.13.5 --extra dev --frozen
+          echo "UV_BIN=$UV_BIN" >> "$GITHUB_ENV"
+
+      - name: Compile Step 4 surface
+        shell: bash
+        run: |
+          set -euo pipefail
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --frozen \
+            python -m compileall -q \
+              src/amodex/model_intelligence \
+              src/amodex/storage/model_intelligence.py \
+              src/amodex/providers/routing.py \
+              src/amodex/api/model_intelligence_routes.py \
+              src/amodex/api/model_intelligence_web.py \
+              src/amodex/api/workspace_app.py
+
+      - name: Prove Step 4 does not import Hermes implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --frozen python - <<'PY'
+          import sys
+          import amodex.model_intelligence.models
+          import amodex.model_intelligence.benchmarks
+          import amodex.model_intelligence.service
+          import amodex.storage.model_intelligence
+          import amodex.providers.routing
+          import amodex.api.model_intelligence_routes
+          import amodex.api.model_intelligence_web
+          import amodex.api.workspace_app
+          assert 'amodex.runtime.hermes_worker' not in sys.modules
+          print('MODEL_INTELLIGENCE_HERMES_ISOLATION_OK')
+          PY
+
+      - name: Run Step 4 PostgreSQL and model-intelligence integration tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --extra dev --frozen pytest -q \
+            tests/integration/test_postbaseline_model_intelligence.py \
+            tests/integration/test_postbaseline_model_intelligence_resilience.py
+
+      - name: Run Step 3 multimodal regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --extra dev --frozen pytest -q \
+            tests/integration/test_postbaseline_multimodal_chat.py
+
+      - name: Run Stage 5 routing regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --extra dev --frozen pytest -q \
+            tests/integration/test_stage5_capability_routing.py \
+            tests/integration/test_stage5_provider_adapters.py \
+            tests/integration/test_stage5_routing_persistence.py \
+            tests/integration/test_stage5_specialized_vertical_slice.py
+
+      - name: Run Workspace and Connectors regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --extra dev --frozen pytest -q \
+            tests/integration/test_postbaseline_web_workspace.py \
+            tests/integration/test_postbaseline_connectors.py
+
+      - name: Run Environment Product and Stage 6 compatibility regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --extra dev --frozen pytest -q \
+            tests/integration/test_postbaseline_environment_product.py \
+            tests/integration/test_stage6_product_surfaces.py \
+            tests/integration/test_stage6_termux_cli.py
+
+      - name: Prove zero-cost bounded-fallback and measured capability policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'BillingClass.FREE' src/amodex/model_intelligence/service.py
+          grep -Fq 'ranked[:2]' src/amodex/model_intelligence/service.py
+          grep -q 'paid_fallback.*DENIED' src/amodex/model_intelligence/service.py
+          grep -q 'vision_success_rate=None' src/amodex/model_intelligence/service.py
+          grep -q 'tool_calling_transport_measured.*False' src/amodex/model_intelligence/service.py
+          grep -q 'tool-calling transport unmeasured' src/amodex/providers/routing.py
+          echo 'STEP4_ZERO_COST_AND_MEASUREMENT_BOUNDARY_OK'
+
+      - name: Prove lifecycle cannot be forced through public API
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -E 'set_lifecycle|promote_model|demote_model' src/amodex/api/model_intelligence_routes.py; then
+            echo 'public Step 4 API exposes direct lifecycle mutation' >&2
+            exit 1
+          fi
+          grep -q 'benchmark_route' src/amodex/api/model_intelligence_routes.py
+          echo 'STEP4_MEASURED_PROMOTION_BOUNDARY_OK'
+
+      - name: Prove benchmark decision and crash-recovery storage boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -Ei '\bBYTEA\b|api_key|access_token|refresh_token|secret_value' migrations/postbaseline/0006_model_intelligence.sql; then
+            echo 'secret or raw binary column leaked into Step 4 schema' >&2
+            exit 1
+          fi
+          grep -q 'chat_id UUID NOT NULL REFERENCES amodex_workspace_chats(chat_id)' migrations/postbaseline/0006_model_intelligence.sql
+          grep -q 'owner_message_id UUID NOT NULL UNIQUE REFERENCES amodex_workspace_messages(message_id)' migrations/postbaseline/0006_model_intelligence.sql
+          grep -q 'result_message_id UUID REFERENCES amodex_workspace_messages(message_id)' migrations/postbaseline/0006_model_intelligence.sql
+          grep -q "attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count BETWEEN 0 AND 2)" migrations/postbaseline/0006_model_intelligence.sql
+          grep -q "WHERE status='STARTED' AND updated_at < %s" src/amodex/storage/model_intelligence.py
+          echo 'STEP4_STORAGE_AND_RECOVERY_BOUNDARY_OK'
+
+      - name: Repository hygiene
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          status="$(git status --porcelain)"
+          if [ -n "$status" ]; then
+            printf '%s\n' "$status" >&2
+            exit 1
+          fi

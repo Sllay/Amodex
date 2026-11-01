@@ -1,7 +1,7 @@
 """Preferred web-first Amodex application composition.
 
 The existing Control Plane app remains the authority owner. This module layers
-workspace/connectors/media routes and replaces only the default root projection.
+workspace/connectors/media/model-intelligence routes and replaces only the default root projection.
 """
 
 from __future__ import annotations
@@ -14,6 +14,8 @@ from fastapi.responses import HTMLResponse
 from amodex.api.app import create_app as create_control_plane_app
 from amodex.api.connector_routes import build_connector_router
 from amodex.api.connector_web import CONNECTOR_HTML
+from amodex.api.model_intelligence_routes import build_model_intelligence_router
+from amodex.api.model_intelligence_web import MODEL_INTELLIGENCE_HTML, augment_model_intelligence_html
 from amodex.api.multimodal_routes import build_multimodal_router
 from amodex.api.multimodal_web import augment_workspace_html
 from amodex.api.web import DASHBOARD_HTML
@@ -22,17 +24,21 @@ from amodex.api.workspace_web import WORKSPACE_HTML
 from amodex.connectors.clients import GitHubAppConnector, RobloxOAuthConnector
 from amodex.connectors.oauth import GitHubAppConfig, RobloxOAuthConfig
 from amodex.connectors.vault import CredentialVault, vault_from_environment
+from amodex.model_intelligence.service import ModelIntelligenceService
 from amodex.multimodal.clients import MultimodalClients, multimodal_clients_from_environment
 from amodex.multimodal.object_store import (
     MediaObjectStore,
     max_upload_bytes_from_environment,
     media_store_from_environment,
 )
+from amodex.providers.registry import ProviderExecutionRegistry, stage5_credential_pools_from_env
 from amodex.storage.connectors import PostgresConnectorRepository
+from amodex.storage.model_intelligence import PostgresModelIntelligenceRepository
 from amodex.storage.multimodal import PostgresMultimodalRepository
+from amodex.storage.routing import PostgresRoutingRepository
 from amodex.storage.workspace import PostgresWorkspaceRepository
 
-_RELEASE = "0.5-multimodal-chat"
+_RELEASE = "0.6-model-intelligence"
 
 
 def create_workspace_app(
@@ -47,6 +53,10 @@ def create_workspace_app(
     media_store: MediaObjectStore | None = None,
     multimodal_clients: MultimodalClients | None = None,
     max_upload_bytes: int | None = None,
+    model_intelligence_repository: PostgresModelIntelligenceRepository | None = None,
+    routing_repository: PostgresRoutingRepository | None = None,
+    provider_execution_registry: ProviderExecutionRegistry | None = None,
+    model_intelligence_service: ModelIntelligenceService | None = None,
     dsn: str | None = None,
 ) -> FastAPI:
     """Compose the web-first surface without creating a second control plane."""
@@ -82,6 +92,24 @@ def create_workspace_app(
     multimodal_clients = multimodal_clients or multimodal_clients_from_environment()
     max_upload_bytes = max_upload_bytes or max_upload_bytes_from_environment()
 
+    # Step 4 is migration-gated. Older Step 1-3 installations continue to boot
+    # without a shadow in-memory authority until 0006 has been applied.
+    if model_intelligence_service is None:
+        if not database_url:
+            database_url = workspace_repository.dsn
+        model_intelligence_repository = model_intelligence_repository or PostgresModelIntelligenceRepository(database_url)
+        if model_intelligence_repository.schema_ready():
+            routing_repository = routing_repository or PostgresRoutingRepository(database_url)
+            provider_execution_registry = provider_execution_registry or ProviderExecutionRegistry(
+                stage5_credential_pools_from_env()
+            )
+            model_intelligence_service = ModelIntelligenceService(
+                repository=model_intelligence_repository,
+                routing_repository=routing_repository,
+                workspace_repository=workspace_repository,
+                execution_registry=provider_execution_registry,
+            )
+
     # The legacy control-plane root is a projection only. Every pre-existing API
     # authority remains on this same FastAPI object.
     base_app.router.routes = [
@@ -111,6 +139,8 @@ def create_workspace_app(
             max_upload_bytes=max_upload_bytes,
         )
     )
+    if model_intelligence_service is not None:
+        base_app.include_router(build_model_intelligence_router(model_intelligence_service))
 
     @base_app.get("/", response_class=HTMLResponse, include_in_schema=False)
     async def workspace_page() -> str:
@@ -120,11 +150,19 @@ def create_workspace_app(
             '<button class="item" onclick="location.href=\'/connections\'">GitHub / Roblox Resources</button></div>'
         )
         html = WORKSPACE_HTML.replace(marker, connector_action + marker)
-        return augment_workspace_html(html)
+        html = augment_workspace_html(html)
+        if model_intelligence_service is not None:
+            html = augment_model_intelligence_html(html)
+        return html
 
     @base_app.get("/connections", response_class=HTMLResponse, include_in_schema=False)
     async def connector_page() -> str:
         return CONNECTOR_HTML
+
+    if model_intelligence_service is not None:
+        @base_app.get("/models", response_class=HTMLResponse, include_in_schema=False)
+        async def model_intelligence_page() -> str:
+            return MODEL_INTELLIGENCE_HTML
 
     @base_app.get("/legacy", response_class=HTMLResponse, include_in_schema=False)
     async def legacy_dashboard() -> str:

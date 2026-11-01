@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from .capabilities import (
     BillingClass,
     ModelCandidate,
+    ModelCapability,
     ModelLifecycle,
     ModelMeasurement,
     ProviderAvailability,
@@ -119,6 +120,14 @@ class CapabilityRouter:
             if observation.sample_count < self._minimum_samples:
                 rejected.append(
                     f"{route_id}: measurement samples {observation.sample_count} < {self._minimum_samples}"
+                )
+                continue
+            if (
+                ModelCapability.TOOL_CALLING in hard_requirements
+                and observation.source.startswith("step4-benchmark:")
+            ):
+                rejected.append(
+                    f"{route_id}: tool-calling transport unmeasured by {observation.source}"
                 )
                 continue
 
