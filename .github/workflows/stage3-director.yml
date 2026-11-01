@@ -1,0 +1,90 @@
+name: stage3-technical-director
+
+on:
+  push:
+    branches:
+      - stage/3-technical-director
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'src/amodex/director/**'
+      - 'tests/integration/test_stage3_*.py'
+      - '.github/workflows/stage3-director.yml'
+
+permissions:
+  contents: read
+
+env:
+  PYTHONNOUSERSITE: '1'
+
+jobs:
+  director-context-dag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres@sha256:1beaa3084eee2676f20a9cd9928f0bf2c5bf674f8e49f81017912183d377c61c
+        env:
+          POSTGRES_USER: amodex
+          POSTGRES_PASSWORD: amodex
+          POSTGRES_DB: amodex_stage3
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U amodex -d amodex_stage3"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      AMODEX_TEST_DATABASE_URL: postgresql://amodex:amodex@127.0.0.1:5432/amodex_stage3
+
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+
+      - name: Recreate runner-owned Python runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          BOOTSTRAP_VENV="$RUNNER_TEMP/amodex-uv-bootstrap"
+          env -u PYTHONPATH -u PYTHONHOME python3 -m venv "$BOOTSTRAP_VENV"
+          env -u PYTHONPATH -u PYTHONHOME "$BOOTSTRAP_VENV/bin/python" -m pip install --disable-pip-version-check uv==0.10.0
+          UV_BIN="$BOOTSTRAP_VENV/bin/uv"
+          test -x "$UV_BIN"
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" python install 3.13.5
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" sync --python 3.13.5 --extra dev --frozen
+          echo "UV_BIN=$UV_BIN" >> "$GITHUB_ENV"
+
+      - name: Prove Director import is independent from Hermes runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --extra dev --frozen \
+            python -I -c 'import sys; import amodex.director; assert "amodex.runtime.hermes_worker" not in sys.modules; print("director-hermes-isolation=ok")'
+
+      - name: Run Stage 3 slices and Stage 0/1/2 deterministic regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --extra dev --frozen pytest -q \
+            tests/unit \
+            tests/contract \
+            tests/integration/test_stage1_vertical_slice.py \
+            tests/integration/test_stage1_crash_recovery.py \
+            tests/integration/test_stage1_migrations.py \
+            tests/integration/test_stage1_provider_failures.py \
+            tests/integration/test_stage2_scoped_tools.py \
+            tests/integration/test_stage2_checkpoint_lifecycle.py \
+            tests/integration/test_stage3_ingestion_context.py \
+            tests/integration/test_stage3_dag_orchestration.py
+
+      - name: Repository hygiene
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          test -z "$(git status --porcelain)"
