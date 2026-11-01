@@ -1,0 +1,67 @@
+name: stage3-technical-director
+
+on:
+  push:
+    branches:
+      - stage/3-technical-director
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'src/amodex/director/**'
+      - 'tests/integration/test_stage3_*.py'
+      - '.github/workflows/stage3-director.yml'
+
+permissions:
+  contents: read
+
+env:
+  PYTHONNOUSERSITE: '1'
+
+jobs:
+  director-context-dag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+
+      - name: Recreate runner-owned Python runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check uv==0.10.0
+          env -u PYTHONPATH -u PYTHONHOME uv python install 3.13.5
+          env -u PYTHONPATH -u PYTHONHOME uv sync --python 3.13.5 --extra dev --frozen
+
+      - name: Prove Director import is independent from Hermes runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          env -u PYTHONPATH -u PYTHONHOME uv run --python 3.13.5 --extra dev --frozen \
+            python -I -c 'import sys; import amodex.director; assert "amodex.runtime.hermes_worker" not in sys.modules; print("director-hermes-isolation=ok")'
+
+      - name: Run Stage 3 slices and Stage 0/1/2 deterministic regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          env -u PYTHONPATH -u PYTHONHOME uv run --python 3.13.5 --extra dev --frozen pytest -q \
+            tests/unit \
+            tests/contract \
+            tests/integration/test_stage1_vertical_slice.py \
+            tests/integration/test_stage1_crash_recovery.py \
+            tests/integration/test_stage1_migrations.py \
+            tests/integration/test_stage1_provider_failures.py \
+            tests/integration/test_stage2_scoped_tools.py \
+            tests/integration/test_stage2_checkpoint_lifecycle.py \
+            tests/integration/test_stage3_ingestion_context.py \
+            tests/integration/test_stage3_dag_orchestration.py
+
+      - name: Repository hygiene
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          test -z "$(git status --porcelain)"
