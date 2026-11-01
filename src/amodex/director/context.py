@@ -73,30 +73,27 @@ def _provenance(entry: RepositoryEntry) -> Provenance:
 
 
 def _relevance(entry: RepositoryEntry, task_tokens: set[str]) -> int:
-    score = 0
     path_overlap = len(_path_tokens(entry.path) & task_tokens)
     symbol_overlap = len({symbol.lower() for symbol in entry.symbols} & task_tokens)
-    score += path_overlap * 4 + symbol_overlap * 8
 
-    content_overlap = 0
-    if entry.safe_text and entry.kind in {
-        FileKind.DOCUMENTATION,
-        FileKind.DECISION,
-        FileKind.CONTRACT,
-    }:
-        sample_tokens = _tokens(entry.safe_text[:12000])
-        content_overlap = len(sample_tokens & task_tokens)
-        # A path/symbol match may use content as supporting evidence. A document
-        # with no structural match must overlap several task-specific concepts;
-        # one or two generic words cannot pull an unrelated architecture area in.
-        if path_overlap or symbol_overlap:
+    # Documentation and ADRs are authority-bearing input, so implicit disclosure
+    # is intentionally stricter than source discovery. Shared prose such as
+    # "save", "migration" or "transaction" is not enough: the path/title topic
+    # must structurally overlap the task. Documents the Director knows are needed
+    # can still be included explicitly through task.read_paths.
+    if entry.kind in {FileKind.DOCUMENTATION, FileKind.DECISION, FileKind.CONTRACT}:
+        if path_overlap == 0 and symbol_overlap == 0:
+            return 0
+        score = path_overlap * 4 + symbol_overlap * 8
+        if entry.safe_text:
+            content_overlap = len(_tokens(entry.safe_text[:12000]) & task_tokens)
             score += min(6, content_overlap)
-        elif content_overlap >= 3:
-            score += min(6, content_overlap)
+        if entry.authority >= DocumentAuthority.FOCUSED_SPEC:
+            score += 2
+        return score
 
-    if entry.authority >= DocumentAuthority.FOCUSED_SPEC:
-        # Authority breaks ties among relevant documents; it must never make an
-        # unrelated high-authority document relevant by itself.
+    score = path_overlap * 4 + symbol_overlap * 8
+    if entry.authority >= DocumentAuthority.FOCUSED_SPEC and score:
         score += 2
     return score
 
@@ -155,7 +152,7 @@ def compile_context(
         ):
             continue
         # High authority is not permission to preload. A focused spec or ADR is
-        # selected only when the task actually overlaps its path/content/symbols.
+        # selected only when the task actually overlaps its path/topic/symbols.
         if score >= 4:
             include(entry, f"relevant project fact score={score}")
 
