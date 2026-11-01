@@ -63,8 +63,8 @@ CREATE INDEX IF NOT EXISTS idx_amodex_model_lifecycle_route_time
 
 CREATE TABLE IF NOT EXISTS amodex_model_route_decisions (
     decision_id TEXT PRIMARY KEY,
-    chat_id TEXT NOT NULL REFERENCES amodex_workspace_chats(chat_id) ON DELETE CASCADE,
-    owner_message_id TEXT NOT NULL UNIQUE REFERENCES amodex_workspace_messages(message_id) ON DELETE CASCADE,
+    chat_id UUID NOT NULL REFERENCES amodex_workspace_chats(chat_id) ON DELETE CASCADE,
+    owner_message_id UUID NOT NULL UNIQUE REFERENCES amodex_workspace_messages(message_id) ON DELETE CASCADE,
     profile_id TEXT NOT NULL,
     status TEXT NOT NULL CHECK (status IN ('STARTED','SUCCEEDED','FAILED','UNKNOWN_OUTCOME','BLOCKED')),
     selected_route_id TEXT REFERENCES amodex_model_routes(route_id) ON DELETE RESTRICT,
@@ -74,7 +74,7 @@ CREATE TABLE IF NOT EXISTS amodex_model_route_decisions (
     selection_facts JSONB NOT NULL DEFAULT '[]'::jsonb,
     attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count BETWEEN 0 AND 2),
     fallback_used BOOLEAN NOT NULL DEFAULT FALSE,
-    result_message_id TEXT REFERENCES amodex_workspace_messages(message_id) ON DELETE SET NULL,
+    result_message_id UUID REFERENCES amodex_workspace_messages(message_id) ON DELETE SET NULL,
     error_code TEXT,
     error_message TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
