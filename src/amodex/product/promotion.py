@@ -41,20 +41,33 @@ class ConfiguredPromotionExecutor:
         return cls(Path(repository_path), dsn, command)
 
     def promote(self, *, candidate_id: str, idempotency_key: str) -> dict[str, object]:
+        repository = PostgresPromotionRepository(self.dsn)
         gate = PromotionGate(
             backend=LocalGitPromotionBackend(self.repository_path),
-            repository=PostgresPromotionRepository(self.dsn),
+            repository=repository,
         )
         validator = CommandValidator(
             validator_id="stage6-product-promotion",
             validator_version="1",
             command=self.validator_command,
         )
-        outcome = gate.promote(
-            candidate_id=candidate_id,
-            idempotency_key=idempotency_key,
-            validator=validator,
-        )
+
+        existing = repository.get_promotion_by_idempotency(idempotency_key)
+        if existing is not None:
+            if str(existing.candidate_id) != candidate_id:
+                raise ValueError(
+                    "promotion idempotency identity already belongs to a different candidate"
+                )
+            outcome = gate.reconcile(
+                idempotency_key=idempotency_key,
+                validator=validator,
+            )
+        else:
+            outcome = gate.promote(
+                candidate_id=candidate_id,
+                idempotency_key=idempotency_key,
+                validator=validator,
+            )
         return {
             "candidate_id": str(outcome.candidate.candidate_id),
             "promotion_id": str(outcome.promotion.promotion_id),
