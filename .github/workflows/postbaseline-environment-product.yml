@@ -15,7 +15,7 @@ on:
       - 'src/amodex/cli.py'
       - 'src/amodex/product/models.py'
       - 'migrations/postbaseline/**'
-      - 'tests/unit/test_postbaseline_environment_product.py'
+      - 'tests/unit/test_postbaseline_environment_product_contracts.py'
       - 'tests/integration/test_postbaseline_environment_product.py'
       - '.github/workflows/environment-runner.yml'
       - '.github/workflows/postbaseline-environment-product.yml'
@@ -97,7 +97,7 @@ jobs:
         run: |
           set -euo pipefail
           env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --extra dev --frozen pytest -q \
-            tests/unit/test_postbaseline_environment_product.py \
+            tests/unit/test_postbaseline_environment_product_contracts.py \
             tests/integration/test_postbaseline_environment_storage.py \
             tests/integration/test_postbaseline_environment_product.py
 
