@@ -27,7 +27,6 @@ jobs:
     env:
       AMODEX_CONTROL_PLANE_URL: ${{ secrets.AMODEX_CONTROL_PLANE_URL }}
       AMODEX_RUNNER_CONTROL_TOKEN: ${{ secrets.AMODEX_RUNNER_CONTROL_TOKEN }}
-      AMODEX_PROJECTS_TOKEN: ${{ secrets.AMODEX_PROJECTS_TOKEN }}
       AMODEX_JOB_ID: ${{ inputs.job_id }}
     steps:
       - name: Require Control Plane runner credentials
@@ -73,15 +72,16 @@ jobs:
           if not match:
               raise SystemExit('runner only clones scoped HTTPS github.com repositories')
           clean=f"https://github.com/{match.group(1)}/{match.group(2)}.git"
+          engine=(job.get('engine') or '').strip().lower()
           with open(sys.argv[2],'a',encoding='utf-8') as out:
               out.write(f"TARGET_REPO={clean}\n")
-              out.write(f"TARGET_ENGINE={job.get('engine') or ''}\n")
+              out.write(f"TARGET_ENGINE={engine}\n")
               out.write(f"TARGET_BRANCH={job.get('branch_name') or ''}\n")
               out.write(f"TARGET_RUN_ID={job['run_id']}\n")
           print(json.dumps({
               'job_id':job['job_id'],
               'environment_id':job['environment_id'],
-              'engine':job.get('engine'),
+              'engine':engine,
               'runner_kind':job['runner_kind'],
               'capabilities':body.get('capabilities',[]),
           },sort_keys=True))
@@ -89,13 +89,26 @@ jobs:
 
       - name: Clone only the scoped project
         shell: bash
+        env:
+          AMODEX_PROJECTS_TOKEN: ${{ secrets.AMODEX_PROJECTS_TOKEN }}
         run: |
           set -euo pipefail
           PROJECT="$RUNNER_TEMP/project"
           if [ -n "${AMODEX_PROJECTS_TOKEN:-}" ]; then
-            git -c http.extraHeader="Authorization: Bearer $AMODEX_PROJECTS_TOKEN" clone --depth 1 "$TARGET_REPO" "$PROJECT"
+            ASKPASS="$RUNNER_TEMP/amodex-git-askpass.sh"
+            cat >"$ASKPASS" <<'SH'
+          #!/usr/bin/env sh
+          case "$1" in
+            *Username*) printf '%s\n' 'x-access-token' ;;
+            *Password*) printf '%s\n' "$AMODEX_PROJECTS_TOKEN" ;;
+            *) printf '%s\n' '' ;;
+          esac
+          SH
+            chmod 700 "$ASKPASS"
+            GIT_ASKPASS="$ASKPASS" GIT_TERMINAL_PROMPT=0 git clone --depth 1 "$TARGET_REPO" "$PROJECT"
+            rm -f "$ASKPASS"
           else
-            git clone --depth 1 "$TARGET_REPO" "$PROJECT"
+            GIT_TERMINAL_PROMPT=0 git clone --depth 1 "$TARGET_REPO" "$PROJECT"
           fi
           unset AMODEX_PROJECTS_TOKEN
           echo "TARGET_PROJECT=$PROJECT" >> "$GITHUB_ENV"
