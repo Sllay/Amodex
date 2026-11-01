@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS amodex_environment_runner_jobs (
     worker_profile TEXT NOT NULL,
     task_class TEXT NOT NULL CHECK (task_class IN ('MICRO','ROUTINE','STANDARD','COMPLEX','CRITICAL')),
     write_paths JSONB NOT NULL DEFAULT '[]'::jsonb,
-    state TEXT NOT NULL CHECK (state IN ('QUEUED','DISPATCHED','CLAIMED','RUNNING','COMPLETED','FAILED','CANCELLED')),
+    state TEXT NOT NULL CHECK (state IN ('QUEUED','DISPATCHED','DISPATCH_UNKNOWN','CLAIMED','RUNNING','COMPLETED','FAILED','CANCELLED')),
     branch_name TEXT NULL,
     result_commit TEXT NULL CHECK (result_commit IS NULL OR result_commit ~ '^[0-9a-f]{40}$'),
     summary TEXT NULL,
