@@ -36,6 +36,20 @@ _STOP = {
     "test",
     "src",
     "docs",
+    # Planning prose appears in almost every architecture document. These words
+    # carry too little information to justify disclosure on their own.
+    "plan",
+    "domain",
+    "change",
+    "changes",
+    "safe",
+    "historical",
+    "foundation",
+    "ownership",
+    "system",
+    "systems",
+    "behavior",
+    "requirements",
 }
 
 
@@ -63,9 +77,23 @@ def _relevance(entry: RepositoryEntry, task_tokens: set[str]) -> int:
     path_overlap = len(_path_tokens(entry.path) & task_tokens)
     symbol_overlap = len({symbol.lower() for symbol in entry.symbols} & task_tokens)
     score += path_overlap * 4 + symbol_overlap * 8
-    if entry.safe_text and entry.kind in {FileKind.DOCUMENTATION, FileKind.DECISION, FileKind.CONTRACT}:
+
+    content_overlap = 0
+    if entry.safe_text and entry.kind in {
+        FileKind.DOCUMENTATION,
+        FileKind.DECISION,
+        FileKind.CONTRACT,
+    }:
         sample_tokens = _tokens(entry.safe_text[:12000])
-        score += min(6, len(sample_tokens & task_tokens))
+        content_overlap = len(sample_tokens & task_tokens)
+        # A path/symbol match may use content as supporting evidence. A document
+        # with no structural match must overlap several task-specific concepts;
+        # one or two generic words cannot pull an unrelated architecture area in.
+        if path_overlap or symbol_overlap:
+            score += min(6, content_overlap)
+        elif content_overlap >= 3:
+            score += min(6, content_overlap)
+
     if entry.authority >= DocumentAuthority.FOCUSED_SPEC:
         # Authority breaks ties among relevant documents; it must never make an
         # unrelated high-authority document relevant by itself.
@@ -116,8 +144,15 @@ def compile_context(
         if entry.kind in {FileKind.DOCUMENTATION, FileKind.DECISION, FileKind.SOURCE, FileKind.TEST}:
             candidates.append((score, entry))
 
-    for score, entry in sorted(candidates, key=lambda item: (-item[0], -int(item[1].authority), item[1].path)):
-        if entry.kind == FileKind.DOCUMENTATION and len(entry.safe_text or "") > max_document_chars and score < 8:
+    for score, entry in sorted(
+        candidates,
+        key=lambda item: (-item[0], -int(item[1].authority), item[1].path),
+    ):
+        if (
+            entry.kind == FileKind.DOCUMENTATION
+            and len(entry.safe_text or "") > max_document_chars
+            and score < 8
+        ):
             continue
         # High authority is not permission to preload. A focused spec or ADR is
         # selected only when the task actually overlaps its path/content/symbols.
@@ -133,7 +168,9 @@ def compile_context(
         if entry.path in selected or entry.safe_text is None:
             continue
         stem = PurePosixPath(entry.path).stem.lower()
-        if entry.kind == FileKind.TEST and any(token in stem for token in selected_stems if token):
+        if entry.kind == FileKind.TEST and any(
+            token in stem for token in selected_stems if token
+        ):
             include(entry, "test adjacent to selected implementation")
             continue
         dotted = entry.path.removeprefix("src/").removesuffix(".py").replace("/", ".")
@@ -153,7 +190,9 @@ def compile_context(
     excluded = tuple(
         entry.path
         for entry in snapshot.entries
-        if entry.safe_text is not None and entry.path not in selected and entry.kind != FileKind.SECRET
+        if entry.safe_text is not None
+        and entry.path not in selected
+        and entry.kind != FileKind.SECRET
     )
     selected_chars = sum(len(section.content) for section in sections)
     return ContextCapsule(
