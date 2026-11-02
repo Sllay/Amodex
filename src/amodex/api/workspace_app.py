@@ -24,6 +24,8 @@ from amodex.api.streaming_upload_routes import build_streaming_upload_router
 from amodex.api.theme_web import augment_theme_html
 from amodex.api.ui_stability_web import augment_ui_stability_html
 from amodex.api.web import DASHBOARD_HTML
+from amodex.api.workspace_cache_routes import build_workspace_cache_router
+from amodex.api.workspace_cache_web import augment_workspace_cache_html
 from amodex.api.workspace_routes import build_workspace_router
 from amodex.api.workspace_ui_routes import build_workspace_ui_router
 from amodex.api.workspace_v2 import augment_workspace_v2_html
@@ -47,7 +49,7 @@ from amodex.storage.routing import PostgresRoutingRepository
 from amodex.storage.runtime_pool import install_runtime_connection_pool
 from amodex.storage.workspace import PostgresWorkspaceRepository
 
-_RELEASE = "0.7.4-performance-structural"
+_RELEASE = "0.7.5-cache-local-state"
 
 
 def _media_store_from_runtime() -> MediaObjectStore:
@@ -136,8 +138,8 @@ def create_workspace_app(
     multimodal_clients = multimodal_clients or multimodal_clients_from_environment()
     max_upload_bytes = max_upload_bytes or max_upload_bytes_from_environment()
 
-    # Step 4 is migration-gated. Older Step 1-3 installations continue to boot
-    # without a shadow in-memory authority until 0006 has been applied.
+    # Model Intelligence remains migration-gated. Older installations continue to
+    # boot without a shadow in-memory authority until 0006 has been applied.
     if model_intelligence_service is None:
         if not database_url:
             database_url = workspace_repository.dsn
@@ -184,6 +186,7 @@ def create_workspace_app(
             vault=connector_vault,
         )
     )
+    base_app.include_router(build_workspace_cache_router())
 
     multimodal_router = build_multimodal_router(
         workspace_repository=workspace_repository,
@@ -217,6 +220,7 @@ def create_workspace_app(
         if model_intelligence_service is not None:
             html = augment_model_intelligence_html(html)
         html = augment_workspace_v2_html(html)
+        html = augment_workspace_cache_html(html)
         html = augment_ui_stability_html(html)
         return augment_theme_html(html)
 
