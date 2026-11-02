@@ -13,12 +13,14 @@ on:
       - 'src/amodex/storage/multimodal.py'
       - 'src/amodex/api/multimodal_*.py'
       - 'src/amodex/api/workspace_app.py'
+      - 'src/amodex/api/access_gate.py'
       - 'migrations/**'
       - 'scripts/migrate_production.py'
       - 'render.yaml'
       - 'tests/integration/test_postbaseline_multimodal_chat.py'
       - 'tests/unit/test_cloudinary_media_store.py'
       - 'tests/unit/test_production_deployment.py'
+      - 'tests/unit/test_access_gate.py'
       - '.github/workflows/postbaseline-multimodal-chat.yml'
       - 'docs/POST_BASELINE_MULTIMODAL_CHAT_V1.md'
       - 'docs/DEPLOY_RENDER_NEON_CLOUDINARY_V1.md'
@@ -79,6 +81,7 @@ jobs:
               src/amodex/storage/multimodal.py \
               src/amodex/api/multimodal_routes.py \
               src/amodex/api/multimodal_web.py \
+              src/amodex/api/access_gate.py \
               src/amodex/api/workspace_app.py \
               scripts/migrate_production.py
 
@@ -128,7 +131,8 @@ jobs:
         run: |
           set -euo pipefail
           env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --extra dev --frozen pytest -q \
-            tests/unit/test_production_deployment.py
+            tests/unit/test_production_deployment.py \
+            tests/unit/test_access_gate.py
           export AMODEX_DATABASE_URL="$AMODEX_TEST_DATABASE_URL"
           export AMODEX_MIGRATION_DATABASE_URL="$AMODEX_TEST_DATABASE_URL"
           export AMODEX_DATABASE_ENDPOINT_GUARD="127"
@@ -144,6 +148,9 @@ jobs:
           grep -q 'GATED_STEP_4' src/amodex/api/multimodal_routes.py
           grep -q 'billing_class == "free"' src/amodex/multimodal/clients.py
           grep -q 'plan: free' render.yaml
+          grep -q 'healthCheckPath: /healthz' render.yaml
+          grep -q 'AMODEX_ACCESS_PASSCODE' render.yaml
+          grep -q 'AMODEX_ACCESS_SESSION_SECRET' render.yaml
           grep -q 'sync: false' render.yaml
           if grep -R -I --exclude-dir='__pycache__' -E \
             '(^|[[:space:]])(from[[:space:]]+amodex\.providers\.routing|import[[:space:]]+amodex\.providers\.routing)|ModelLifecycle|promote_model|demote_model|model_leaderboard' \
