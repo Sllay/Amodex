@@ -1,11 +1,8 @@
 """Cloudinary REST adapter for private content-addressed raw assets.
 
-Cloudinary's raw authenticated upload flow is not symmetric with the delivery
-URL. For raw assets the documented upload endpoint is ``/raw/upload`` while the
-delivery type is supplied as the signed ``type=authenticated`` upload option.
-The resulting asset is still stored as ``raw`` + ``authenticated`` and is
-verified through the Admin API before duplicate uploads are treated as
-idempotent successes.
+Cloudinary raw uploads use ``/raw/upload`` and carry the authenticated delivery
+option in the signed upload payload. Content-addressed retries are verified
+through the Admin API before being accepted as idempotent successes.
 """
 
 from __future__ import annotations
@@ -24,6 +21,23 @@ from amodex.multimodal.object_store import (
     _CLOUDINARY_API_ROOT,
     _cloudinary_json,
 )
+
+
+def _cloudinary_error_detail(response: httpx.Response) -> str:
+    """Extract a bounded provider diagnostic without logging request credentials."""
+
+    message = ""
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = None
+    if isinstance(payload, dict):
+        error = payload.get("error")
+        if isinstance(error, dict):
+            message = str(error.get("message", "")).strip()
+    if not message:
+        message = response.headers.get("x-cld-error", "").strip()
+    return " ".join(message.split())[:320]
 
 
 class CloudinaryAuthenticatedRestMediaStore(CloudinaryMediaStore):
@@ -76,14 +90,13 @@ class CloudinaryAuthenticatedRestMediaStore(CloudinaryMediaStore):
     ) -> StoredMediaObject:
         storage_ref = f"media://sha256/{digest}"
         public_id = self._public_id(digest)
-
-        # Cloudinary documents raw uploads at /raw/upload. ``authenticated`` is
-        # an upload option for this flow, not the upload action itself. The
-        # previous /raw/authenticated request returned HTTP 404 in production.
         url = f"{_CLOUDINARY_API_ROOT}/{self.cloud_name}/raw/upload"
         params = self._signed_params(
             {
-                "overwrite": "0",
+                # Cloudinary defines overwrite as a Boolean. Sending the numeric
+                # string "0" caused production HTTP 400 responses; use the
+                # documented textual Boolean representation instead.
+                "overwrite": "false",
                 "public_id": public_id,
                 "timestamp": str(int(self._now())),
                 "type": "authenticated",
@@ -106,11 +119,20 @@ class CloudinaryAuthenticatedRestMediaStore(CloudinaryMediaStore):
             raise MediaStoreUnavailable("Cloudinary media upload is unavailable") from exc
 
         if response.status_code == 409:
-            # overwrite=0 makes retries deterministic: an already-existing SHA
+            # overwrite=false keeps retries deterministic: an already-existing SHA
             # object is accepted only after the Admin API proves that the exact
             # authenticated raw object exists with the expected size.
             self._verify_existing_object(public_id=public_id, size_bytes=size_bytes)
             return StoredMediaObject(storage_ref, digest, size_bytes)
+
+        if response.status_code >= 400 and response.status_code not in {401, 403, 420, 429}:
+            detail = _cloudinary_error_detail(response)
+            if detail:
+                detail = detail.replace(self._api_key, "[redacted]")
+                detail = detail.replace(self._api_secret, "[redacted]")
+                raise MediaStoreError(
+                    f"Cloudinary media upload failed with HTTP {response.status_code}: {detail}"
+                )
 
         payload = _cloudinary_json(response, operation="upload")
         returned_public_id = str(payload.get("public_id", ""))
