@@ -13,6 +13,7 @@ on:
       - 'src/amodex/deployment/**'
       - 'src/amodex/storage/multimodal.py'
       - 'src/amodex/api/multimodal_*.py'
+      - 'src/amodex/api/activation_status.py'
       - 'src/amodex/api/workspace_app.py'
       - 'src/amodex/api/workspace_v2.py'
       - 'src/amodex/api/workspace_ui_routes.py'
@@ -91,6 +92,7 @@ jobs:
               src/amodex/storage/multimodal.py \
               src/amodex/api/multimodal_routes.py \
               src/amodex/api/multimodal_web.py \
+              src/amodex/api/activation_status.py \
               src/amodex/api/access_gate.py \
               src/amodex/api/theme_web.py \
               src/amodex/api/ui_stability_web.py \
@@ -160,14 +162,16 @@ jobs:
           env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --frozen \
             python scripts/migrate_production.py
 
-      - name: Prove zero-cost and Step 4 boundary
+      - name: Prove zero-cost and activation readiness boundary
         shell: bash
         run: |
           set -euo pipefail
           grep -q 'GATED_STEP_4' src/amodex/api/multimodal_routes.py
           grep -q 'billing_class == "free"' src/amodex/multimodal/clients.py
           grep -q 'plan: free' render.yaml
-          grep -q 'healthCheckPath: /healthz' render.yaml
+          grep -q 'healthCheckPath: /readyz' render.yaml
+          grep -q '@router.get("/healthz"' src/amodex/api/activation_status.py
+          grep -q '@router.get("/readyz"' src/amodex/api/activation_status.py
           grep -q 'AMODEX_ACCESS_PASSCODE' render.yaml
           grep -q 'AMODEX_ACCESS_SESSION_SECRET' render.yaml
           grep -q 'AMODEX_THEME_COLORS' render.yaml
@@ -182,7 +186,7 @@ jobs:
             echo 'Step 4 model intelligence leaked into Step 3' >&2
             exit 1
           fi
-          echo 'STEP4_BOUNDARY_OK'
+          echo 'ACTIVATION_READINESS_BOUNDARY_OK'
 
       - name: Prove media and secret reference boundaries
         shell: bash
@@ -213,7 +217,8 @@ jobs:
             exit 1
           fi
           grep -q "addEventListener('click',()=>mmSpeak(m.content))" src/amodex/api/multimodal_web.py
-          grep -q 'uiStable.sending' src/amodex/api/ui_stability_web.py
+          grep -q 'runtimeState.sending' src/amodex/api/ui_stability_web.py
+          grep -q 'window.AmodexApp=app' src/amodex/api/ui_stability_web.py
           echo 'MULTIMODAL_BROWSER_HANDLER_BOUNDARY_OK'
 
       - name: Repository hygiene
