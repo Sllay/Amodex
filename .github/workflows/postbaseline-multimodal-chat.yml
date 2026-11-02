@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - postbaseline/multimodal-chat-v1
+      - deploy/render-neon-cloudinary-v1
   pull_request:
     branches:
       - main
