@@ -22,7 +22,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 _COOKIE_NAME = "__Host-amodex_access"
-_PUBLIC_PATHS = frozenset({"/healthz", "/auth/passcode", "/auth/logout"})
+_PUBLIC_PATHS = frozenset({"/healthz", "/readyz", "/auth/passcode", "/auth/logout"})
 _PASSCODE_RE = re.compile(r"^[0-9]{6}$")
 _DEFAULT_TTL_SECONDS = 12 * 60 * 60
 
