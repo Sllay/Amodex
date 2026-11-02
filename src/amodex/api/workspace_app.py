@@ -23,6 +23,7 @@ from amodex.api.multimodal_web import augment_workspace_html
 from amodex.api.theme_web import augment_theme_html
 from amodex.api.web import DASHBOARD_HTML
 from amodex.api.workspace_routes import build_workspace_router
+from amodex.api.workspace_ui_routes import build_workspace_ui_router
 from amodex.api.workspace_v2 import augment_workspace_v2_html
 from amodex.api.workspace_web import WORKSPACE_HTML
 from amodex.connectors.clients import GitHubAppConnector, RobloxOAuthConnector
@@ -42,7 +43,7 @@ from amodex.storage.multimodal import PostgresMultimodalRepository
 from amodex.storage.routing import PostgresRoutingRepository
 from amodex.storage.workspace import PostgresWorkspaceRepository
 
-_RELEASE = "0.7-workspace-v2"
+_RELEASE = "0.7.1-workspace-v2-fast-ui"
 
 
 def create_workspace_app(
@@ -130,6 +131,15 @@ def create_workspace_app(
         build_connector_router(
             repository=connector_repository,
             workspace_repository=workspace_repository,
+            github=github_connector,
+            roblox=roblox_connector,
+            vault=connector_vault,
+        )
+    )
+    base_app.include_router(
+        build_workspace_ui_router(
+            workspace_repository=workspace_repository,
+            connector_repository=connector_repository,
             github=github_connector,
             roblox=roblox_connector,
             vault=connector_vault,
