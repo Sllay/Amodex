@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -83,7 +82,7 @@ def test_enabled_stt_requires_free_billing(monkeypatch) -> None:
     assert "stt" in snapshot["violations"]
 
 
-def test_readiness_route_is_public_shape_and_system_status_is_richer(monkeypatch, tmp_path: Path) -> None:
+def test_readiness_route_is_public_shape_and_activation_status_is_richer(monkeypatch) -> None:
     monkeypatch.delenv("RENDER_GIT_COMMIT", raising=False)
     monkeypatch.delenv("AMODEX_RELEASE_SHA", raising=False)
     app = FastAPI()
@@ -99,17 +98,26 @@ def test_readiness_route_is_public_shape_and_system_status_is_richer(monkeypatch
     assert ready.json()["ready"] is False
     assert "expected_migrations" not in ready.json()["database"]
 
-    system = client.get("/v1/system/status")
-    assert system.status_code == 200
-    assert system.json()["ready"] is False
-    assert "expected_migrations" in system.json()["database"]
+    activation = client.get("/v1/activation/status")
+    assert activation.status_code == 200
+    assert activation.json()["ready"] is False
+    assert "expected_migrations" in activation.json()["database"]
 
 
-def test_access_gate_keeps_readiness_public() -> None:
+def test_access_gate_keeps_readiness_public_and_activation_status_private() -> None:
     source = Path("src/amodex/api/access_gate.py").read_text(encoding="utf-8")
-    assert '"/healthz"' in source
-    assert '"/readyz"' in source
-    assert '"/v1/system/status"' not in source.split("_PUBLIC_PATHS", 1)[1].split(")", 1)[0]
+    public_section = source.split("_PUBLIC_PATHS", 1)[1].split(")", 1)[0]
+    assert '"/healthz"' in public_section
+    assert '"/readyz"' in public_section
+    assert '"/v1/activation/status"' not in public_section
+
+
+def test_activation_route_does_not_shadow_legacy_system_status() -> None:
+    activation = Path("src/amodex/api/activation_status.py").read_text(encoding="utf-8")
+    control_plane = Path("src/amodex/api/app.py").read_text(encoding="utf-8")
+    assert '@router.get("/v1/activation/status")' in activation
+    assert '@router.get("/v1/system/status")' not in activation
+    assert '@app.get("/v1/system/status")' in control_plane
 
 
 def test_workspace_release_is_activation_v1() -> None:
