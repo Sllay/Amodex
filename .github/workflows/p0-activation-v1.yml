@@ -1,0 +1,275 @@
+name: p0-activation-v1
+
+on:
+  push:
+    branches:
+      - p0/activation-v1
+  pull_request:
+    branches:
+      - deploy/render-neon-cloudinary-v1
+    paths:
+      - 'src/amodex/api/activation_status.py'
+      - 'src/amodex/api/access_gate.py'
+      - 'src/amodex/api/workspace_app.py'
+      - 'scripts/smoke_remote.py'
+      - 'scripts/activation_persistence_probe.py'
+      - 'tests/unit/test_activation_status.py'
+      - 'tests/integration/test_activation_readiness.py'
+      - 'render.yaml'
+      - '.github/workflows/p0-activation-v1.yml'
+
+permissions:
+  contents: read
+
+env:
+  PYTHONNOUSERSITE: '1'
+  AMODEX_TEST_DATABASE_URL: postgresql://amodex@127.0.0.1:5432/amodex_e2e
+  AMODEX_DATABASE_URL: postgresql://amodex@127.0.0.1:5432/amodex_e2e
+  AMODEX_MIGRATION_DATABASE_URL: postgresql://amodex@127.0.0.1:5432/amodex_e2e
+  AMODEX_DATABASE_ENDPOINT_GUARD: '127'
+  AMODEX_MEDIA_STORE_BACKEND: file
+  AMODEX_STT_ENABLED: 'false'
+  AMODEX_DB_POOL_SIZE: '2'
+  AMODEX_URL: http://localhost:8766
+
+jobs:
+  activation:
+    name: activation-restart-persistence
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    services:
+      postgres:
+        image: postgres@sha256:1beaa3084eee2676f20a9cd9928f0bf2c5bf674f8e49f81017912183d377c61c
+        env:
+          POSTGRES_USER: amodex
+          POSTGRES_DB: amodex_e2e
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U amodex -d amodex_e2e"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 20
+
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+
+      - name: Recreate isolated Python runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          BOOTSTRAP_VENV="$RUNNER_TEMP/amodex-uv-bootstrap"
+          env -u PYTHONPATH -u PYTHONHOME python3 -m venv "$BOOTSTRAP_VENV"
+          env -u PYTHONPATH -u PYTHONHOME "$BOOTSTRAP_VENV/bin/python" -m pip install --disable-pip-version-check uv==0.10.0
+          UV_BIN="$BOOTSTRAP_VENV/bin/uv"
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" python install 3.13.5
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" sync --python 3.13.5 --extra dev --frozen
+          echo "UV_BIN=$UV_BIN" >> "$GITHUB_ENV"
+          echo "AMODEX_RELEASE_SHA=$GITHUB_SHA" >> "$GITHUB_ENV"
+
+      - name: Prepare isolated local stores
+        shell: bash
+        run: |
+          set -euo pipefail
+          MEDIA_DIR="$RUNNER_TEMP/amodex-activation-media"
+          VAULT_DIR="$RUNNER_TEMP/amodex-activation-vault"
+          mkdir -p "$MEDIA_DIR" "$VAULT_DIR"
+          echo "AMODEX_MEDIA_STORE_DIR=$MEDIA_DIR" >> "$GITHUB_ENV"
+          echo "AMODEX_CONNECTOR_VAULT_DIR=$VAULT_DIR" >> "$GITHUB_ENV"
+
+      - name: Compile activation surfaces
+        shell: bash
+        run: |
+          set -euo pipefail
+          .venv/bin/python -m compileall -q \
+            src/amodex/api/activation_status.py \
+            src/amodex/api/access_gate.py \
+            src/amodex/api/workspace_app.py \
+            scripts/smoke_remote.py \
+            scripts/activation_persistence_probe.py \
+            tests/unit/test_activation_status.py \
+            tests/integration/test_activation_readiness.py
+
+      - name: Prove P0 regression and activation boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          .venv/bin/python -m pytest \
+            tests/unit/test_activation_status.py \
+            tests/unit/test_workspace_frontend_authority.py \
+            tests/unit/test_performance_structural.py \
+            tests/unit/test_cache_local_state.py \
+            tests/unit/test_cloudinary_media_store.py \
+            -q
+
+      - name: Install pinned Chromium test layer
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$UV_BIN" pip install --python .venv/bin/python \
+            playwright==1.64.1 \
+            pytest-playwright==0.10.0
+          .venv/bin/python -m playwright install --with-deps chromium
+
+      - name: Apply production migrations
+        shell: bash
+        run: |
+          set -euo pipefail
+          .venv/bin/python scripts/migrate_production.py
+
+      - name: Prove migrated PostgreSQL readiness
+        shell: bash
+        run: |
+          set -euo pipefail
+          .venv/bin/python -m pytest \
+            tests/integration/test_activation_readiness.py \
+            tests/integration/test_workspace_ui_snapshots.py \
+            -q
+
+      - name: Start first Control Plane process
+        shell: bash
+        run: |
+          set -euo pipefail
+          nohup .venv/bin/python -m uvicorn amodex.api.workspace_app:app \
+            --host 127.0.0.1 --port 8766 \
+            >"$RUNNER_TEMP/amodex-activation-first.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/amodex-activation.pid"
+          for attempt in $(seq 1 45); do
+            if curl -fsS "$AMODEX_URL/readyz" >/dev/null; then
+              exit 0
+            fi
+            if ! kill -0 "$(cat "$RUNNER_TEMP/amodex-activation.pid")" 2>/dev/null; then
+              cat "$RUNNER_TEMP/amodex-activation-first.log" >&2
+              exit 1
+            fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/amodex-activation-first.log" >&2
+          exit 1
+
+      - name: Run read-only remote smoke before restart
+        shell: bash
+        run: |
+          set -euo pipefail
+          .venv/bin/python scripts/smoke_remote.py \
+            --url "$AMODEX_URL" \
+            --expect-sha "$GITHUB_SHA"
+
+      - name: Seed durable state before restart
+        shell: bash
+        run: |
+          set -euo pipefail
+          .venv/bin/python scripts/activation_persistence_probe.py seed \
+            --url "$AMODEX_URL" \
+            --state-file "$RUNNER_TEMP/amodex-activation-state.json"
+
+      - name: Stop Control Plane and prove migration idempotency
+        shell: bash
+        run: |
+          set -euo pipefail
+          PID="$(cat "$RUNNER_TEMP/amodex-activation.pid")"
+          kill -TERM "$PID"
+          for attempt in $(seq 1 30); do
+            if ! kill -0 "$PID" 2>/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          if kill -0 "$PID" 2>/dev/null; then
+            echo "Control Plane did not terminate after SIGTERM" >&2
+            exit 1
+          fi
+          .venv/bin/python scripts/migrate_production.py | tee "$RUNNER_TEMP/amodex-second-migration.log"
+          grep -q 'MIGRATIONS_OK applied=0' "$RUNNER_TEMP/amodex-second-migration.log"
+
+      - name: Start second Control Plane process
+        shell: bash
+        run: |
+          set -euo pipefail
+          nohup .venv/bin/python -m uvicorn amodex.api.workspace_app:app \
+            --host 127.0.0.1 --port 8766 \
+            >"$RUNNER_TEMP/amodex-activation-second.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/amodex-activation.pid"
+          for attempt in $(seq 1 45); do
+            if curl -fsS "$AMODEX_URL/readyz" >/dev/null; then
+              exit 0
+            fi
+            if ! kill -0 "$(cat "$RUNNER_TEMP/amodex-activation.pid")" 2>/dev/null; then
+              cat "$RUNNER_TEMP/amodex-activation-second.log" >&2
+              exit 1
+            fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/amodex-activation-second.log" >&2
+          exit 1
+
+      - name: Verify durable state survived restart
+        shell: bash
+        run: |
+          set -euo pipefail
+          .venv/bin/python scripts/activation_persistence_probe.py verify \
+            --url "$AMODEX_URL" \
+            --state-file "$RUNNER_TEMP/amodex-activation-state.json"
+
+      - name: Run read-only remote smoke after restart
+        shell: bash
+        run: |
+          set -euo pipefail
+          .venv/bin/python scripts/smoke_remote.py \
+            --url "$AMODEX_URL" \
+            --expect-sha "$GITHUB_SHA"
+
+      - name: Run mobile web regression after restart
+        shell: bash
+        run: |
+          set -euo pipefail
+          .venv/bin/python -m pytest tests/e2e -q \
+            --browser chromium \
+            --tracing retain-on-failure
+
+      - name: Prove benchmark gate remains explicit
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          .venv/bin/python scripts/smoke_remote.py \
+            --url "$AMODEX_URL" \
+            --expect-sha "$GITHUB_SHA" \
+            --require-benchmarks \
+            >"$RUNNER_TEMP/amodex-benchmark-gate.out" 2>"$RUNNER_TEMP/amodex-benchmark-gate.err"
+          rc=$?
+          set -e
+          if [ "$rc" -eq 0 ]; then
+            echo "Benchmarks are already READY in isolated CI; gate closed successfully."
+          else
+            grep -Eq 'model benchmark gate is not ready: (BENCHMARK_REQUIRED|UNAVAILABLE|GATED_BENCHMARK_PENDING|DEGRADED)' "$RUNNER_TEMP/amodex-benchmark-gate.err"
+            echo "Benchmark gate correctly remains fail-closed until a measured free route exists."
+          fi
+
+      - name: Show activation logs on failure
+        if: failure()
+        shell: bash
+        run: |
+          for file in \
+            "$RUNNER_TEMP/amodex-activation-first.log" \
+            "$RUNNER_TEMP/amodex-activation-second.log" \
+            "$RUNNER_TEMP/amodex-second-migration.log" \
+            "$RUNNER_TEMP/amodex-benchmark-gate.err"; do
+            if [ -f "$file" ]; then
+              echo "===== $file ====="
+              cat "$file"
+            fi
+          done
+
+      - name: Stop activation server
+        if: always()
+        shell: bash
+        run: |
+          if [ -f "$RUNNER_TEMP/amodex-activation.pid" ]; then
+            kill "$(cat "$RUNNER_TEMP/amodex-activation.pid")" 2>/dev/null || true
+          fi
