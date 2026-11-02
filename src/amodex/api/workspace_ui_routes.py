@@ -5,7 +5,9 @@ PostgreSQL repositories use synchronous psycopg, so FastAPI executes these handl
 in its worker thread pool instead of blocking the single Uvicorn event loop.
 
 The browser-facing snapshots also collapse several Neon round trips into one HTTP
-request and, where useful, one PostgreSQL connection.
+request and, where useful, one PostgreSQL connection. Snapshot GETs use private
+ETag revalidation so browser IndexedDB can refresh in the background without
+putting chat/project payloads in a shared/public HTTP cache.
 """
 
 from __future__ import annotations
@@ -13,9 +15,10 @@ from __future__ import annotations
 from typing import Any
 
 import psycopg
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request, Response
 from psycopg.rows import dict_row
 
+from amodex.api.ui_cache_http import private_conditional_json
 from amodex.connectors.clients import GitHubAppConnector, RobloxOAuthConnector
 from amodex.connectors.vault import CredentialVault
 from amodex.contracts.ids import new_uuid7
@@ -80,7 +83,7 @@ def build_workspace_ui_router(
         return row
 
     @router.get("/bootstrap")
-    def bootstrap() -> dict[str, Any]:
+    def bootstrap(request: Request) -> Response:
         try:
             with psycopg.connect(dsn, row_factory=dict_row) as conn:
                 global_workspace = ensure_global_workspace(conn)
@@ -100,18 +103,21 @@ def build_workspace_ui_router(
                     """,
                     (global_workspace["workspace_id"],),
                 ).fetchall()
-            return {
-                "ready": True,
-                "chat_inference": "GATED_BENCHMARK_PENDING",
-                "projects": projects,
-                "global_workspace": global_workspace,
-                "global_chats": global_chats,
-            }
+            return private_conditional_json(
+                request,
+                {
+                    "ready": True,
+                    "chat_inference": "GATED_BENCHMARK_PENDING",
+                    "projects": projects,
+                    "global_workspace": global_workspace,
+                    "global_chats": global_chats,
+                },
+            )
         except Exception as exc:
             raise fail(exc) from exc
 
     @router.get("/projects/{workspace_id}")
-    def project_snapshot(workspace_id: str) -> dict[str, Any]:
+    def project_snapshot(workspace_id: str, request: Request) -> Response:
         try:
             with psycopg.connect(dsn, row_factory=dict_row) as conn:
                 project = conn.execute(
@@ -149,18 +155,21 @@ def build_workspace_ui_router(
                     FROM amodex_environments ORDER BY created_at,environment_id
                     """
                 ).fetchall()
-            return {
-                "project": project,
-                "chats": chats,
-                "memories": memories,
-                "bindings": bindings,
-                "environments": environments,
-            }
+            return private_conditional_json(
+                request,
+                {
+                    "project": project,
+                    "chats": chats,
+                    "memories": memories,
+                    "bindings": bindings,
+                    "environments": environments,
+                },
+            )
         except Exception as exc:
             raise fail(exc) from exc
 
     @router.get("/chats/{chat_id}")
-    def chat_snapshot(chat_id: str) -> dict[str, Any]:
+    def chat_snapshot(chat_id: str, request: Request) -> Response:
         try:
             with psycopg.connect(dsn, row_factory=dict_row) as conn:
                 chat = conn.execute(
@@ -210,15 +219,18 @@ def build_workspace_ui_router(
                     FROM amodex_environments ORDER BY created_at,environment_id
                     """
                 ).fetchall()
-            return {
-                "chat": chat,
-                "workspace": workspace,
-                "messages": messages,
-                "drafts": drafts,
-                "memories": memories,
-                "bindings": bindings,
-                "environments": environments,
-            }
+            return private_conditional_json(
+                request,
+                {
+                    "chat": chat,
+                    "workspace": workspace,
+                    "messages": messages,
+                    "drafts": drafts,
+                    "memories": memories,
+                    "bindings": bindings,
+                    "environments": environments,
+                },
+            )
         except Exception as exc:
             raise fail(exc) from exc
 
@@ -270,7 +282,7 @@ def build_workspace_ui_router(
             raise fail(exc) from exc
 
     @router.get("/connections/bootstrap")
-    def connections_bootstrap() -> dict[str, Any]:
+    def connections_bootstrap(request: Request) -> Response:
         try:
             with psycopg.connect(dsn, row_factory=dict_row) as conn:
                 projects = conn.execute(
@@ -296,12 +308,12 @@ def build_workspace_ui_router(
                     "state": "READY" if roblox.config is not None and vault.available else "NOT_CONFIGURED",
                 },
             ]
-            return {"projects": projects, "statuses": statuses}
+            return private_conditional_json(request, {"projects": projects, "statuses": statuses})
         except Exception as exc:
             raise fail(exc) from exc
 
     @router.get("/connections/projects/{workspace_id}")
-    def connection_project_snapshot(workspace_id: str) -> dict[str, Any]:
+    def connection_project_snapshot(workspace_id: str, request: Request) -> Response:
         try:
             with psycopg.connect(dsn, row_factory=dict_row) as conn:
                 project = conn.execute(
@@ -338,7 +350,10 @@ def build_workspace_ui_router(
                     """,
                     (workspace_id,),
                 ).fetchall()
-            return {"project": project, "bindings": bindings, "accounts": accounts, "resources": resources}
+            return private_conditional_json(
+                request,
+                {"project": project, "bindings": bindings, "accounts": accounts, "resources": resources},
+            )
         except Exception as exc:
             raise fail(exc) from exc
 
