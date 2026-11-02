@@ -72,7 +72,7 @@ def build_connector_router(
         return HTTPException(status_code=502, detail=str(exc))
 
     @router.get("/connectors/status", response_model=list[ConnectorStatusRecord])
-    async def connector_status() -> list[ConnectorStatusRecord]:
+    def connector_status() -> list[ConnectorStatusRecord]:
         ready()
         return [
             ConnectorStatusRecord(
@@ -95,14 +95,14 @@ def build_connector_router(
         "/workspaces/{workspace_id}/connectors",
         response_model=list[ConnectorAccountRecord],
     )
-    async def list_workspace_connectors(workspace_id: str) -> list[ConnectorAccountRecord]:
+    def list_workspace_connectors(workspace_id: str) -> list[ConnectorAccountRecord]:
         ready()
         if workspace_repository.get_workspace(workspace_id) is None:
             raise HTTPException(status_code=404, detail="workspace not found")
         return list(repository.list_accounts(workspace_id=workspace_id))
 
     @router.post("/workspaces/{workspace_id}/connectors/github/start")
-    async def start_github(workspace_id: str):
+    def start_github(workspace_id: str):
         try:
             ready()
             if workspace_repository.get_workspace(workspace_id) is None:
@@ -112,7 +112,7 @@ def build_connector_router(
             raise convert(exc) from exc
 
     @router.get("/connectors/github/callback", include_in_schema=True)
-    async def github_callback(code: str = Query(min_length=1), state: str = Query(min_length=1)):
+    def github_callback(code: str = Query(min_length=1), state: str = Query(min_length=1)):
         try:
             account = github.complete(code=code, state=state)
             return RedirectResponse(url=f"/?connector={account.connector_id}&provider=github", status_code=303)
@@ -120,7 +120,7 @@ def build_connector_router(
             raise convert(exc) from exc
 
     @router.post("/workspaces/{workspace_id}/connectors/roblox/start")
-    async def start_roblox(workspace_id: str):
+    def start_roblox(workspace_id: str):
         try:
             ready()
             if workspace_repository.get_workspace(workspace_id) is None:
@@ -130,7 +130,7 @@ def build_connector_router(
             raise convert(exc) from exc
 
     @router.get("/connectors/roblox/callback", include_in_schema=True)
-    async def roblox_callback(code: str = Query(min_length=1), state: str = Query(min_length=1)):
+    def roblox_callback(code: str = Query(min_length=1), state: str = Query(min_length=1)):
         try:
             account = roblox.complete(code=code, state=state)
             return RedirectResponse(url=f"/?connector={account.connector_id}&provider=roblox", status_code=303)
@@ -138,7 +138,7 @@ def build_connector_router(
             raise convert(exc) from exc
 
     @router.post("/connectors/{connector_id}/refresh", response_model=ConnectorRefreshResponse)
-    async def refresh_connector(connector_id: str) -> ConnectorRefreshResponse:
+    def refresh_connector(connector_id: str) -> ConnectorRefreshResponse:
         try:
             account = ready().get_account(connector_id)
             if account is None:
@@ -150,7 +150,7 @@ def build_connector_router(
             raise convert(exc) from exc
 
     @router.get("/connectors/{connector_id}/resources", response_model=list[ConnectorResourceRecord])
-    async def list_connector_resources(connector_id: str) -> list[ConnectorResourceRecord]:
+    def list_connector_resources(connector_id: str) -> list[ConnectorResourceRecord]:
         if ready().get_account(connector_id) is None:
             raise HTTPException(status_code=404, detail="connector not found")
         return list(repository.list_resources(connector_id=connector_id))
@@ -160,7 +160,7 @@ def build_connector_router(
         response_model=ConnectorResourceRecord,
         status_code=201,
     )
-    async def add_roblox_place(connector_id: str, body: RobloxPlaceAddRequest) -> ConnectorResourceRecord:
+    def add_roblox_place(connector_id: str, body: RobloxPlaceAddRequest) -> ConnectorResourceRecord:
         try:
             account = ready().get_account(connector_id)
             if account is None:
@@ -179,7 +179,7 @@ def build_connector_router(
         "/connector-resources/{resource_id}/bind",
         response_model=ConnectorResourceRecord,
     )
-    async def bind_connector_resource(
+    def bind_connector_resource(
         resource_id: str,
         body: ConnectorResourceBindRequest,
     ) -> ConnectorResourceRecord:
@@ -192,7 +192,7 @@ def build_connector_router(
             raise convert(exc) from exc
 
     @router.delete("/connectors/{connector_id}", response_model=ConnectorAccountRecord)
-    async def disconnect(connector_id: str) -> ConnectorAccountRecord:
+    def disconnect(connector_id: str) -> ConnectorAccountRecord:
         try:
             account = ready().get_account(connector_id)
             if account is None:
