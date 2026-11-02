@@ -109,6 +109,16 @@ jobs:
             pytest-playwright==0.10.0
           .venv/bin/python -m playwright install --with-deps "${{ matrix.browser }}"
 
+      - name: Prepare isolated local stores
+        shell: bash
+        run: |
+          set -euo pipefail
+          MEDIA_DIR="$RUNNER_TEMP/amodex-p4-media-${{ matrix.browser }}"
+          VAULT_DIR="$RUNNER_TEMP/amodex-p4-vault-${{ matrix.browser }}"
+          mkdir -p "$MEDIA_DIR" "$VAULT_DIR"
+          echo "AMODEX_MEDIA_STORE_DIR=$MEDIA_DIR" >> "$GITHUB_ENV"
+          echo "AMODEX_CONNECTOR_VAULT_DIR=$VAULT_DIR" >> "$GITHUB_ENV"
+
       - name: Apply production migrations to isolated PostgreSQL
         shell: bash
         run: |
@@ -125,14 +135,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          MEDIA_DIR="$RUNNER_TEMP/amodex-p4-media-${{ matrix.browser }}"
-          VAULT_DIR="$RUNNER_TEMP/amodex-p4-vault-${{ matrix.browser }}"
-          mkdir -p "$MEDIA_DIR" "$VAULT_DIR"
-          echo "AMODEX_MEDIA_STORE_DIR=$MEDIA_DIR" >> "$GITHUB_ENV"
-          echo "AMODEX_CONNECTOR_VAULT_DIR=$VAULT_DIR" >> "$GITHUB_ENV"
-          export AMODEX_MEDIA_STORE_DIR="$MEDIA_DIR"
-          export AMODEX_CONNECTOR_VAULT_DIR="$VAULT_DIR"
-
           openssl req -x509 -newkey rsa:2048 -nodes \
             -keyout "$RUNNER_TEMP/e2e-key.pem" \
             -out "$RUNNER_TEMP/e2e-cert.pem" \
