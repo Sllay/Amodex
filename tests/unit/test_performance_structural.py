@@ -136,8 +136,8 @@ def test_cloudinary_authenticated_store_accepts_file_stream_without_read_bytes(
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(request)
-        assert request.url.path.endswith("/raw/authenticated")
-        assert request.headers.get("authorization", "").startswith("Basic ")
+        assert request.url.path.endswith("/raw/upload")
+        assert not request.url.path.endswith("/raw/authenticated")
         return httpx.Response(
             200,
             json={
