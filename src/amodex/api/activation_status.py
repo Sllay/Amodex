@@ -35,11 +35,7 @@ def release_identity(*, app_version: str) -> dict[str, str]:
         or "unknown"
     )
     host = "render" if os.environ.get("RENDER_SERVICE_ID", "").strip() else "generic"
-    return {
-        "version": app_version,
-        "git_sha": sha,
-        "host": host,
-    }
+    return {"version": app_version, "git_sha": sha, "host": host}
 
 
 def readiness_cache_seconds() -> float:
@@ -95,9 +91,7 @@ def database_readiness(
             with conn.cursor() as cur:
                 cur.execute("SELECT 1")
                 cur.fetchone()
-                cur.execute(
-                    "SELECT version, checksum_sha256 FROM amodex_schema_migrations"
-                )
+                cur.execute("SELECT version, checksum_sha256 FROM amodex_schema_migrations")
                 rows = cur.fetchall()
     except psycopg.Error:
         return {
@@ -156,9 +150,8 @@ def zero_cost_readiness() -> dict[str, Any]:
     return {
         "ready": not violations,
         "mode": "zero-cost-fail-closed",
-        "configured_free_provider_pools": len(configured) - len(
-            [item for item in violations if item != "stt"]
-        ),
+        "configured_free_provider_pools": len(configured)
+        - len([item for item in violations if item != "stt"]),
         "configured_provider_pools": len(configured),
         "violations": tuple(violations),
         "stt_enabled": stt_enabled,
@@ -229,14 +222,10 @@ def build_activation_router(
 
     @router.get("/healthz", include_in_schema=False)
     def healthz() -> dict[str, str]:
-        # Liveness deliberately avoids DB/provider/GitHub calls.
         return {"status": "ok"}
 
     @router.get("/readyz", include_in_schema=False)
     def readyz() -> JSONResponse:
-        # Render may poll health frequently. Keep DB/schema checks bounded without
-        # turning readiness into liveness: the first request is always real and
-        # the cached result expires quickly (default 15 seconds).
         snapshot = current_snapshot()
         public = {
             "status": snapshot["status"],
@@ -253,10 +242,11 @@ def build_activation_router(
         }
         return JSONResponse(public, status_code=200 if snapshot["ready"] else 503)
 
-    @router.get("/v1/system/status")
-    def system_status() -> dict[str, Any]:
-        # Access-gate middleware protects /v1/* when private deployment mode is on.
-        # Diagnostics force a fresh probe instead of reusing the public health cache.
+    @router.get("/v1/activation/status")
+    def activation_status() -> dict[str, Any]:
+        # The base Control Plane already owns /v1/system/status. A dedicated path
+        # avoids route-order collisions while preserving that legacy contract.
+        # Access-gate middleware still protects this /v1/* diagnostic in private mode.
         return current_snapshot(force=True)
 
     return router
