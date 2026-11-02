@@ -12,6 +12,7 @@ one-shot psycopg connections in their own process.
 
 from __future__ import annotations
 
+import atexit
 import os
 from collections.abc import Callable
 from threading import Condition, Lock
@@ -31,6 +32,7 @@ _ORIGINAL_CONNECT = psycopg.connect
 _REGISTRY_LOCK = Lock()
 _POOLS: dict[str, "RuntimeConnectionPool"] = {}
 _INSTALLED = False
+_ATEXIT_REGISTERED = False
 _POOL_MAX_SIZE = 2
 _POOL_TIMEOUT_SECONDS = 10.0
 
@@ -210,12 +212,15 @@ def install_runtime_connection_pool(*, max_size: int | None = None) -> None:
     psycopg's original connector rather than silently changing semantics.
     """
 
-    global _INSTALLED, _POOL_MAX_SIZE
+    global _ATEXIT_REGISTERED, _INSTALLED, _POOL_MAX_SIZE
     size = max_size if max_size is not None else runtime_pool_size_from_environment()
     if size not in {1, 2}:
         raise ValueError("runtime PostgreSQL pool size must be 1 or 2")
     with _REGISTRY_LOCK:
         _POOL_MAX_SIZE = size
+        if not _ATEXIT_REGISTERED:
+            atexit.register(close_runtime_connection_pools)
+            _ATEXIT_REGISTERED = True
         if _INSTALLED:
             return
         psycopg.connect = _runtime_connect  # type: ignore[assignment]
@@ -223,7 +228,7 @@ def install_runtime_connection_pool(*, max_size: int | None = None) -> None:
 
 
 def close_runtime_connection_pools() -> None:
-    """Close idle physical connections; future runtime calls lazily recreate pools."""
+    """Close idle physical connections owned by this application process."""
 
     with _REGISTRY_LOCK:
         pools = tuple(_POOLS.values())
