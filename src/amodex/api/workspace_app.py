@@ -32,6 +32,7 @@ from amodex.connectors.oauth import GitHubAppConfig, RobloxOAuthConfig
 from amodex.connectors.vault import CredentialVault, vault_from_environment
 from amodex.model_intelligence.service import ModelIntelligenceService
 from amodex.multimodal.clients import MultimodalClients, multimodal_clients_from_environment
+from amodex.multimodal.cloudinary_rest_store import CloudinaryAuthenticatedRestMediaStore
 from amodex.multimodal.object_store import (
     MediaObjectStore,
     max_upload_bytes_from_environment,
@@ -44,7 +45,14 @@ from amodex.storage.multimodal import PostgresMultimodalRepository
 from amodex.storage.routing import PostgresRoutingRepository
 from amodex.storage.workspace import PostgresWorkspaceRepository
 
-_RELEASE = "0.7.2-workspace-v2-stable-actions"
+_RELEASE = "0.7.3-cloudinary-auth-rest"
+
+
+def _media_store_from_runtime() -> MediaObjectStore:
+    backend = os.environ.get("AMODEX_MEDIA_STORE_BACKEND", "").strip().lower()
+    if backend == "cloudinary":
+        return CloudinaryAuthenticatedRestMediaStore.from_environment()
+    return media_store_from_environment()
 
 
 def create_workspace_app(
@@ -94,7 +102,7 @@ def create_workspace_app(
         repository=connector_repository,
         vault=connector_vault,
     )
-    media_store = media_store or media_store_from_environment()
+    media_store = media_store or _media_store_from_runtime()
     multimodal_clients = multimodal_clients or multimodal_clients_from_environment()
     max_upload_bytes = max_upload_bytes or max_upload_bytes_from_environment()
 
