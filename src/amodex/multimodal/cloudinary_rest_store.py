@@ -1,26 +1,34 @@
 """Cloudinary REST adapter for private content-addressed raw assets.
 
 Cloudinary raw uploads use ``/raw/upload`` and carry the authenticated delivery
-option in the signed upload payload. Content-addressed retries are verified
-through the Admin API before being accepted as idempotent successes.
+option in the signed upload payload. Raw assets must retain a real extension in
+their public ID, while the SHA-256 digest remains the content authority.
 """
 
 from __future__ import annotations
 
 import hashlib
 from pathlib import Path
+import re
 from typing import BinaryIO
 
 import httpx
 
 from amodex.multimodal.object_store import (
     CloudinaryMediaStore,
+    MediaObjectMissing,
     MediaStoreError,
     MediaStoreUnavailable,
     StoredMediaObject,
     _CLOUDINARY_API_ROOT,
     _cloudinary_json,
+    _raise_cloudinary_status,
 )
+
+_MEDIA_REF_WITH_EXTENSION_RE = re.compile(
+    r"^media://sha256/([0-9a-f]{64})(?:\.([a-z0-9]{1,16}))?$"
+)
+_SAFE_EXTENSION_RE = re.compile(r"^[a-z0-9]{1,16}$")
 
 
 def _cloudinary_error_detail(response: httpx.Response) -> str:
@@ -40,15 +48,38 @@ def _cloudinary_error_detail(response: httpx.Response) -> str:
     return " ".join(message.split())[:320]
 
 
+def _normalize_extension(extension: str | None) -> str:
+    value = (extension or "dat").strip().lower().lstrip(".")
+    if not value:
+        value = "dat"
+    if not _SAFE_EXTENSION_RE.fullmatch(value):
+        raise MediaStoreError("invalid media file extension")
+    return value
+
+
+def _storage_ref_parts(storage_ref: str) -> tuple[str, str]:
+    match = _MEDIA_REF_WITH_EXTENSION_RE.fullmatch(storage_ref)
+    if not match:
+        raise MediaStoreError("invalid media storage reference")
+    # Legacy refs did not carry an extension and historically pointed at .bin.
+    return match.group(1), (match.group(2) or "bin")
+
+
 class CloudinaryAuthenticatedRestMediaStore(CloudinaryMediaStore):
     """Cloudinary store using signed raw uploads with authenticated delivery."""
 
-    def put_bytes(self, data: bytes) -> StoredMediaObject:
+    def put_bytes(
+        self,
+        data: bytes,
+        *,
+        extension: str | None = None,
+    ) -> StoredMediaObject:
         digest = hashlib.sha256(data).hexdigest()
         return self._upload(
             digest=digest,
             size_bytes=len(data),
             file_value=data,
+            extension=_normalize_extension(extension),
         )
 
     def put_file(
@@ -57,6 +88,7 @@ class CloudinaryAuthenticatedRestMediaStore(CloudinaryMediaStore):
         *,
         digest: str | None = None,
         size_bytes: int | None = None,
+        extension: str | None = None,
     ) -> StoredMediaObject:
         """Upload a staged file without materializing the whole object in RAM."""
 
@@ -74,12 +106,17 @@ class CloudinaryAuthenticatedRestMediaStore(CloudinaryMediaStore):
             size_bytes = source.stat().st_size
 
         assert size_bytes is not None
+        chosen_extension = _normalize_extension(extension or source.suffix)
         with source.open("rb") as input_handle:
             return self._upload(
                 digest=digest,
                 size_bytes=size_bytes,
                 file_value=input_handle,
+                extension=chosen_extension,
             )
+
+    def _public_id_with_extension(self, digest: str, extension: str) -> str:
+        return f"{self.prefix}/sha256/{digest[:2]}/{digest}.{extension}"
 
     def _upload(
         self,
@@ -87,15 +124,13 @@ class CloudinaryAuthenticatedRestMediaStore(CloudinaryMediaStore):
         digest: str,
         size_bytes: int,
         file_value: bytes | BinaryIO,
+        extension: str,
     ) -> StoredMediaObject:
-        storage_ref = f"media://sha256/{digest}"
-        public_id = self._public_id(digest)
+        storage_ref = f"media://sha256/{digest}.{extension}"
+        public_id = self._public_id_with_extension(digest, extension)
         url = f"{_CLOUDINARY_API_ROOT}/{self.cloud_name}/raw/upload"
         params = self._signed_params(
             {
-                # Cloudinary defines overwrite as a Boolean. Sending the numeric
-                # string "0" caused production HTTP 400 responses; use the
-                # documented textual Boolean representation instead.
                 "overwrite": "false",
                 "public_id": public_id,
                 "timestamp": str(int(self._now())),
@@ -109,7 +144,7 @@ class CloudinaryAuthenticatedRestMediaStore(CloudinaryMediaStore):
                 data=params,
                 files={
                     "file": (
-                        f"{digest}.bin",
+                        f"{digest}.{extension}",
                         file_value,
                         "application/octet-stream",
                     )
@@ -119,9 +154,6 @@ class CloudinaryAuthenticatedRestMediaStore(CloudinaryMediaStore):
             raise MediaStoreUnavailable("Cloudinary media upload is unavailable") from exc
 
         if response.status_code == 409:
-            # overwrite=false keeps retries deterministic: an already-existing SHA
-            # object is accepted only after the Admin API proves that the exact
-            # authenticated raw object exists with the expected size.
             self._verify_existing_object(public_id=public_id, size_bytes=size_bytes)
             return StoredMediaObject(storage_ref, digest, size_bytes)
 
@@ -143,6 +175,52 @@ class CloudinaryAuthenticatedRestMediaStore(CloudinaryMediaStore):
         if payload.get("type") not in {None, "authenticated"}:
             raise MediaStoreError("Cloudinary returned an unexpected delivery type")
         return StoredMediaObject(storage_ref, digest, size_bytes)
+
+    def get_bytes(self, storage_ref: str) -> bytes:
+        digest, extension = _storage_ref_parts(storage_ref)
+        timestamp = int(self._now())
+        params = self._signed_params(
+            {
+                "expires_at": str(timestamp + 300),
+                "format": extension,
+                "public_id": f"{self.prefix}/sha256/{digest[:2]}/{digest}",
+                "timestamp": str(timestamp),
+                "type": "authenticated",
+            }
+        )
+        url = f"{_CLOUDINARY_API_ROOT}/{self.cloud_name}/raw/download"
+        try:
+            response = self._client.get(url, params=params)
+        except httpx.HTTPError as exc:
+            raise MediaStoreUnavailable("Cloudinary media download is unavailable") from exc
+        if response.status_code == 404:
+            raise MediaObjectMissing(storage_ref)
+        _raise_cloudinary_status(response, operation="download")
+        data = response.content
+        if hashlib.sha256(data).hexdigest() != digest:
+            raise MediaStoreError("Cloudinary stored media digest mismatch")
+        return data
+
+    def delete(self, storage_ref: str) -> None:
+        digest, extension = _storage_ref_parts(storage_ref)
+        params = self._signed_params(
+            {
+                "public_id": self._public_id_with_extension(digest, extension),
+                "timestamp": str(int(self._now())),
+                "type": "authenticated",
+            }
+        )
+        url = f"{_CLOUDINARY_API_ROOT}/{self.cloud_name}/raw/destroy"
+        try:
+            response = self._client.post(url, data=params)
+        except httpx.HTTPError as exc:
+            raise MediaStoreUnavailable("Cloudinary media delete is unavailable") from exc
+        if response.status_code == 404:
+            return
+        payload = _cloudinary_json(response, operation="delete")
+        result = str(payload.get("result", ""))
+        if result not in {"ok", "not found"}:
+            raise MediaStoreError("Cloudinary media delete did not complete")
 
     def _verify_existing_object(self, *, public_id: str, size_bytes: int) -> None:
         url = f"{_CLOUDINARY_API_ROOT}/{self.cloud_name}/resources/raw/authenticated"
