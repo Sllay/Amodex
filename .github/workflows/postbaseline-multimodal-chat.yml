@@ -15,13 +15,16 @@ on:
       - 'src/amodex/api/multimodal_*.py'
       - 'src/amodex/api/workspace_app.py'
       - 'src/amodex/api/workspace_v2.py'
+      - 'src/amodex/api/workspace_ui_routes.py'
       - 'src/amodex/api/theme_web.py'
       - 'src/amodex/api/global_chat_routes.py'
       - 'src/amodex/api/access_gate.py'
+      - 'src/amodex/api/connector_web.py'
       - 'migrations/**'
       - 'scripts/migrate_production.py'
       - 'render.yaml'
       - 'tests/integration/test_postbaseline_multimodal_chat.py'
+      - 'tests/integration/test_workspace_ui_snapshots.py'
       - 'tests/unit/test_cloudinary_media_store.py'
       - 'tests/unit/test_production_deployment.py'
       - 'tests/unit/test_access_gate.py'
@@ -89,8 +92,10 @@ jobs:
               src/amodex/api/access_gate.py \
               src/amodex/api/theme_web.py \
               src/amodex/api/global_chat_routes.py \
+              src/amodex/api/workspace_ui_routes.py \
               src/amodex/api/workspace_v2.py \
               src/amodex/api/workspace_app.py \
+              src/amodex/api/connector_web.py \
               scripts/migrate_production.py
 
       - name: Prove Step 3 does not import Hermes implementation
@@ -117,13 +122,14 @@ jobs:
             tests/integration/test_postbaseline_multimodal_chat.py \
             tests/unit/test_cloudinary_media_store.py
 
-      - name: Run Step 1 and Step 2 checkpoint regressions
+      - name: Run Step 1, Step 2 and fast UI snapshot regressions
         shell: bash
         run: |
           set -euo pipefail
           env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --extra dev --frozen pytest -q \
             tests/integration/test_postbaseline_web_workspace.py \
-            tests/integration/test_postbaseline_connectors.py
+            tests/integration/test_postbaseline_connectors.py \
+            tests/integration/test_workspace_ui_snapshots.py
 
       - name: Run Environment Product and Stage 6 compatibility regression
         shell: bash
@@ -183,6 +189,10 @@ jobs:
           grep -q 'env://' src/amodex/multimodal/clients.py
           if grep -E 'cloudinary://[^<[:space:]]+|postgres(ql)?://[^<[:space:]]+@[^<[:space:]]+' render.yaml; then
             echo 'credential-like deployment value was hardcoded in render.yaml' >&2
+            exit 1
+          fi
+          if grep -q 'credential_ref' src/amodex/api/connector_web.py; then
+            echo 'connector web surface references a credential secret field' >&2
             exit 1
           fi
           echo 'MULTIMODAL_STORAGE_BOUNDARY_OK'
