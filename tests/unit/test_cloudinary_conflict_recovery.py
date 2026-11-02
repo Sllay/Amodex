@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-from urllib.parse import unquote
 
 import httpx
 import pytest
@@ -21,7 +20,7 @@ def _store(handler) -> CloudinaryAuthenticatedRestMediaStore:
     )
 
 
-def test_authenticated_rest_upload_409_is_idempotent_after_admin_lookup() -> None:
+def test_authenticated_rest_upload_409_is_idempotent_after_admin_collection_lookup() -> None:
     data = b"same private file retried"
     digest = hashlib.sha256(data).hexdigest()
     public_id = f"amodex-production/sha256/{digest[:2]}/{digest}.bin"
@@ -32,18 +31,24 @@ def test_authenticated_rest_upload_409_is_idempotent_after_admin_lookup() -> Non
         if request.method == "POST":
             assert request.url.path.endswith("/raw/authenticated")
             return httpx.Response(409, json={"error": {"message": "already exists"}})
+
         assert request.method == "GET"
-        assert "/resources/raw/authenticated/" in request.url.path
-        encoded = request.url.path.split("/resources/raw/authenticated/", 1)[1]
-        assert unquote(encoded) == public_id
+        assert request.url.path.endswith("/resources/raw/authenticated")
+        assert request.url.params.get_list("public_ids[]") == [public_id]
+        assert request.url.params["max_results"] == "1"
+        assert public_id not in request.url.path
         assert request.headers.get("authorization", "").startswith("Basic ")
         return httpx.Response(
             200,
             json={
-                "public_id": public_id,
-                "resource_type": "raw",
-                "type": "authenticated",
-                "bytes": len(data),
+                "resources": [
+                    {
+                        "public_id": public_id,
+                        "resource_type": "raw",
+                        "type": "authenticated",
+                        "bytes": len(data),
+                    }
+                ]
             },
         )
 
@@ -67,14 +72,30 @@ def test_authenticated_rest_upload_409_rejects_mismatched_existing_object() -> N
         return httpx.Response(
             200,
             json={
-                "public_id": public_id,
-                "resource_type": "raw",
-                "type": "authenticated",
-                "bytes": len(data) + 1,
+                "resources": [
+                    {
+                        "public_id": public_id,
+                        "resource_type": "raw",
+                        "type": "authenticated",
+                        "bytes": len(data) + 1,
+                    }
+                ]
             },
         )
 
     with pytest.raises(MediaStoreError, match="content-addressed object collision"):
+        _store(handler).put_bytes(data)
+
+
+def test_authenticated_rest_upload_409_rejects_empty_admin_result() -> None:
+    data = b"expected content"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            return httpx.Response(409, json={"error": {"message": "already exists"}})
+        return httpx.Response(200, json={"resources": []})
+
+    with pytest.raises(MediaStoreError, match="was not returned by the Admin API"):
         _store(handler).put_bytes(data)
 
 
@@ -90,10 +111,25 @@ def test_authenticated_rest_upload_409_maps_admin_auth_failure_to_unavailable() 
         _store(handler).put_bytes(data)
 
 
-def test_streaming_upload_route_maps_unavailable_before_generic_conflict() -> None:
+def test_authenticated_rest_upload_409_maps_admin_quota_failure_to_unavailable() -> None:
+    data = b"private content"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            return httpx.Response(409, json={"error": {"message": "already exists"}})
+        return httpx.Response(429, json={"error": {"message": "rate limited"}})
+
+    with pytest.raises(MediaStoreUnavailable, match="lookup quota is unavailable"):
+        _store(handler).put_bytes(data)
+
+
+def test_streaming_upload_route_maps_storage_failures_to_server_side_statuses() -> None:
     source = open("src/amodex/api/streaming_upload_routes.py", encoding="utf-8").read()
     unavailable = source.index("except MediaStoreUnavailable as exc:")
     generic = source.index("except MediaStoreError as exc:")
     assert unavailable < generic
     assert 'status_code=503' in source[unavailable:generic]
     assert '"MEDIA_STORE_UNAVAILABLE"' in source[unavailable:generic]
+    assert 'status_code=502' in source[generic:]
+    assert '"MEDIA_STORE_ERROR"' in source[generic:]
+    assert 'logger.error(' in source[generic:]

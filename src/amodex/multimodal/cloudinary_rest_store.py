@@ -12,7 +12,6 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 from typing import BinaryIO
-from urllib.parse import quote
 
 import httpx
 
@@ -98,11 +97,12 @@ class CloudinaryAuthenticatedRestMediaStore(CloudinaryMediaStore):
             raise MediaStoreUnavailable("Cloudinary media upload is unavailable") from exc
 
         if response.status_code == 409:
-            # Content-addressed uploads are intentionally overwrite=false. A retry
+            # Content-addressed uploads intentionally use overwrite=false. A retry
             # therefore receives 409 when the same SHA object already exists.
-            # Verify that exact raw/authenticated public_id through the Admin API
-            # instead of downloading the private binary back into memory. This
-            # preserves idempotency and keeps large retries bounded-memory.
+            # Verify the exact asset through the documented Admin API collection
+            # filter. Using public_ids[] avoids embedding a slash-containing
+            # public_id in the URL path, which can be mis-routed/decoded by HTTP
+            # layers and previously produced false "resource missing" conflicts.
             self._verify_existing_object(public_id=public_id, size_bytes=size_bytes)
             return StoredMediaObject(storage_ref, digest, size_bytes)
 
@@ -117,37 +117,49 @@ class CloudinaryAuthenticatedRestMediaStore(CloudinaryMediaStore):
         return StoredMediaObject(storage_ref, digest, size_bytes)
 
     def _verify_existing_object(self, *, public_id: str, size_bytes: int) -> None:
-        encoded_public_id = quote(public_id, safe="")
-        url = (
-            f"{_CLOUDINARY_API_ROOT}/{self.cloud_name}"
-            f"/resources/raw/authenticated/{encoded_public_id}"
-        )
+        url = f"{_CLOUDINARY_API_ROOT}/{self.cloud_name}/resources/raw/authenticated"
         try:
             response = self._client.get(
                 url,
                 auth=(self._api_key, self._api_secret),
+                params=[
+                    ("public_ids[]", public_id),
+                    ("max_results", "1"),
+                ],
             )
         except httpx.HTTPError as exc:
             raise MediaStoreUnavailable("Cloudinary media lookup is unavailable") from exc
 
-        if response.status_code == 404:
-            raise MediaStoreError(
-                "Cloudinary reported an upload conflict but the content-addressed object is missing"
-            )
         if response.status_code in {401, 403}:
             raise MediaStoreUnavailable("Cloudinary media lookup is not authorized")
         if response.status_code in {420, 429}:
             raise MediaStoreUnavailable("Cloudinary media lookup quota is unavailable")
 
         payload = _cloudinary_json(response, operation="lookup")
-        if str(payload.get("public_id", "")) != public_id:
+        resources = payload.get("resources")
+        if not isinstance(resources, list):
+            raise MediaStoreError("Cloudinary media lookup returned an invalid response")
+
+        resource = next(
+            (
+                item
+                for item in resources
+                if isinstance(item, dict) and str(item.get("public_id", "")) == public_id
+            ),
+            None,
+        )
+        if resource is None:
+            raise MediaStoreError(
+                "Cloudinary reported an upload conflict but the content-addressed object "
+                "was not returned by the Admin API"
+            )
+
+        if resource.get("resource_type") not in {None, "raw"}:
             raise MediaStoreError("Cloudinary content-addressed object collision")
-        if payload.get("resource_type") not in {None, "raw"}:
-            raise MediaStoreError("Cloudinary content-addressed object collision")
-        if payload.get("type") not in {None, "authenticated"}:
+        if resource.get("type") not in {None, "authenticated"}:
             raise MediaStoreError("Cloudinary content-addressed object collision")
 
-        remote_size = payload.get("bytes")
+        remote_size = resource.get("bytes")
         if remote_size is not None:
             try:
                 measured_size = int(remote_size)

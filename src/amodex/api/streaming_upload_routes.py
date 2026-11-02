@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import tempfile
 from pathlib import Path, PurePath
@@ -17,6 +18,9 @@ from amodex.multimodal.object_store import (
 from amodex.multimodal.streaming_store import put_media_file
 from amodex.storage.workspace import PostgresWorkspaceRepository, WorkspaceStateError
 from amodex.workspace.models import AttachmentRecord
+
+
+logger = logging.getLogger("amodex.multimodal.upload")
 
 
 def _safe_name(raw: str) -> str:
@@ -110,6 +114,12 @@ def build_streaming_upload_router(
                 detail={"code": exc.code, "message": exc.detail},
             ) from exc
         except MediaStoreUnavailable as exc:
+            logger.warning(
+                "media_store_unavailable chat_id=%s size_bytes=%s reason=%s",
+                chat_id,
+                size_bytes,
+                exc,
+            )
             raise HTTPException(
                 status_code=503,
                 detail={
@@ -118,10 +128,19 @@ def build_streaming_upload_router(
                 },
             ) from exc
         except MediaStoreError as exc:
+            # Storage integrity/provider failures are server-side upstream errors,
+            # not client conflicts. Mapping them to 409 previously hid the real
+            # Cloudinary failure and made the browser report a misleading conflict.
+            logger.error(
+                "media_store_error chat_id=%s size_bytes=%s reason=%s",
+                chat_id,
+                size_bytes,
+                exc,
+            )
             raise HTTPException(
-                status_code=409,
+                status_code=502,
                 detail={
-                    "code": "MEDIA_STORE_CONFLICT",
+                    "code": "MEDIA_STORE_ERROR",
                     "message": str(exc),
                 },
             ) from exc
