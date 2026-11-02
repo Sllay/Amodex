@@ -1,0 +1,98 @@
+name: hotfix-cloudinary-model-reply
+
+on:
+  pull_request:
+    branches:
+      - deploy/render-neon-cloudinary-v1
+    paths:
+      - 'src/amodex/api/streaming_upload_routes.py'
+      - 'src/amodex/multimodal/cloudinary_rest_store.py'
+      - 'src/amodex/providers/openai_compatible.py'
+      - 'src/amodex/providers/groq.py'
+      - 'tests/unit/test_cloudinary_conflict_recovery.py'
+      - 'tests/unit/test_provider_benchmark_transport.py'
+      - 'tests/unit/test_cloudinary_media_store.py'
+      - 'tests/unit/test_performance_structural.py'
+      - 'tests/integration/test_stage5_provider_adapters.py'
+      - '.github/workflows/hotfix-cloudinary-model-reply.yml'
+
+permissions:
+  contents: read
+
+env:
+  PYTHONNOUSERSITE: '1'
+
+jobs:
+  focused-hotfix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+
+      - name: Recreate isolated Python runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          BOOTSTRAP_VENV="$RUNNER_TEMP/amodex-uv-bootstrap"
+          env -u PYTHONPATH -u PYTHONHOME python3 -m venv "$BOOTSTRAP_VENV"
+          env -u PYTHONPATH -u PYTHONHOME "$BOOTSTRAP_VENV/bin/python" -m pip install --disable-pip-version-check uv==0.10.0
+          UV_BIN="$BOOTSTRAP_VENV/bin/uv"
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" python install 3.13.5
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" sync --python 3.13.5 --extra dev --frozen
+          echo "UV_BIN=$UV_BIN" >> "$GITHUB_ENV"
+
+      - name: Compile hotfix surfaces
+        shell: bash
+        run: |
+          set -euo pipefail
+          .venv/bin/python -m compileall -q \
+            src/amodex/api/streaming_upload_routes.py \
+            src/amodex/multimodal/cloudinary_rest_store.py \
+            src/amodex/providers/openai_compatible.py \
+            src/amodex/providers/groq.py \
+            tests/unit/test_cloudinary_conflict_recovery.py \
+            tests/unit/test_provider_benchmark_transport.py \
+            tests/integration/test_stage5_provider_adapters.py
+
+      - name: Prove Cloudinary conflict recovery and bounded upload behavior
+        shell: bash
+        run: |
+          set -euo pipefail
+          .venv/bin/python -m pytest -q \
+            tests/unit/test_cloudinary_conflict_recovery.py \
+            tests/unit/test_cloudinary_media_store.py \
+            tests/unit/test_performance_structural.py
+
+      - name: Prove Groq benchmark transport and provider compatibility
+        shell: bash
+        run: |
+          set -euo pipefail
+          .venv/bin/python -m pytest -q \
+            tests/unit/test_provider_benchmark_transport.py \
+            tests/integration/test_stage5_provider_adapters.py
+
+      - name: Prove zero-cost policy was not bypassed
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'BillingClass.FREE' src/amodex/model_intelligence/service.py
+          grep -q 'paid_fallback.*DENIED' src/amodex/model_intelligence/service.py
+          grep -q 'unknown_billing.*DENIED' src/amodex/model_intelligence/service.py
+          grep -q 'aggregate >= 0.75' src/amodex/model_intelligence/service.py
+          grep -q 'pass_rate >= 0.67' src/amodex/model_intelligence/service.py
+          echo 'HOTFIX_ZERO_COST_AND_BENCHMARK_THRESHOLDS_INTACT'
+
+      - name: Repository hygiene
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          status="$(git status --porcelain)"
+          if [ -n "$status" ]; then
+            printf '%s\n' "$status" >&2
+            exit 1
+          fi
