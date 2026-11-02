@@ -5,7 +5,7 @@ services:
     plan: free
     buildCommand: pip install .
     startCommand: python scripts/migrate_production.py && uvicorn amodex.api.workspace_app:app --host 0.0.0.0 --port $PORT
-    healthCheckPath: /
+    healthCheckPath: /healthz
     envVars:
       - key: PYTHON_VERSION
         value: 3.13.5
@@ -17,9 +17,19 @@ services:
         sync: false
       - key: AMODEX_MEDIA_STORE_BACKEND
         value: cloudinary
-      - key: CLOUDINARY_URL
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
         sync: false
       - key: AMODEX_CLOUDINARY_PREFIX
         value: amodex-production
       - key: AMODEX_MEDIA_MAX_UPLOAD_BYTES
         value: "26214400"
+      - key: AMODEX_ACCESS_PASSCODE
+        sync: false
+      - key: AMODEX_ACCESS_SESSION_SECRET
+        sync: false
+      - key: AMODEX_ACCESS_SESSION_TTL_SECONDS
+        value: "43200"
