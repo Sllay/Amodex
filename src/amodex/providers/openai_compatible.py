@@ -16,6 +16,9 @@ from amodex.runtime.models import ProviderResponse, ProviderUsage
 from .base import ProviderFailure
 
 
+_BENCHMARK_REQUEST_PREFIX = "benchmark:"
+
+
 class OpenAICompatibleProvider:
     def __init__(
         self,
@@ -26,6 +29,7 @@ class OpenAICompatibleProvider:
         timeout_seconds: float = 45.0,
         require_json_object: bool = True,
         extra_headers: Mapping[str, str] | None = None,
+        user_only_instructions: bool = False,
     ) -> None:
         if not provider_name.strip():
             raise ValueError("provider_name is required")
@@ -39,28 +43,19 @@ class OpenAICompatibleProvider:
         self._timeout_seconds = timeout_seconds
         self._require_json_object = require_json_object
         self._extra_headers = dict(extra_headers or {})
+        self._user_only_instructions = user_only_instructions
 
     def generate(self, *, model: str, prompt: str, request_key: str) -> ProviderResponse:
         if not model.strip():
             raise ValueError("model is required")
         if not prompt.strip():
             raise ValueError("prompt is required")
-        payload: dict[str, Any] = {
-            "model": model,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": (
-                        "Return a useful answer. If JSON mode is enabled, return exactly "
-                        "one JSON object with a non-empty string field named text."
-                    ),
-                },
-                {"role": "user", "content": prompt},
-            ],
-            "temperature": 0.1,
-        }
-        if self._require_json_object:
-            payload["response_format"] = {"type": "json_object"}
+
+        payload = self._build_payload(
+            model=model,
+            prompt=prompt,
+            request_key=request_key,
+        )
 
         headers = {
             "authorization": f"Bearer {self._api_key}",
@@ -124,6 +119,58 @@ class OpenAICompatibleProvider:
                 total_tokens=_optional_int(usage.get("total_tokens")),
             ),
         )
+
+    def _build_payload(self, *, model: str, prompt: str, request_key: str) -> dict[str, Any]:
+        instruction = self._instruction_text()
+        if self._user_only_instructions:
+            messages = [
+                {
+                    "role": "user",
+                    "content": f"{instruction}\n\nTask:\n{prompt}",
+                }
+            ]
+        else:
+            messages = [
+                {"role": "system", "content": instruction},
+                {"role": "user", "content": prompt},
+            ]
+
+        payload: dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+            "temperature": 0.1,
+        }
+        if self._require_json_object:
+            payload["response_format"] = {"type": "json_object"}
+        payload.update(
+            self._provider_payload_overrides(
+                model=model,
+                request_key=request_key,
+                benchmark=request_key.startswith(_BENCHMARK_REQUEST_PREFIX),
+            )
+        )
+        return payload
+
+    def _instruction_text(self) -> str:
+        if not self._require_json_object:
+            return "Return a useful final answer and follow the user's formatting requirements exactly."
+        return (
+            "Return exactly one JSON object with one non-empty string field named text. "
+            "The value of text is the final answer. Follow all formatting constraints inside that "
+            "text value. If the task says to return exactly a token, phrase, JSON string, code line, "
+            "or other literal output, set text to exactly that requested output with no extra prose."
+        )
+
+    def _provider_payload_overrides(
+        self,
+        *,
+        model: str,
+        request_key: str,
+        benchmark: bool,
+    ) -> dict[str, Any]:
+        """Provider-specific request fields without changing the public provider protocol."""
+
+        return {}
 
 
 def _extract_content_text(content: object) -> str:
