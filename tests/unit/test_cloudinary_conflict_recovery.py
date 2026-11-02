@@ -34,7 +34,8 @@ def _assert_signed_raw_authenticated_upload(request: httpx.Request) -> None:
     assert b"test-key" in body
     assert b'name="signature"' in body
     assert b'name="overwrite"' in body
-    assert b"\r\n\r\n0\r\n" in body
+    assert b"\r\n\r\nfalse\r\n" in body
+    assert b"\r\n\r\n0\r\n" not in body
 
 
 def test_authenticated_raw_upload_uses_documented_signed_upload_endpoint() -> None:
@@ -60,6 +61,32 @@ def test_authenticated_raw_upload_uses_documented_signed_upload_endpoint() -> No
     assert saved.storage_ref == f"media://sha256/{digest}"
     assert saved.sha256 == digest
     assert saved.size_bytes == len(data)
+
+
+def test_authenticated_raw_upload_400_surfaces_provider_message_and_redacts_credentials() -> None:
+    data = b"bad request diagnostic"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        _assert_signed_raw_authenticated_upload(request)
+        return httpx.Response(
+            400,
+            headers={"x-cld-error": "fallback diagnostic"},
+            json={
+                "error": {
+                    "message": "Invalid value for overwrite; account=test-key secret=test-secret"
+                }
+            },
+        )
+
+    with pytest.raises(MediaStoreError) as raised:
+        _store(handler).put_bytes(data)
+
+    message = str(raised.value)
+    assert "HTTP 400" in message
+    assert "Invalid value for overwrite" in message
+    assert "test-key" not in message
+    assert "test-secret" not in message
+    assert "[redacted]" in message
 
 
 def test_authenticated_rest_upload_409_is_idempotent_after_admin_collection_lookup() -> None:
