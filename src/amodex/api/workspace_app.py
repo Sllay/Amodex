@@ -15,12 +15,15 @@ from amodex.api.access_gate import install_access_gate
 from amodex.api.app import create_app as create_control_plane_app
 from amodex.api.connector_routes import build_connector_router
 from amodex.api.connector_web import CONNECTOR_HTML
+from amodex.api.global_chat_routes import build_global_chat_router
 from amodex.api.model_intelligence_routes import build_model_intelligence_router
 from amodex.api.model_intelligence_web import MODEL_INTELLIGENCE_HTML, augment_model_intelligence_html
 from amodex.api.multimodal_routes import build_multimodal_router
 from amodex.api.multimodal_web import augment_workspace_html
+from amodex.api.theme_web import augment_theme_html
 from amodex.api.web import DASHBOARD_HTML
 from amodex.api.workspace_routes import build_workspace_router
+from amodex.api.workspace_v2 import augment_workspace_v2_html
 from amodex.api.workspace_web import WORKSPACE_HTML
 from amodex.connectors.clients import GitHubAppConnector, RobloxOAuthConnector
 from amodex.connectors.oauth import GitHubAppConfig, RobloxOAuthConfig
@@ -39,7 +42,7 @@ from amodex.storage.multimodal import PostgresMultimodalRepository
 from amodex.storage.routing import PostgresRoutingRepository
 from amodex.storage.workspace import PostgresWorkspaceRepository
 
-_RELEASE = "0.6-model-intelligence"
+_RELEASE = "0.7-workspace-v2"
 
 
 def create_workspace_app(
@@ -122,6 +125,7 @@ def create_workspace_app(
         )
     ]
     base_app.include_router(build_workspace_router(workspace_repository))
+    base_app.include_router(build_global_chat_router(workspace_repository))
     base_app.include_router(
         build_connector_router(
             repository=connector_repository,
@@ -154,20 +158,21 @@ def create_workspace_app(
         html = augment_workspace_html(html)
         if model_intelligence_service is not None:
             html = augment_model_intelligence_html(html)
-        return html
+        html = augment_workspace_v2_html(html)
+        return augment_theme_html(html)
 
     @base_app.get("/connections", response_class=HTMLResponse, include_in_schema=False)
     async def connector_page() -> str:
-        return CONNECTOR_HTML
+        return augment_theme_html(CONNECTOR_HTML)
 
     if model_intelligence_service is not None:
         @base_app.get("/models", response_class=HTMLResponse, include_in_schema=False)
         async def model_intelligence_page() -> str:
-            return MODEL_INTELLIGENCE_HTML
+            return augment_theme_html(MODEL_INTELLIGENCE_HTML)
 
     @base_app.get("/legacy", response_class=HTMLResponse, include_in_schema=False)
     async def legacy_dashboard() -> str:
-        return DASHBOARD_HTML
+        return augment_theme_html(DASHBOARD_HTML)
 
     @base_app.get("/healthz", include_in_schema=False)
     async def healthz() -> dict[str, str]:
