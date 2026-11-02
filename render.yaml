@@ -37,3 +37,11 @@ services:
         value: "#8b5cf6"
       - key: AMODEX_THEME_MODE
         value: single
+      - key: AMODEX_STT_ENABLED
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: AMODEX_STT_BILLING_CLASS
+        value: free
+      - key: AMODEX_STT_MODEL
+        value: whisper-large-v3-turbo
