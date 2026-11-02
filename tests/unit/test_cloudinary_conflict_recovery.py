@@ -17,7 +17,49 @@ def _store(handler) -> CloudinaryAuthenticatedRestMediaStore:
         api_secret="test-secret",
         prefix="amodex-production",
         client=client,
+        now=lambda: 1_700_000_000.0,
     )
+
+
+def _assert_signed_raw_authenticated_upload(request: httpx.Request) -> None:
+    assert request.method == "POST"
+    assert request.url.path.endswith("/raw/upload")
+    assert not request.url.path.endswith("/raw/authenticated")
+    body = request.read()
+    assert b'name="type"' in body
+    assert b"authenticated" in body
+    assert b'name="timestamp"' in body
+    assert b"1700000000" in body
+    assert b'name="api_key"' in body
+    assert b"test-key" in body
+    assert b'name="signature"' in body
+    assert b'name="overwrite"' in body
+    assert b"\r\n\r\n0\r\n" in body
+
+
+def test_authenticated_raw_upload_uses_documented_signed_upload_endpoint() -> None:
+    data = b"new private file"
+    digest = hashlib.sha256(data).hexdigest()
+    public_id = f"amodex-production/sha256/{digest[:2]}/{digest}.bin"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        _assert_signed_raw_authenticated_upload(request)
+        body = request.read()
+        assert public_id.encode() in body
+        return httpx.Response(
+            200,
+            json={
+                "public_id": public_id,
+                "resource_type": "raw",
+                "type": "authenticated",
+                "bytes": len(data),
+            },
+        )
+
+    saved = _store(handler).put_bytes(data)
+    assert saved.storage_ref == f"media://sha256/{digest}"
+    assert saved.sha256 == digest
+    assert saved.size_bytes == len(data)
 
 
 def test_authenticated_rest_upload_409_is_idempotent_after_admin_collection_lookup() -> None:
@@ -29,7 +71,7 @@ def test_authenticated_rest_upload_409_is_idempotent_after_admin_collection_look
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
         if request.method == "POST":
-            assert request.url.path.endswith("/raw/authenticated")
+            _assert_signed_raw_authenticated_upload(request)
             return httpx.Response(409, json={"error": {"message": "already exists"}})
 
         assert request.method == "GET"
@@ -68,6 +110,7 @@ def test_authenticated_rest_upload_409_rejects_mismatched_existing_object() -> N
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.method == "POST":
+            _assert_signed_raw_authenticated_upload(request)
             return httpx.Response(409, json={"error": {"message": "already exists"}})
         return httpx.Response(
             200,
@@ -92,6 +135,7 @@ def test_authenticated_rest_upload_409_rejects_empty_admin_result() -> None:
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.method == "POST":
+            _assert_signed_raw_authenticated_upload(request)
             return httpx.Response(409, json={"error": {"message": "already exists"}})
         return httpx.Response(200, json={"resources": []})
 
@@ -104,6 +148,7 @@ def test_authenticated_rest_upload_409_maps_admin_auth_failure_to_unavailable() 
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.method == "POST":
+            _assert_signed_raw_authenticated_upload(request)
             return httpx.Response(409, json={"error": {"message": "already exists"}})
         return httpx.Response(401, json={"error": {"message": "unauthorized"}})
 
@@ -116,6 +161,7 @@ def test_authenticated_rest_upload_409_maps_admin_quota_failure_to_unavailable()
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.method == "POST":
+            _assert_signed_raw_authenticated_upload(request)
             return httpx.Response(409, json={"error": {"message": "already exists"}})
         return httpx.Response(429, json={"error": {"message": "rate limited"}})
 
