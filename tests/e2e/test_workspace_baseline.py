@@ -3,7 +3,6 @@ from __future__ import annotations
 import re
 import uuid
 
-import pytest
 from playwright.sync_api import Page, expect
 
 from .conftest import E2E_BASE_URL, create_global_chat, open_projects
@@ -11,6 +10,22 @@ from .conftest import E2E_BASE_URL, create_global_chat, open_projects
 
 def unique(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex[:8]}"
+
+
+def wait_for_local_cache(page: Page) -> None:
+    page.wait_for_function("window.AmodexLocalCache && window.AmodexLocalCache.ready")
+    page.evaluate("() => window.AmodexLocalCache.ready()")
+
+
+def wait_for_shell_cache(page: Page) -> None:
+    page.evaluate("() => window.AmodexLocalCache.serviceWorkerReady()")
+    page.wait_for_function(
+        """async () => {
+          if (!('caches' in window)) return false;
+          return Boolean(await caches.match('/'));
+        }""",
+        timeout=15_000,
+    )
 
 
 def test_private_gate_home_and_mobile_drawer(logged_in_page: Page) -> None:
@@ -25,7 +40,7 @@ def test_private_gate_home_and_mobile_drawer(logged_in_page: Page) -> None:
     expect(page.locator("#side")).not_to_have_class(re.compile(r"\bopen\b"))
 
 
-def test_project_chat_send_once_and_reload_history(logged_in_page: Page) -> None:
+def test_project_chat_send_once_and_reload_restores_history(logged_in_page: Page) -> None:
     page = logged_in_page
     project = unique("E2E-Projeto")
     chat = unique("E2E-Chat")
@@ -47,15 +62,12 @@ def test_project_chat_send_once_and_reload_history(logged_in_page: Page) -> None
     page.locator("#uiSend").click()
     owner_message = page.locator(".message.owner .bubble", has_text=message)
     expect(owner_message).to_have_count(1)
+    wait_for_local_cache(page)
 
     page.reload(wait_until="domcontentloaded")
-    expect(page.locator(".home-stage")).to_be_visible()
-    open_projects(page)
-    page.locator(".project-card", has_text=project).click()
-    expect(page.locator(".project-detail h1")).to_have_text(project)
-    page.locator(".project-chat-row", has_text=chat).click()
     expect(page.locator("#chatTitle")).to_have_text(chat)
     expect(page.locator(".message.owner .bubble", has_text=message)).to_have_count(1)
+    expect(page.locator("#composer")).to_be_enabled()
 
 
 def test_double_click_send_writes_one_owner_message(logged_in_page: Page) -> None:
@@ -105,6 +117,83 @@ def test_large_attachment_upload_reaches_streaming_pipeline(logged_in_page: Page
     expect(chip).to_contain_text(filename)
 
 
+def test_private_etag_revalidation_returns_304(logged_in_page: Page) -> None:
+    page = logged_in_page
+    result = page.evaluate(
+        """async () => {
+          const first = await fetch('/v1/ui/bootstrap', {cache: 'no-store'});
+          const etag = first.headers.get('etag');
+          const policy = first.headers.get('cache-control') || '';
+          const second = await fetch('/v1/ui/bootstrap', {
+            cache: 'no-store',
+            headers: {'If-None-Match': etag},
+          });
+          return {firstStatus:first.status, etag, policy, secondStatus:second.status};
+        }"""
+    )
+    assert result["firstStatus"] == 200
+    assert result["etag"]
+    assert "private" in result["policy"]
+    assert "public" not in result["policy"]
+    assert result["secondStatus"] == 304
+
+
+def test_last_global_chat_restores_after_reload(logged_in_page: Page) -> None:
+    page = logged_in_page
+    chat = unique("E2E-Restore")
+    message = unique("restore-message")
+    create_global_chat(page, chat)
+    page.locator("#composer").fill(message)
+    page.locator("#uiSend").click()
+    expect(page.locator(".message.owner .bubble", has_text=message)).to_have_count(1)
+    page.wait_for_function(
+        """async () => {
+          if (!window.AmodexLocalCache || !state.chat) return false;
+          const entry = await AmodexLocalCache.getSnapshot(`chat:${state.chat.chat_id}`);
+          return Boolean(entry?.payload?.messages?.some(m => m.content.includes('restore-message')));
+        }""",
+        timeout=10_000,
+    )
+
+    page.reload(wait_until="domcontentloaded")
+    expect(page.locator("#chatTitle")).to_have_text(chat)
+    expect(page.locator(".message.owner .bubble", has_text=message)).to_have_count(1)
+
+
+def test_cached_chat_survives_offline_reload(logged_in_page: Page) -> None:
+    page = logged_in_page
+    chat = unique("E2E-Offline")
+    message = unique("offline-message")
+    create_global_chat(page, chat)
+    page.locator("#composer").fill(message)
+    page.locator("#uiSend").click()
+    expect(page.locator(".message.owner .bubble", has_text=message)).to_have_count(1)
+
+    page.wait_for_function(
+        """async () => {
+          if (!window.AmodexLocalCache || !state.chat) return false;
+          const entry = await AmodexLocalCache.getSnapshot(`chat:${state.chat.chat_id}`);
+          return Boolean(entry?.payload?.messages?.length);
+        }""",
+        timeout=10_000,
+    )
+    wait_for_shell_cache(page)
+
+    # One online reload guarantees the now-active worker controls this document.
+    page.reload(wait_until="domcontentloaded")
+    expect(page.locator("#chatTitle")).to_have_text(chat)
+    page.wait_for_function("Boolean(navigator.serviceWorker && navigator.serviceWorker.controller)", timeout=10_000)
+
+    page.context.set_offline(True)
+    try:
+        page.reload(wait_until="domcontentloaded")
+        expect(page.locator("#chatTitle")).to_have_text(chat)
+        expect(page.locator(".message.owner .bubble", has_text=message)).to_have_count(1)
+        expect(page.locator("#statusBadge")).to_contain_text(re.compile("offline|cached"))
+    finally:
+        page.context.set_offline(False)
+
+
 def test_connections_and_models_surfaces_return_html(logged_in_page: Page) -> None:
     page = logged_in_page
     response = page.goto(E2E_BASE_URL + "/connections", wait_until="domcontentloaded")
@@ -114,17 +203,3 @@ def test_connections_and_models_surfaces_return_html(logged_in_page: Page) -> No
     response = page.goto(E2E_BASE_URL + "/models", wait_until="domcontentloaded")
     assert response is not None and response.status == 200
     expect(page.locator("body")).to_contain_text("Model")
-
-
-@pytest.mark.xfail(
-    reason="P0 baseline gap: selected chat is not restored after a full page reload yet",
-    strict=False,
-)
-def test_reload_restores_selected_chat_baseline_gap(logged_in_page: Page) -> None:
-    page = logged_in_page
-    chat = unique("E2E-Restore")
-    create_global_chat(page, chat)
-    expect(page.locator("#chatTitle")).to_have_text(chat)
-
-    page.reload(wait_until="domcontentloaded")
-    expect(page.locator("#chatTitle")).to_have_text(chat)
