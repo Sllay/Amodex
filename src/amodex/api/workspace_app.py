@@ -21,6 +21,7 @@ from amodex.api.model_intelligence_web import MODEL_INTELLIGENCE_HTML, augment_m
 from amodex.api.multimodal_routes import build_multimodal_router
 from amodex.api.multimodal_web import augment_workspace_html
 from amodex.api.theme_web import augment_theme_html
+from amodex.api.ui_stability_web import augment_ui_stability_html
 from amodex.api.web import DASHBOARD_HTML
 from amodex.api.workspace_routes import build_workspace_router
 from amodex.api.workspace_ui_routes import build_workspace_ui_router
@@ -43,7 +44,7 @@ from amodex.storage.multimodal import PostgresMultimodalRepository
 from amodex.storage.routing import PostgresRoutingRepository
 from amodex.storage.workspace import PostgresWorkspaceRepository
 
-_RELEASE = "0.7.1-workspace-v2-fast-ui"
+_RELEASE = "0.7.2-workspace-v2-stable-actions"
 
 
 def create_workspace_app(
@@ -169,6 +170,7 @@ def create_workspace_app(
         if model_intelligence_service is not None:
             html = augment_model_intelligence_html(html)
         html = augment_workspace_v2_html(html)
+        html = augment_ui_stability_html(html)
         return augment_theme_html(html)
 
     @base_app.get("/connections", response_class=HTMLResponse, include_in_schema=False)
