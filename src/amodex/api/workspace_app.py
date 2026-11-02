@@ -24,7 +24,7 @@ from amodex.api.streaming_upload_routes import build_streaming_upload_router
 from amodex.api.theme_web import augment_theme_html
 from amodex.api.ui_stability_web import augment_ui_stability_html
 from amodex.api.web import DASHBOARD_HTML
-from amodex.api.workspace_cache_routes import build_workspace_cache_router
+from amodex.api.workspace_cache_routes import build_workspace_cache_router, install_private_cache_boundary
 from amodex.api.workspace_cache_web import augment_workspace_cache_html
 from amodex.api.workspace_routes import build_workspace_router
 from amodex.api.workspace_ui_routes import build_workspace_ui_router
@@ -240,6 +240,12 @@ def create_workspace_app(
     @base_app.get("/healthz", include_in_schema=False)
     async def healthz() -> dict[str, str]:
         return {"status": "ok"}
+
+    # Cache policy is installed before the access gate so successful private
+    # shell responses are explicitly private and logout purges CacheStorage /
+    # IndexedDB through Clear-Site-Data. API snapshot responses set their own
+    # private ETag headers.
+    install_private_cache_boundary(base_app)
 
     # Server-side boundary: when AMODEX_ACCESS_PASSCODE is configured, every
     # route except the explicit health/login surface requires a signed session.
