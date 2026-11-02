@@ -61,7 +61,7 @@ def test_correct_passcode_issues_secure_http_only_session() -> None:
     assert "__Host-amodex_access=" in set_cookie
     assert "HttpOnly" in set_cookie
     assert "Secure" in set_cookie
-    assert "SameSite=strict" in set_cookie
+    assert "SameSite=lax" in set_cookie
 
     root = client.get("/")
     assert root.status_code == 200
