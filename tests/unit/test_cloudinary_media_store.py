@@ -39,18 +39,25 @@ def _rest_store_with_transport(handler, *, now: float = 1_700_000_000.0) -> Clou
     )
 
 
-def test_cloudinary_authenticated_rest_upload_uses_delivery_type_in_endpoint() -> None:
+def test_cloudinary_authenticated_rest_upload_uses_signed_raw_upload_endpoint() -> None:
     data = b"private authenticated rest attachment"
     digest = hashlib.sha256(data).hexdigest()
     public_id = f"amodex/sha256/{digest[:2]}/{digest}.bin"
 
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.method == "POST"
-        assert request.url.path.endswith("/raw/authenticated")
-        assert not request.url.path.endswith("/raw/upload")
-        assert public_id.encode() in request.content
-        assert b'name="type"' not in request.content
-        assert request.headers.get("authorization", "").startswith("Basic ")
+        assert request.url.path.endswith("/raw/upload")
+        assert not request.url.path.endswith("/raw/authenticated")
+        body = request.read()
+        assert public_id.encode() in body
+        assert b'name="type"' in body
+        assert b"authenticated" in body
+        assert b'name="timestamp"' in body
+        assert b"1700000000" in body
+        assert b'name="api_key"' in body
+        assert b"test-key" in body
+        assert b'name="signature"' in body
+        assert request.headers.get("authorization", "") == ""
         return httpx.Response(
             200,
             json={
