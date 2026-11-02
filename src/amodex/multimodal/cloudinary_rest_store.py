@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 from typing import BinaryIO
+from urllib.parse import quote
 
 import httpx
 
@@ -97,10 +98,13 @@ class CloudinaryAuthenticatedRestMediaStore(CloudinaryMediaStore):
             raise MediaStoreUnavailable("Cloudinary media upload is unavailable") from exc
 
         if response.status_code == 409:
-            existing = self.get_bytes(storage_ref)
-            if hashlib.sha256(existing).hexdigest() != digest:
-                raise MediaStoreError("Cloudinary content-addressed object collision")
-            return StoredMediaObject(storage_ref, digest, len(existing))
+            # Content-addressed uploads are intentionally overwrite=false. A retry
+            # therefore receives 409 when the same SHA object already exists.
+            # Verify that exact raw/authenticated public_id through the Admin API
+            # instead of downloading the private binary back into memory. This
+            # preserves idempotency and keeps large retries bounded-memory.
+            self._verify_existing_object(public_id=public_id, size_bytes=size_bytes)
+            return StoredMediaObject(storage_ref, digest, size_bytes)
 
         payload = _cloudinary_json(response, operation="upload")
         returned_public_id = str(payload.get("public_id", ""))
@@ -111,3 +115,43 @@ class CloudinaryAuthenticatedRestMediaStore(CloudinaryMediaStore):
         if payload.get("type") not in {None, "authenticated"}:
             raise MediaStoreError("Cloudinary returned an unexpected delivery type")
         return StoredMediaObject(storage_ref, digest, size_bytes)
+
+    def _verify_existing_object(self, *, public_id: str, size_bytes: int) -> None:
+        encoded_public_id = quote(public_id, safe="")
+        url = (
+            f"{_CLOUDINARY_API_ROOT}/{self.cloud_name}"
+            f"/resources/raw/authenticated/{encoded_public_id}"
+        )
+        try:
+            response = self._client.get(
+                url,
+                auth=(self._api_key, self._api_secret),
+            )
+        except httpx.HTTPError as exc:
+            raise MediaStoreUnavailable("Cloudinary media lookup is unavailable") from exc
+
+        if response.status_code == 404:
+            raise MediaStoreError(
+                "Cloudinary reported an upload conflict but the content-addressed object is missing"
+            )
+        if response.status_code in {401, 403}:
+            raise MediaStoreUnavailable("Cloudinary media lookup is not authorized")
+        if response.status_code in {420, 429}:
+            raise MediaStoreUnavailable("Cloudinary media lookup quota is unavailable")
+
+        payload = _cloudinary_json(response, operation="lookup")
+        if str(payload.get("public_id", "")) != public_id:
+            raise MediaStoreError("Cloudinary content-addressed object collision")
+        if payload.get("resource_type") not in {None, "raw"}:
+            raise MediaStoreError("Cloudinary content-addressed object collision")
+        if payload.get("type") not in {None, "authenticated"}:
+            raise MediaStoreError("Cloudinary content-addressed object collision")
+
+        remote_size = payload.get("bytes")
+        if remote_size is not None:
+            try:
+                measured_size = int(remote_size)
+            except (TypeError, ValueError) as exc:
+                raise MediaStoreError("Cloudinary returned an invalid object size") from exc
+            if measured_size != size_bytes:
+                raise MediaStoreError("Cloudinary content-addressed object collision")
