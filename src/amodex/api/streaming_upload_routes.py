@@ -9,7 +9,11 @@ from urllib.parse import unquote
 
 from fastapi import APIRouter, HTTPException, Request
 
-from amodex.multimodal.object_store import MediaObjectStore, MediaStoreError
+from amodex.multimodal.object_store import (
+    MediaObjectStore,
+    MediaStoreError,
+    MediaStoreUnavailable,
+)
 from amodex.multimodal.streaming_store import put_media_file
 from amodex.storage.workspace import PostgresWorkspaceRepository, WorkspaceStateError
 from amodex.workspace.models import AttachmentRecord
@@ -105,8 +109,22 @@ def build_streaming_upload_router(
                 status_code=409,
                 detail={"code": exc.code, "message": exc.detail},
             ) from exc
+        except MediaStoreUnavailable as exc:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "MEDIA_STORE_UNAVAILABLE",
+                    "message": str(exc),
+                },
+            ) from exc
         except MediaStoreError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "MEDIA_STORE_CONFLICT",
+                    "message": str(exc),
+                },
+            ) from exc
         finally:
             try:
                 os.unlink(tmp_name)
