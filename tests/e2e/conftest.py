@@ -23,13 +23,22 @@ def browser_context_args() -> dict[str, object]:
 
 @pytest.fixture
 def logged_in_page(page: Page) -> Page:
+    """Open the workspace under both protected and gate-disabled CI modes.
+
+    The established P0 baseline still exercises the real passcode flow when the
+    access gate is configured. The cache-specific workflow intentionally carries
+    no authentication secret, so it reaches the already-private test workspace
+    directly and focuses on cache/offline semantics.
+    """
+
     response = page.goto(E2E_BASE_URL + "/", wait_until="domcontentloaded")
     assert response is not None
-    assert response.status == 401
-    expect(page.locator("#passcode")).to_be_visible()
-    page.locator("#passcode").fill(E2E_PASSCODE)
-    page.get_by_role("button", name="Entrar").click()
-    page.wait_for_url(E2E_BASE_URL + "/")
+    assert response.status in {200, 401}
+    if response.status == 401:
+        expect(page.locator("#passcode")).to_be_visible()
+        page.locator("#passcode").fill(E2E_PASSCODE)
+        page.get_by_role("button", name="Entrar").click()
+        page.wait_for_url(E2E_BASE_URL + "/")
     expect(page.locator(".home-stage")).to_be_visible()
     return page
 
