@@ -6,6 +6,7 @@ from urllib.parse import parse_qs
 import httpx
 import pytest
 
+from amodex.multimodal.cloudinary_rest_store import CloudinaryAuthenticatedRestMediaStore
 from amodex.multimodal.object_store import (
     CloudinaryMediaStore,
     FileMediaStore,
@@ -25,6 +26,44 @@ def _store_with_transport(handler, *, now: float = 1_700_000_000.0) -> Cloudinar
         client=client,
         now=lambda: now,
     )
+
+
+def _rest_store_with_transport(handler, *, now: float = 1_700_000_000.0) -> CloudinaryAuthenticatedRestMediaStore:
+    client = httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=True)
+    return CloudinaryAuthenticatedRestMediaStore(
+        cloud_name="amodex-test",
+        api_key="test-key",
+        api_secret="test-secret",
+        client=client,
+        now=lambda: now,
+    )
+
+
+def test_cloudinary_authenticated_rest_upload_uses_delivery_type_in_endpoint() -> None:
+    data = b"private authenticated rest attachment"
+    digest = hashlib.sha256(data).hexdigest()
+    public_id = f"amodex/sha256/{digest[:2]}/{digest}.bin"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "POST"
+        assert request.url.path.endswith("/raw/authenticated")
+        assert not request.url.path.endswith("/raw/upload")
+        assert public_id.encode() in request.content
+        assert b'name="type"' not in request.content
+        assert request.headers.get("authorization", "").startswith("Basic ")
+        return httpx.Response(
+            200,
+            json={
+                "public_id": public_id,
+                "resource_type": "raw",
+                "type": "authenticated",
+            },
+        )
+
+    saved = _rest_store_with_transport(handler).put_bytes(data)
+    assert saved.storage_ref == f"media://sha256/{digest}"
+    assert saved.sha256 == digest
+    assert saved.size_bytes == len(data)
 
 
 def test_cloudinary_store_round_trip_preserves_opaque_sha_reference() -> None:
