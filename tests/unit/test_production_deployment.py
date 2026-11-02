@@ -51,7 +51,7 @@ def test_database_guard_blocks_accidental_other_neon_project() -> None:
 
 
 def test_neon_runtime_requires_pooler_and_migrations_require_direct_endpoint() -> None:
-    with pytest.raises(ValueError, match="runtime.*pooled endpoint"):
+    with pytest.raises(ValueError, match="AMODEX_DATABASE_URL.*pooled endpoint"):
         validate_database_target(
             runtime_dsn=MIGRATION_NEON,
             migration_dsn=MIGRATION_NEON,
@@ -59,7 +59,7 @@ def test_neon_runtime_requires_pooler_and_migrations_require_direct_endpoint() -
         )
 
     pooled_migration = RUNTIME_NEON
-    with pytest.raises(ValueError, match="migration.*direct Neon endpoint"):
+    with pytest.raises(ValueError, match="AMODEX_MIGRATION_DATABASE_URL.*direct Neon endpoint"):
         validate_database_target(
             runtime_dsn=RUNTIME_NEON,
             migration_dsn=pooled_migration,
