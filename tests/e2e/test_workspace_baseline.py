@@ -6,7 +6,7 @@ import uuid
 import pytest
 from playwright.sync_api import Page, expect
 
-from .conftest import E2E_BASE_URL, create_global_chat
+from .conftest import E2E_BASE_URL, create_global_chat, open_projects
 
 
 def unique(prefix: str) -> str:
@@ -31,8 +31,7 @@ def test_project_chat_send_once_and_reload_history(logged_in_page: Page) -> None
     chat = unique("E2E-Chat")
     message = unique("mensagem-unica")
 
-    page.get_by_role("button", name=re.compile("Projetos")).click()
-    expect(page.locator(".project-hub h1")).to_have_text("Projetos")
+    open_projects(page)
     page.locator(".project-hub button.primary").click()
     page.locator("#newWorkspaceName").fill(project)
     page.locator("#newWorkspaceDescription").fill("Baseline Playwright")
@@ -51,7 +50,7 @@ def test_project_chat_send_once_and_reload_history(logged_in_page: Page) -> None
 
     page.reload(wait_until="domcontentloaded")
     expect(page.locator(".home-stage")).to_be_visible()
-    page.get_by_role("button", name=re.compile("Projetos")).click()
+    open_projects(page)
     page.locator(".project-card", has_text=project).click()
     expect(page.locator(".project-detail h1")).to_have_text(project)
     page.locator(".project-chat-row", has_text=chat).click()
