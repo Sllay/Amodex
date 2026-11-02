@@ -20,6 +20,7 @@ from amodex.api.model_intelligence_routes import build_model_intelligence_router
 from amodex.api.model_intelligence_web import MODEL_INTELLIGENCE_HTML, augment_model_intelligence_html
 from amodex.api.multimodal_routes import build_multimodal_router
 from amodex.api.multimodal_web import augment_workspace_html
+from amodex.api.streaming_upload_routes import build_streaming_upload_router
 from amodex.api.theme_web import augment_theme_html
 from amodex.api.ui_stability_web import augment_ui_stability_html
 from amodex.api.web import DASHBOARD_HTML
@@ -43,9 +44,13 @@ from amodex.storage.connectors import PostgresConnectorRepository
 from amodex.storage.model_intelligence import PostgresModelIntelligenceRepository
 from amodex.storage.multimodal import PostgresMultimodalRepository
 from amodex.storage.routing import PostgresRoutingRepository
+from amodex.storage.runtime_pool import (
+    close_runtime_connection_pools,
+    install_runtime_connection_pool,
+)
 from amodex.storage.workspace import PostgresWorkspaceRepository
 
-_RELEASE = "0.7.3-cloudinary-auth-rest"
+_RELEASE = "0.7.4-performance-structural"
 
 
 def _media_store_from_runtime() -> MediaObjectStore:
@@ -53,6 +58,22 @@ def _media_store_from_runtime() -> MediaObjectStore:
     if backend == "cloudinary":
         return CloudinaryAuthenticatedRestMediaStore.from_environment()
     return media_store_from_environment()
+
+
+def _remove_legacy_upload_route(router) -> None:
+    """Replace exactly one byte-buffering upload route with the streaming route."""
+
+    before = len(router.routes)
+    router.routes = [
+        route
+        for route in router.routes
+        if not (
+            getattr(route, "path", None) == "/v1/chats/{chat_id}/uploads"
+            and "POST" in (getattr(route, "methods", None) or set())
+        )
+    ]
+    if before - len(router.routes) != 1:
+        raise RuntimeError("expected exactly one legacy multimodal upload route")
 
 
 def create_workspace_app(
@@ -74,10 +95,20 @@ def create_workspace_app(
     dsn: str | None = None,
 ) -> FastAPI:
     """Compose the web-first surface without creating a second control plane."""
+    database_url = dsn or os.environ.get("AMODEX_DATABASE_URL", "")
+    if not database_url and workspace_repository is not None:
+        database_url = workspace_repository.dsn
+
+    # Runtime repository methods historically call psycopg.connect directly.
+    # Install the bounded compatibility pool before any control-plane repository
+    # can perform I/O. Production migrations run in a separate process and keep
+    # their one-shot direct connection semantics.
+    if database_url:
+        install_runtime_connection_pool()
+
     if base_app is None:
         base_app = create_control_plane_app()
 
-    database_url = dsn or os.environ.get("AMODEX_DATABASE_URL", "")
     if workspace_repository is None:
         if not database_url:
             raise ValueError("workspace_repository, dsn or AMODEX_DATABASE_URL is required")
@@ -154,15 +185,24 @@ def create_workspace_app(
             vault=connector_vault,
         )
     )
+
+    multimodal_router = build_multimodal_router(
+        workspace_repository=workspace_repository,
+        repository=multimodal_repository,
+        media_store=media_store,
+        clients=multimodal_clients,
+        max_upload_bytes=max_upload_bytes,
+    )
+    _remove_legacy_upload_route(multimodal_router)
     base_app.include_router(
-        build_multimodal_router(
+        build_streaming_upload_router(
             workspace_repository=workspace_repository,
-            repository=multimodal_repository,
             media_store=media_store,
-            clients=multimodal_clients,
             max_upload_bytes=max_upload_bytes,
         )
     )
+    base_app.include_router(multimodal_router)
+
     if model_intelligence_service is not None:
         base_app.include_router(build_model_intelligence_router(model_intelligence_service))
 
@@ -201,6 +241,9 @@ def create_workspace_app(
     # Server-side boundary: when AMODEX_ACCESS_PASSCODE is configured, every
     # route except the explicit health/login surface requires a signed session.
     install_access_gate(base_app)
+
+    if database_url:
+        base_app.add_event_handler("shutdown", close_runtime_connection_pools)
 
     base_app.title = "Amodex Web Workspace"
     base_app.version = _RELEASE
