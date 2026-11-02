@@ -85,6 +85,26 @@ def test_tool_drawer_and_disabled_stt_feedback(logged_in_page: Page) -> None:
     expect(page.locator("#composerMeta")).to_contain_text("Transcrição indisponível")
 
 
+def test_large_attachment_upload_reaches_streaming_pipeline(logged_in_page: Page) -> None:
+    page = logged_in_page
+    create_global_chat(page, unique("E2E-Upload"))
+    filename = unique("streaming") + ".bin"
+    payload = (b"amodex-stream-boundary-" * 100_000) + b"tail"
+    assert len(payload) > 2 * 1024 * 1024
+
+    page.locator("#mmFileInput").set_input_files(
+        {
+            "name": filename,
+            "mimeType": "application/octet-stream",
+            "buffer": payload,
+        }
+    )
+
+    chip = page.locator("#mmTray .mm-chip", has_text=filename)
+    expect(chip).to_have_count(1, timeout=15_000)
+    expect(chip).to_contain_text(filename)
+
+
 def test_connections_and_models_surfaces_return_html(logged_in_page: Page) -> None:
     page = logged_in_page
     response = page.goto(E2E_BASE_URL + "/connections", wait_until="domcontentloaded")
