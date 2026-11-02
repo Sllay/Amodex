@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import tempfile
 from pathlib import Path, PurePath
 from urllib.parse import unquote
@@ -22,6 +23,38 @@ from amodex.workspace.models import AttachmentRecord
 
 logger = logging.getLogger("amodex.multimodal.upload")
 
+_SAFE_EXTENSION_RE = re.compile(r"^[a-z0-9]{1,16}$")
+_MIME_EXTENSIONS = {
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/gif": "gif",
+    "image/webp": "webp",
+    "image/avif": "avif",
+    "image/heic": "heic",
+    "image/heif": "heif",
+    "audio/mpeg": "mp3",
+    "audio/mp3": "mp3",
+    "audio/wav": "wav",
+    "audio/x-wav": "wav",
+    "audio/ogg": "ogg",
+    "audio/flac": "flac",
+    "video/mp4": "mp4",
+    "video/webm": "webm",
+    "application/pdf": "pdf",
+    "application/json": "json",
+    "text/plain": "txt",
+    "text/csv": "csv",
+}
+# Cloudinary rejects these raw extensions by default for security. Do not hide an
+# explicitly dangerous filename behind a different suffix just to force upload.
+_BLOCKED_RAW_EXTENSIONS = {
+    "action", "apk", "app", "bat", "bin", "cmd", "com", "command", "cpl",
+    "csh", "exe", "gadget", "inf1", "ins", "inx", "ipa", "isu", "job", "jse",
+    "ksh", "lnk", "msc", "msi", "msp", "mst", "osx", "out", "paf", "pif",
+    "prg", "ps1", "reg", "rgs", "run", "sct", "shb", "shs", "u3p", "vb",
+    "vbe", "vbs", "vbscript", "workflow", "ws", "wsf",
+}
+
 
 def _safe_name(raw: str) -> str:
     candidate = unquote(raw or "").replace("\\", "/")
@@ -29,7 +62,31 @@ def _safe_name(raw: str) -> str:
     candidate = "".join(
         ch for ch in candidate if ch >= " " and ch not in {"\x7f", "\r", "\n"}
     ).strip()
-    return (candidate or "upload.bin")[:255]
+    return (candidate or "upload.dat")[:255]
+
+
+def _safe_upload_extension(name: str, media_type: str) -> str:
+    mapped = _MIME_EXTENSIONS.get(media_type)
+    if mapped:
+        return mapped
+
+    suffix = PurePath(name).suffix.lower().lstrip(".")
+    if not suffix:
+        return "dat"
+    if not _SAFE_EXTENSION_RE.fullmatch(suffix):
+        raise HTTPException(
+            status_code=415,
+            detail={"code": "UNSUPPORTED_FILE_EXTENSION"},
+        )
+    if suffix in _BLOCKED_RAW_EXTENSIONS:
+        raise HTTPException(
+            status_code=415,
+            detail={
+                "code": "BLOCKED_FILE_EXTENSION",
+                "extension": suffix,
+            },
+        )
+    return suffix
 
 
 def build_streaming_upload_router(
@@ -62,7 +119,18 @@ def build_streaming_upload_router(
                     detail={"code": "UPLOAD_TOO_LARGE", "max_upload_bytes": max_upload_bytes},
                 )
 
-        fd, tmp_name = tempfile.mkstemp(prefix="amodex-upload-", suffix=".bin")
+        name = _safe_name(request.headers.get("x-file-name", "upload.dat"))
+        media_type = (
+            request.headers.get("content-type", "application/octet-stream")
+            .split(";", 1)[0]
+            .strip()
+            .lower()
+        )
+        if not media_type or len(media_type) > 160:
+            media_type = "application/octet-stream"
+        extension = _safe_upload_extension(name, media_type)
+
+        fd, tmp_name = tempfile.mkstemp(prefix="amodex-upload-", suffix=f".{extension}")
         size_bytes = 0
         try:
             with os.fdopen(fd, "wb") as handle:
@@ -85,17 +153,11 @@ def build_streaming_upload_router(
                 os.fsync(handle.fileno())
             os.chmod(tmp_name, 0o600)
 
-            name = _safe_name(request.headers.get("x-file-name", "upload.bin"))
-            media_type = (
-                request.headers.get("content-type", "application/octet-stream")
-                .split(";", 1)[0]
-                .strip()
-                .lower()
+            stored = put_media_file(
+                media_store,
+                Path(tmp_name),
+                extension=extension,
             )
-            if not media_type or len(media_type) > 160:
-                media_type = "application/octet-stream"
-
-            stored = put_media_file(media_store, Path(tmp_name))
             return workspace_repository.create_attachment(
                 chat_id=chat_id,
                 name=name,
@@ -128,9 +190,6 @@ def build_streaming_upload_router(
                 },
             ) from exc
         except MediaStoreError as exc:
-            # Storage integrity/provider failures are server-side upstream errors,
-            # not client conflicts. Mapping them to 409 previously hid the real
-            # Cloudinary failure and made the browser report a misleading conflict.
             logger.error(
                 "media_store_error chat_id=%s size_bytes=%s reason=%s",
                 chat_id,
