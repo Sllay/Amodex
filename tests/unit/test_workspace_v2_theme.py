@@ -6,8 +6,9 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from amodex.api.global_chat_routes import GLOBAL_WORKSPACE_SENTINEL, build_global_chat_router
+from amodex.api.multimodal_web import _MULTIMODAL_SCRIPT
 from amodex.api.theme_web import ThemeConfig, augment_theme_html, theme_css, tone
-from amodex.api.workspace_v2 import augment_workspace_v2_html
+from amodex.api.workspace_v2 import _V2_PREBOOT_SCRIPT, augment_workspace_v2_html
 from amodex.api.workspace_web import WORKSPACE_HTML
 from amodex.contracts.ids import new_uuid7
 from amodex.workspace.models import ChatRecord, ChatStatus, WorkspaceRecord, WorkspaceStatus
@@ -98,7 +99,13 @@ def test_workspace_v2_has_compact_composer_project_hub_and_tool_drawer() -> None
     assert "🎤" in page
     assert "⏫" in page
     assert "JÁ DECIDIDO — NÃO REABRIR" in page
-    assert "Gravando… toque 🎤 para finalizar" in page
+
+    # Workspace V2 owns the shell/tool affordance, while the multimodal feature
+    # owns recording feedback and the final runtime owns microphone dispatch.
+    assert "mmToggleMic=async function" not in _V2_PREBOOT_SCRIPT
+    assert "window.addEventListener('load'" not in _V2_PREBOOT_SCRIPT
+    assert "Gravando… toque 🎤 para finalizar" in _MULTIMODAL_SCRIPT
+    assert "app.hooks.register('toggleMic'" in _MULTIMODAL_SCRIPT
 
 
 def test_global_chat_router_uses_one_hidden_container() -> None:
