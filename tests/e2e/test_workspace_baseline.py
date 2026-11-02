@@ -74,11 +74,12 @@ def test_tool_drawer_and_disabled_stt_feedback(logged_in_page: Page) -> None:
     create_global_chat(page, unique("E2E-STT"))
 
     page.locator("#toolToggle").click()
-    expect(page.locator("#toolDrawer")).to_have_class(re.compile(r"\bopen\b"))
-    expect(page.get_by_role("button", name="Arquivos")).to_be_visible()
-    expect(page.get_by_role("button", name="Pesquisar na web")).to_be_visible()
-    expect(page.get_by_role("button", name="Memória")).to_be_visible()
-    expect(page.get_by_role("button", name="Cozinhar")).to_be_visible()
+    drawer = page.locator("#toolDrawer")
+    expect(drawer).to_have_class(re.compile(r"\bopen\b"))
+    expect(drawer.get_by_role("button", name="Arquivos", exact=True)).to_be_visible()
+    expect(drawer.get_by_role("button", name="Pesquisar na web", exact=True)).to_be_visible()
+    expect(drawer.get_by_role("button", name="Memória", exact=True)).to_be_visible()
+    expect(drawer.get_by_role("button", name="Cozinhar", exact=True)).to_be_visible()
 
     page.locator("#mmMic").click()
     expect(page.locator("#composerMeta")).to_contain_text("Transcrição indisponível")
