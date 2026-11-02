@@ -45,3 +45,5 @@ services:
         value: free
       - key: AMODEX_STT_MODEL
         value: whisper-large-v3-turbo
+      - key: AMODEX_GROQ_BILLING_CLASS
+        value: free
