@@ -79,6 +79,21 @@ def _require(condition: bool, message: str) -> None:
         raise RuntimeError(message)
 
 
+def _unready_detail(system: dict[str, Any]) -> str:
+    database = system.get("database", {}) if isinstance(system.get("database"), dict) else {}
+    zero_cost = system.get("zero_cost", {}) if isinstance(system.get("zero_cost"), dict) else {}
+    safe = {
+        "database_reason": database.get("reason", "unknown"),
+        "database_reachable": database.get("reachable"),
+        "schema_compatible": database.get("schema_compatible"),
+        "missing_migrations": database.get("missing_migrations"),
+        "checksum_mismatches": database.get("checksum_mismatches"),
+        "zero_cost_ready": zero_cost.get("ready"),
+        "zero_cost_violations": zero_cost.get("violations", ()),
+    }
+    return json.dumps(safe, ensure_ascii=False, sort_keys=True)
+
+
 def run_smoke(
     *,
     base_url: str,
@@ -105,14 +120,17 @@ def run_smoke(
             f"deployed SHA mismatch: expected {expected[:12]}, got {actual[:12]}",
         )
 
-    status_code, system = session.json_request("/v1/system/status")
+    status_code, system = session.json_request("/v1/activation/status")
     if status_code == 401:
         _require(bool(passcode), "private deployment requires AMODEX_ACCESS_PASSCODE for full smoke")
         assert passcode is not None
         session.login(passcode)
-        status_code, system = session.json_request("/v1/system/status")
-    _require(status_code == 200, f"authenticated system status failed: HTTP {status_code}")
-    _require(system.get("ready") is True, "authenticated system status reports unready")
+        status_code, system = session.json_request("/v1/activation/status")
+    _require(status_code == 200, f"authenticated activation status failed: HTTP {status_code}")
+    _require(
+        system.get("ready") is True,
+        "authenticated activation status reports unready: " + _unready_detail(system),
+    )
 
     inference = str(
         system.get("model_intelligence", {}).get("automatic_chat_inference", "UNAVAILABLE")
