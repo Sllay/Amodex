@@ -56,38 +56,33 @@ def build_workspace_router(repository: PostgresWorkspaceRepository) -> APIRouter
         if isinstance(exc, KeyError):
             return HTTPException(status_code=404, detail="workspace resource not found")
         if isinstance(exc, WorkspaceStateError):
-            return HTTPException(
-                status_code=409,
-                detail={"code": exc.code, "message": exc.detail},
-            )
+            return HTTPException(status_code=409, detail={"code": exc.code, "message": exc.detail})
         return HTTPException(status_code=409, detail=str(exc))
 
     @router.get("/workspace/status")
-    async def workspace_status() -> dict[str, object]:
-        repo = ready()
+    def workspace_status() -> dict[str, object]:
+        ready()
         return {
             "ready": True,
-            "workspace_schema_ready": repo.schema_ready(),
+            "workspace_schema_ready": True,
             "chat_inference": "GATED_BENCHMARK_PENDING",
             "binary_upload": "DEFERRED_STEP_3",
             "execution_authority": "ENVIRONMENT_ONLY",
         }
 
     @router.post("/workspaces", response_model=WorkspaceRecord, status_code=201)
-    async def create_workspace(body: WorkspaceCreateRequest) -> WorkspaceRecord:
+    def create_workspace(body: WorkspaceCreateRequest) -> WorkspaceRecord:
         try:
             return ready().create_workspace(name=body.name, description=body.description)
         except (KeyError, WorkspaceStateError) as exc:
             raise convert_error(exc) from exc
 
     @router.get("/workspaces", response_model=list[WorkspaceRecord])
-    async def list_workspaces(
-        limit: int = Query(default=200, ge=1, le=500),
-    ) -> list[WorkspaceRecord]:
+    def list_workspaces(limit: int = Query(default=200, ge=1, le=500)) -> list[WorkspaceRecord]:
         return list(ready().list_workspaces(limit=limit))
 
     @router.get("/workspaces/{workspace_id}", response_model=WorkspaceRecord)
-    async def get_workspace(workspace_id: str) -> WorkspaceRecord:
+    def get_workspace(workspace_id: str) -> WorkspaceRecord:
         item = ready().get_workspace(workspace_id)
         if item is None:
             raise HTTPException(status_code=404, detail="workspace not found")
@@ -98,7 +93,7 @@ def build_workspace_router(repository: PostgresWorkspaceRepository) -> APIRouter
         response_model=WorkspaceEnvironmentRecord,
         status_code=201,
     )
-    async def bind_workspace_environment(
+    def bind_workspace_environment(
         workspace_id: str,
         body: WorkspaceEnvironmentBindRequest,
     ) -> WorkspaceEnvironmentRecord:
@@ -115,9 +110,7 @@ def build_workspace_router(repository: PostgresWorkspaceRepository) -> APIRouter
         "/workspaces/{workspace_id}/environments",
         response_model=list[WorkspaceEnvironmentRecord],
     )
-    async def list_workspace_environments(
-        workspace_id: str,
-    ) -> list[WorkspaceEnvironmentRecord]:
+    def list_workspace_environments(workspace_id: str) -> list[WorkspaceEnvironmentRecord]:
         if ready().get_workspace(workspace_id) is None:
             raise HTTPException(status_code=404, detail="workspace not found")
         return list(ready().list_environments(workspace_id=workspace_id))
@@ -127,7 +120,7 @@ def build_workspace_router(repository: PostgresWorkspaceRepository) -> APIRouter
         response_model=ChatRecord,
         status_code=201,
     )
-    async def create_chat(workspace_id: str, body: ChatCreateRequest) -> ChatRecord:
+    def create_chat(workspace_id: str, body: ChatCreateRequest) -> ChatRecord:
         try:
             return ready().create_chat(
                 workspace_id=workspace_id,
@@ -138,7 +131,7 @@ def build_workspace_router(repository: PostgresWorkspaceRepository) -> APIRouter
             raise convert_error(exc) from exc
 
     @router.get("/workspaces/{workspace_id}/chats", response_model=list[ChatRecord])
-    async def list_chats(
+    def list_chats(
         workspace_id: str,
         limit: int = Query(default=300, ge=1, le=500),
     ) -> list[ChatRecord]:
@@ -147,7 +140,7 @@ def build_workspace_router(repository: PostgresWorkspaceRepository) -> APIRouter
         return list(ready().list_chats(workspace_id=workspace_id, limit=limit))
 
     @router.get("/chats/{chat_id}", response_model=ChatRecord)
-    async def get_chat(chat_id: str) -> ChatRecord:
+    def get_chat(chat_id: str) -> ChatRecord:
         item = ready().get_chat(chat_id)
         if item is None:
             raise HTTPException(status_code=404, detail="chat not found")
@@ -158,12 +151,10 @@ def build_workspace_router(repository: PostgresWorkspaceRepository) -> APIRouter
         response_model=ChatMessageRecord,
         status_code=201,
     )
-    async def add_owner_message(
+    def add_owner_message(
         chat_id: str,
         body: ChatMessageCreateRequest,
     ) -> ChatMessageRecord:
-        # Public browser/API callers are never allowed to impersonate Amodex.
-        # A future trusted model broker may use a separate internal surface.
         if body.role != ChatRole.OWNER:
             raise HTTPException(
                 status_code=403,
@@ -173,16 +164,12 @@ def build_workspace_router(repository: PostgresWorkspaceRepository) -> APIRouter
                 },
             )
         try:
-            return ready().add_message(
-                chat_id=chat_id,
-                role=ChatRole.OWNER,
-                content=body.content,
-            )
+            return ready().add_message(chat_id=chat_id, role=ChatRole.OWNER, content=body.content)
         except (KeyError, WorkspaceStateError) as exc:
             raise convert_error(exc) from exc
 
     @router.get("/chats/{chat_id}/messages", response_model=list[ChatMessageRecord])
-    async def list_messages(
+    def list_messages(
         chat_id: str,
         limit: int = Query(default=500, ge=1, le=1000),
     ) -> list[ChatMessageRecord]:
@@ -195,7 +182,7 @@ def build_workspace_router(repository: PostgresWorkspaceRepository) -> APIRouter
         response_model=WorkspaceMemoryRecord,
         status_code=201,
     )
-    async def create_memory(
+    def create_memory(
         workspace_id: str,
         body: WorkspaceMemoryCreateRequest,
     ) -> WorkspaceMemoryRecord:
@@ -211,7 +198,7 @@ def build_workspace_router(repository: PostgresWorkspaceRepository) -> APIRouter
         "/workspaces/{workspace_id}/memories",
         response_model=list[WorkspaceMemoryRecord],
     )
-    async def list_memories(
+    def list_memories(
         workspace_id: str,
         include_rejected: bool = False,
     ) -> list[WorkspaceMemoryRecord]:
@@ -225,7 +212,7 @@ def build_workspace_router(repository: PostgresWorkspaceRepository) -> APIRouter
         )
 
     @router.post("/memories/{memory_id}/decision", response_model=WorkspaceMemoryRecord)
-    async def decide_memory(
+    def decide_memory(
         memory_id: str,
         body: WorkspaceMemoryDecisionRequest,
     ) -> WorkspaceMemoryRecord:
@@ -239,12 +226,10 @@ def build_workspace_router(repository: PostgresWorkspaceRepository) -> APIRouter
         response_model=AttachmentRecord,
         status_code=201,
     )
-    async def create_attachment_metadata(
+    def create_attachment_metadata(
         chat_id: str,
         body: AttachmentCreateRequest,
     ) -> AttachmentRecord:
-        # Step 1 only records an already-authorized storage reference. It does not
-        # accept raw bytes, fetch arbitrary URLs or invoke vision models.
         try:
             return ready().create_attachment(
                 chat_id=chat_id,
@@ -258,7 +243,7 @@ def build_workspace_router(repository: PostgresWorkspaceRepository) -> APIRouter
             raise convert_error(exc) from exc
 
     @router.get("/chats/{chat_id}/attachments", response_model=list[AttachmentRecord])
-    async def list_attachments(chat_id: str) -> list[AttachmentRecord]:
+    def list_attachments(chat_id: str) -> list[AttachmentRecord]:
         if ready().get_chat(chat_id) is None:
             raise HTTPException(status_code=404, detail="chat not found")
         return list(ready().list_attachments(chat_id=chat_id))
@@ -268,7 +253,7 @@ def build_workspace_router(repository: PostgresWorkspaceRepository) -> APIRouter
         response_model=ExecutionDraftRecord,
         status_code=201,
     )
-    async def create_execution_draft(
+    def create_execution_draft(
         chat_id: str,
         body: ExecutionDraftCreateRequest,
     ) -> ExecutionDraftRecord:
@@ -285,13 +270,13 @@ def build_workspace_router(repository: PostgresWorkspaceRepository) -> APIRouter
             raise convert_error(exc) from exc
 
     @router.get("/chats/{chat_id}/drafts", response_model=list[ExecutionDraftRecord])
-    async def list_execution_drafts(chat_id: str) -> list[ExecutionDraftRecord]:
+    def list_execution_drafts(chat_id: str) -> list[ExecutionDraftRecord]:
         if ready().get_chat(chat_id) is None:
             raise HTTPException(status_code=404, detail="chat not found")
         return list(ready().list_drafts(chat_id=chat_id))
 
     @router.post("/drafts/{draft_id}/state", response_model=ExecutionDraftRecord)
-    async def set_execution_draft_state(
+    def set_execution_draft_state(
         draft_id: str,
         body: ExecutionDraftStateRequest,
     ) -> ExecutionDraftRecord:

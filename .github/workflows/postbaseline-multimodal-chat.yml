@@ -4,18 +4,36 @@ on:
   push:
     branches:
       - postbaseline/multimodal-chat-v1
+      - deploy/render-neon-cloudinary-v1
   pull_request:
     branches:
       - main
     paths:
       - 'src/amodex/multimodal/**'
+      - 'src/amodex/deployment/**'
       - 'src/amodex/storage/multimodal.py'
       - 'src/amodex/api/multimodal_*.py'
       - 'src/amodex/api/workspace_app.py'
-      - 'migrations/postbaseline/0005_multimodal_chat.sql'
+      - 'src/amodex/api/workspace_v2.py'
+      - 'src/amodex/api/workspace_ui_routes.py'
+      - 'src/amodex/api/theme_web.py'
+      - 'src/amodex/api/ui_stability_web.py'
+      - 'src/amodex/api/global_chat_routes.py'
+      - 'src/amodex/api/access_gate.py'
+      - 'src/amodex/api/connector_web.py'
+      - 'migrations/**'
+      - 'scripts/migrate_production.py'
+      - 'render.yaml'
       - 'tests/integration/test_postbaseline_multimodal_chat.py'
+      - 'tests/integration/test_workspace_ui_snapshots.py'
+      - 'tests/unit/test_cloudinary_media_store.py'
+      - 'tests/unit/test_production_deployment.py'
+      - 'tests/unit/test_access_gate.py'
+      - 'tests/unit/test_workspace_v2_theme.py'
+      - 'tests/unit/test_ui_stability_web.py'
       - '.github/workflows/postbaseline-multimodal-chat.yml'
       - 'docs/POST_BASELINE_MULTIMODAL_CHAT_V1.md'
+      - 'docs/DEPLOY_RENDER_NEON_CLOUDINARY_V1.md'
 
 permissions:
   contents: read
@@ -62,17 +80,26 @@ jobs:
           env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" sync --python 3.13.5 --extra dev --frozen
           echo "UV_BIN=$UV_BIN" >> "$GITHUB_ENV"
 
-      - name: Compile Step 3 surface
+      - name: Compile Step 3 and deployment surface
         shell: bash
         run: |
           set -euo pipefail
           env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --frozen \
             python -m compileall -q \
               src/amodex/multimodal \
+              src/amodex/deployment \
               src/amodex/storage/multimodal.py \
               src/amodex/api/multimodal_routes.py \
               src/amodex/api/multimodal_web.py \
-              src/amodex/api/workspace_app.py
+              src/amodex/api/access_gate.py \
+              src/amodex/api/theme_web.py \
+              src/amodex/api/ui_stability_web.py \
+              src/amodex/api/global_chat_routes.py \
+              src/amodex/api/workspace_ui_routes.py \
+              src/amodex/api/workspace_v2.py \
+              src/amodex/api/workspace_app.py \
+              src/amodex/api/connector_web.py \
+              scripts/migrate_production.py
 
       - name: Prove Step 3 does not import Hermes implementation
         shell: bash
@@ -95,15 +122,17 @@ jobs:
         run: |
           set -euo pipefail
           env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --extra dev --frozen pytest -q \
-            tests/integration/test_postbaseline_multimodal_chat.py
+            tests/integration/test_postbaseline_multimodal_chat.py \
+            tests/unit/test_cloudinary_media_store.py
 
-      - name: Run Step 1 and Step 2 checkpoint regressions
+      - name: Run Step 1, Step 2 and fast UI snapshot regressions
         shell: bash
         run: |
           set -euo pipefail
           env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --extra dev --frozen pytest -q \
             tests/integration/test_postbaseline_web_workspace.py \
-            tests/integration/test_postbaseline_connectors.py
+            tests/integration/test_postbaseline_connectors.py \
+            tests/integration/test_workspace_ui_snapshots.py
 
       - name: Run Environment Product and Stage 6 compatibility regression
         shell: bash
@@ -114,12 +143,39 @@ jobs:
             tests/integration/test_stage6_product_surfaces.py \
             tests/integration/test_stage6_termux_cli.py
 
+      - name: Prove deployment, access gate and Workspace V2 contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --extra dev --frozen pytest -q \
+            tests/unit/test_production_deployment.py \
+            tests/unit/test_access_gate.py \
+            tests/unit/test_workspace_v2_theme.py \
+            tests/unit/test_ui_stability_web.py
+          export AMODEX_DATABASE_URL="$AMODEX_TEST_DATABASE_URL"
+          export AMODEX_MIGRATION_DATABASE_URL="$AMODEX_TEST_DATABASE_URL"
+          export AMODEX_DATABASE_ENDPOINT_GUARD="127"
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --frozen \
+            python scripts/migrate_production.py
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --frozen \
+            python scripts/migrate_production.py
+
       - name: Prove zero-cost and Step 4 boundary
         shell: bash
         run: |
           set -euo pipefail
           grep -q 'GATED_STEP_4' src/amodex/api/multimodal_routes.py
           grep -q 'billing_class == "free"' src/amodex/multimodal/clients.py
+          grep -q 'plan: free' render.yaml
+          grep -q 'healthCheckPath: /healthz' render.yaml
+          grep -q 'AMODEX_ACCESS_PASSCODE' render.yaml
+          grep -q 'AMODEX_ACCESS_SESSION_SECRET' render.yaml
+          grep -q 'AMODEX_THEME_COLORS' render.yaml
+          grep -q 'AMODEX_THEME_MODE' render.yaml
+          grep -q 'AMODEX_STT_ENABLED' render.yaml
+          grep -q 'GROQ_API_KEY' render.yaml
+          grep -q 'AMODEX_STT_BILLING_CLASS' render.yaml
+          grep -q 'sync: false' render.yaml
           if grep -R -I --exclude-dir='__pycache__' -E \
             '(^|[[:space:]])(from[[:space:]]+amodex\.providers\.routing|import[[:space:]]+amodex\.providers\.routing)|ModelLifecycle|promote_model|demote_model|model_leaderboard' \
             src/amodex/multimodal src/amodex/api/multimodal_*.py src/amodex/storage/multimodal.py; then
@@ -138,6 +194,14 @@ jobs:
           fi
           grep -q 'media://sha256/' src/amodex/multimodal/object_store.py
           grep -q 'env://' src/amodex/multimodal/clients.py
+          if grep -E 'cloudinary://[^<[:space:]]+|postgres(ql)?://[^<[:space:]]+@[^<[:space:]]+' render.yaml; then
+            echo 'credential-like deployment value was hardcoded in render.yaml' >&2
+            exit 1
+          fi
+          if grep -q 'credential_ref' src/amodex/api/connector_web.py; then
+            echo 'connector web surface references a credential secret field' >&2
+            exit 1
+          fi
           echo 'MULTIMODAL_STORAGE_BOUNDARY_OK'
 
       - name: Prove browser message text is not interpolated into inline handlers
@@ -149,6 +213,7 @@ jobs:
             exit 1
           fi
           grep -q "addEventListener('click',()=>mmSpeak(m.content))" src/amodex/api/multimodal_web.py
+          grep -q 'uiStable.sending' src/amodex/api/ui_stability_web.py
           echo 'MULTIMODAL_BROWSER_HANDLER_BOUNDARY_OK'
 
       - name: Repository hygiene

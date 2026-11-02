@@ -11,21 +11,28 @@ import os
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 
+from amodex.api.access_gate import install_access_gate
 from amodex.api.app import create_app as create_control_plane_app
 from amodex.api.connector_routes import build_connector_router
 from amodex.api.connector_web import CONNECTOR_HTML
+from amodex.api.global_chat_routes import build_global_chat_router
 from amodex.api.model_intelligence_routes import build_model_intelligence_router
 from amodex.api.model_intelligence_web import MODEL_INTELLIGENCE_HTML, augment_model_intelligence_html
 from amodex.api.multimodal_routes import build_multimodal_router
 from amodex.api.multimodal_web import augment_workspace_html
+from amodex.api.theme_web import augment_theme_html
+from amodex.api.ui_stability_web import augment_ui_stability_html
 from amodex.api.web import DASHBOARD_HTML
 from amodex.api.workspace_routes import build_workspace_router
+from amodex.api.workspace_ui_routes import build_workspace_ui_router
+from amodex.api.workspace_v2 import augment_workspace_v2_html
 from amodex.api.workspace_web import WORKSPACE_HTML
 from amodex.connectors.clients import GitHubAppConnector, RobloxOAuthConnector
 from amodex.connectors.oauth import GitHubAppConfig, RobloxOAuthConfig
 from amodex.connectors.vault import CredentialVault, vault_from_environment
 from amodex.model_intelligence.service import ModelIntelligenceService
 from amodex.multimodal.clients import MultimodalClients, multimodal_clients_from_environment
+from amodex.multimodal.cloudinary_rest_store import CloudinaryAuthenticatedRestMediaStore
 from amodex.multimodal.object_store import (
     MediaObjectStore,
     max_upload_bytes_from_environment,
@@ -38,7 +45,14 @@ from amodex.storage.multimodal import PostgresMultimodalRepository
 from amodex.storage.routing import PostgresRoutingRepository
 from amodex.storage.workspace import PostgresWorkspaceRepository
 
-_RELEASE = "0.6-model-intelligence"
+_RELEASE = "0.7.3-cloudinary-auth-rest"
+
+
+def _media_store_from_runtime() -> MediaObjectStore:
+    backend = os.environ.get("AMODEX_MEDIA_STORE_BACKEND", "").strip().lower()
+    if backend == "cloudinary":
+        return CloudinaryAuthenticatedRestMediaStore.from_environment()
+    return media_store_from_environment()
 
 
 def create_workspace_app(
@@ -88,7 +102,7 @@ def create_workspace_app(
         repository=connector_repository,
         vault=connector_vault,
     )
-    media_store = media_store or media_store_from_environment()
+    media_store = media_store or _media_store_from_runtime()
     multimodal_clients = multimodal_clients or multimodal_clients_from_environment()
     max_upload_bytes = max_upload_bytes or max_upload_bytes_from_environment()
 
@@ -121,10 +135,20 @@ def create_workspace_app(
         )
     ]
     base_app.include_router(build_workspace_router(workspace_repository))
+    base_app.include_router(build_global_chat_router(workspace_repository))
     base_app.include_router(
         build_connector_router(
             repository=connector_repository,
             workspace_repository=workspace_repository,
+            github=github_connector,
+            roblox=roblox_connector,
+            vault=connector_vault,
+        )
+    )
+    base_app.include_router(
+        build_workspace_ui_router(
+            workspace_repository=workspace_repository,
+            connector_repository=connector_repository,
             github=github_connector,
             roblox=roblox_connector,
             vault=connector_vault,
@@ -153,20 +177,30 @@ def create_workspace_app(
         html = augment_workspace_html(html)
         if model_intelligence_service is not None:
             html = augment_model_intelligence_html(html)
-        return html
+        html = augment_workspace_v2_html(html)
+        html = augment_ui_stability_html(html)
+        return augment_theme_html(html)
 
     @base_app.get("/connections", response_class=HTMLResponse, include_in_schema=False)
     async def connector_page() -> str:
-        return CONNECTOR_HTML
+        return augment_theme_html(CONNECTOR_HTML)
 
     if model_intelligence_service is not None:
         @base_app.get("/models", response_class=HTMLResponse, include_in_schema=False)
         async def model_intelligence_page() -> str:
-            return MODEL_INTELLIGENCE_HTML
+            return augment_theme_html(MODEL_INTELLIGENCE_HTML)
 
     @base_app.get("/legacy", response_class=HTMLResponse, include_in_schema=False)
     async def legacy_dashboard() -> str:
-        return DASHBOARD_HTML
+        return augment_theme_html(DASHBOARD_HTML)
+
+    @base_app.get("/healthz", include_in_schema=False)
+    async def healthz() -> dict[str, str]:
+        return {"status": "ok"}
+
+    # Server-side boundary: when AMODEX_ACCESS_PASSCODE is configured, every
+    # route except the explicit health/login surface requires a signed session.
+    install_access_gate(base_app)
 
     base_app.title = "Amodex Web Workspace"
     base_app.version = _RELEASE
