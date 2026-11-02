@@ -10,6 +10,8 @@ with raw REST calls).
 from __future__ import annotations
 
 import hashlib
+from pathlib import Path
+from typing import BinaryIO
 
 import httpx
 
@@ -28,6 +30,49 @@ class CloudinaryAuthenticatedRestMediaStore(CloudinaryMediaStore):
 
     def put_bytes(self, data: bytes) -> StoredMediaObject:
         digest = hashlib.sha256(data).hexdigest()
+        return self._upload(
+            digest=digest,
+            size_bytes=len(data),
+            file_value=data,
+        )
+
+    def put_file(
+        self,
+        path: str | Path,
+        *,
+        digest: str | None = None,
+        size_bytes: int | None = None,
+    ) -> StoredMediaObject:
+        """Upload a staged file without materializing the whole object in RAM."""
+
+        source = Path(path)
+        if digest is None:
+            hasher = hashlib.sha256()
+            measured_size = 0
+            with source.open("rb") as input_handle:
+                while chunk := input_handle.read(1024 * 1024):
+                    hasher.update(chunk)
+                    measured_size += len(chunk)
+            digest = hasher.hexdigest()
+            size_bytes = measured_size
+        elif size_bytes is None:
+            size_bytes = source.stat().st_size
+
+        assert size_bytes is not None
+        with source.open("rb") as input_handle:
+            return self._upload(
+                digest=digest,
+                size_bytes=size_bytes,
+                file_value=input_handle,
+            )
+
+    def _upload(
+        self,
+        *,
+        digest: str,
+        size_bytes: int,
+        file_value: bytes | BinaryIO,
+    ) -> StoredMediaObject:
         storage_ref = f"media://sha256/{digest}"
         public_id = self._public_id(digest)
         url = f"{_CLOUDINARY_API_ROOT}/{self.cloud_name}/raw/authenticated"
@@ -40,7 +85,13 @@ class CloudinaryAuthenticatedRestMediaStore(CloudinaryMediaStore):
                     "overwrite": "false",
                     "public_id": public_id,
                 },
-                files={"file": (f"{digest}.bin", data, "application/octet-stream")},
+                files={
+                    "file": (
+                        f"{digest}.bin",
+                        file_value,
+                        "application/octet-stream",
+                    )
+                },
             )
         except httpx.HTTPError as exc:
             raise MediaStoreUnavailable("Cloudinary media upload is unavailable") from exc
@@ -59,4 +110,4 @@ class CloudinaryAuthenticatedRestMediaStore(CloudinaryMediaStore):
             raise MediaStoreError("Cloudinary returned an unexpected resource type")
         if payload.get("type") not in {None, "authenticated"}:
             raise MediaStoreError("Cloudinary returned an unexpected delivery type")
-        return StoredMediaObject(storage_ref, digest, len(data))
+        return StoredMediaObject(storage_ref, digest, size_bytes)
