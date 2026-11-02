@@ -12,7 +12,6 @@ import os
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Any
 
 from amodex.multimodal.object_store import (
     FileMediaStore,
@@ -36,21 +35,29 @@ def hash_media_file(path: str | Path) -> tuple[str, int]:
     return digest.hexdigest(), size
 
 
-def put_media_file(store: MediaObjectStore, path: str | Path) -> StoredMediaObject:
+def put_media_file(
+    store: MediaObjectStore,
+    path: str | Path,
+    *,
+    extension: str | None = None,
+) -> StoredMediaObject:
     """Persist a staged file using a streaming backend when available.
 
-    Production Cloudinary exposes ``put_file``. The local filesystem backend is
-    handled directly here with bounded copies. ``MemoryMediaStore`` intentionally
-    keeps its byte-oriented behavior because it is a test/development backend.
-    Unknown stores must opt in to ``put_file`` instead of silently regressing to
-    an unbounded read.
+    Production Cloudinary exposes ``put_file`` and needs the original safe file
+    extension for raw assets. Local stores continue to use the SHA-only opaque
+    reference because their filesystem layout doesn't depend on an extension.
     """
 
     source = Path(path)
     digest, size_bytes = hash_media_file(source)
     put_file = getattr(store, "put_file", None)
     if callable(put_file):
-        return put_file(source, digest=digest, size_bytes=size_bytes)
+        return put_file(
+            source,
+            digest=digest,
+            size_bytes=size_bytes,
+            extension=extension,
+        )
     if isinstance(store, FileMediaStore):
         return _put_file_media_store(store, source, digest=digest, size_bytes=size_bytes)
     if isinstance(store, MemoryMediaStore):
