@@ -3,6 +3,7 @@ from __future__ import annotations
 from amodex.api.model_intelligence_web import _STEP4_SCRIPT
 from amodex.api.multimodal_web import _MULTIMODAL_SCRIPT
 from amodex.api.ui_stability_web import _STABILITY_SCRIPT
+from amodex.api.workspace_v2 import _V2_PREBOOT_SCRIPT
 
 
 def test_feature_layers_do_not_replace_shared_browser_actions() -> None:
@@ -55,3 +56,8 @@ def test_runtime_send_has_one_write_boundary_and_lock() -> None:
     assert "if(runtimeState.sending||!state.chat)return null;" in _STABILITY_SCRIPT
     assert "runtimeState.sending=true;" in _STABILITY_SCRIPT
     assert _STABILITY_SCRIPT.count("/messages`,{method:'POST'") == 1
+
+
+def test_v2_shell_does_not_rebind_microphone_after_load() -> None:
+    assert "mmToggleMic=async function" not in _V2_PREBOOT_SCRIPT
+    assert "window.addEventListener('load'" not in _V2_PREBOOT_SCRIPT
