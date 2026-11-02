@@ -22,6 +22,7 @@ GLOBAL_WORKSPACE_SENTINEL = "__amodex_global_chat_container_v1__"
 def build_global_chat_router(repository: PostgresWorkspaceRepository) -> APIRouter:
     router = APIRouter(prefix="/v1", tags=["global-chat"])
     create_lock = Lock()
+    cached_workspace: WorkspaceRecord | None = None
 
     def ready() -> PostgresWorkspaceRepository:
         try:
@@ -34,32 +35,40 @@ def build_global_chat_router(repository: PostgresWorkspaceRepository) -> APIRout
         return repository
 
     def global_workspace() -> WorkspaceRecord:
+        nonlocal cached_workspace
+        if cached_workspace is not None:
+            return cached_workspace
         repo = ready()
         for item in repo.list_workspaces(limit=500):
             if item.description == GLOBAL_WORKSPACE_SENTINEL:
+                cached_workspace = item
                 return item
         with create_lock:
+            if cached_workspace is not None:
+                return cached_workspace
             for item in repo.list_workspaces(limit=500):
                 if item.description == GLOBAL_WORKSPACE_SENTINEL:
+                    cached_workspace = item
                     return item
-            return repo.create_workspace(
+            cached_workspace = repo.create_workspace(
                 name=GLOBAL_WORKSPACE_NAME,
                 description=GLOBAL_WORKSPACE_SENTINEL,
             )
+            return cached_workspace
 
     @router.get("/global-workspace", response_model=WorkspaceRecord)
-    async def get_global_workspace() -> WorkspaceRecord:
+    def get_global_workspace() -> WorkspaceRecord:
         return global_workspace()
 
     @router.get("/global-chats", response_model=list[ChatRecord])
-    async def list_global_chats(
+    def list_global_chats(
         limit: int = Query(default=300, ge=1, le=500),
     ) -> list[ChatRecord]:
         workspace = global_workspace()
         return list(ready().list_chats(workspace_id=workspace.workspace_id, limit=limit))
 
     @router.post("/global-chats", response_model=ChatRecord, status_code=201)
-    async def create_global_chat(body: ChatCreateRequest) -> ChatRecord:
+    def create_global_chat(body: ChatCreateRequest) -> ChatRecord:
         workspace = global_workspace()
         try:
             return ready().create_chat(
