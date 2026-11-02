@@ -123,10 +123,13 @@ def test_authenticated_rest_upload_409_maps_admin_quota_failure_to_unavailable()
         _store(handler).put_bytes(data)
 
 
-def test_streaming_upload_route_maps_unavailable_before_generic_conflict() -> None:
+def test_streaming_upload_route_maps_storage_failures_to_server_side_statuses() -> None:
     source = open("src/amodex/api/streaming_upload_routes.py", encoding="utf-8").read()
     unavailable = source.index("except MediaStoreUnavailable as exc:")
     generic = source.index("except MediaStoreError as exc:")
     assert unavailable < generic
     assert 'status_code=503' in source[unavailable:generic]
     assert '"MEDIA_STORE_UNAVAILABLE"' in source[unavailable:generic]
+    assert 'status_code=502' in source[generic:]
+    assert '"MEDIA_STORE_ERROR"' in source[generic:]
+    assert 'logger.error(' in source[generic:]
