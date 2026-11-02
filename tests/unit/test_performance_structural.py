@@ -12,6 +12,7 @@ from amodex.api import streaming_upload_routes
 from amodex.multimodal.cloudinary_rest_store import CloudinaryAuthenticatedRestMediaStore
 from amodex.multimodal.object_store import FileMediaStore
 from amodex.multimodal.streaming_store import put_media_file
+from amodex.storage import runtime_pool
 from amodex.storage.runtime_pool import RuntimeConnectionPool, RuntimePoolExhausted
 
 
@@ -177,4 +178,10 @@ def test_workspace_runtime_wires_pool_and_replaces_legacy_upload_route() -> None
     assert "install_runtime_connection_pool()" in source
     assert "_remove_legacy_upload_route(multimodal_router)" in source
     assert "build_streaming_upload_router(" in source
-    assert "close_runtime_connection_pools" in source
+    assert "add_event_handler" not in source
+
+
+def test_runtime_pool_owns_process_cleanup() -> None:
+    source = inspect.getsource(runtime_pool)
+    assert "atexit.register(close_runtime_connection_pools)" in source
+    assert "_ATEXIT_REGISTERED" in source
