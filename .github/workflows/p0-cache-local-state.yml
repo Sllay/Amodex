@@ -31,7 +31,7 @@ env:
   AMODEX_MEDIA_STORE_BACKEND: file
   AMODEX_STT_ENABLED: 'false'
   AMODEX_DB_POOL_SIZE: '2'
-  AMODEX_E2E_BASE_URL: https://127.0.0.1:8765
+  AMODEX_E2E_BASE_URL: http://localhost:8765
 
 jobs:
   browser-e2e:
@@ -131,24 +131,17 @@ jobs:
           set -euo pipefail
           .venv/bin/python -m pytest tests/integration/test_workspace_ui_snapshots.py -q
 
-      - name: Start HTTPS E2E server
+      - name: Start localhost E2E server
         shell: bash
         run: |
           set -euo pipefail
-          openssl req -x509 -newkey rsa:2048 -nodes \
-            -keyout "$RUNNER_TEMP/e2e-key.pem" \
-            -out "$RUNNER_TEMP/e2e-cert.pem" \
-            -days 1 -subj '/CN=127.0.0.1' >/dev/null 2>&1
-
           nohup .venv/bin/python -m uvicorn amodex.api.workspace_app:app \
             --host 127.0.0.1 --port 8765 \
-            --ssl-keyfile "$RUNNER_TEMP/e2e-key.pem" \
-            --ssl-certfile "$RUNNER_TEMP/e2e-cert.pem" \
             >"$RUNNER_TEMP/amodex-p4-e2e.log" 2>&1 &
           echo $! > "$RUNNER_TEMP/amodex-p4-e2e.pid"
 
           for attempt in $(seq 1 45); do
-            if curl -kfsS https://127.0.0.1:8765/healthz >/dev/null; then
+            if curl -fsS http://localhost:8765/healthz >/dev/null; then
               exit 0
             fi
             if ! kill -0 "$(cat "$RUNNER_TEMP/amodex-p4-e2e.pid")" 2>/dev/null; then
