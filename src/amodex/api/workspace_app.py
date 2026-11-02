@@ -11,6 +11,7 @@ import os
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 
+from amodex.api.access_gate import install_access_gate
 from amodex.api.app import create_app as create_control_plane_app
 from amodex.api.connector_routes import build_connector_router
 from amodex.api.connector_web import CONNECTOR_HTML
@@ -167,6 +168,14 @@ def create_workspace_app(
     @base_app.get("/legacy", response_class=HTMLResponse, include_in_schema=False)
     async def legacy_dashboard() -> str:
         return DASHBOARD_HTML
+
+    @base_app.get("/healthz", include_in_schema=False)
+    async def healthz() -> dict[str, str]:
+        return {"status": "ok"}
+
+    # Server-side boundary: when AMODEX_ACCESS_PASSCODE is configured, every
+    # route except the explicit health/login surface requires a signed session.
+    install_access_gate(base_app)
 
     base_app.title = "Amodex Web Workspace"
     base_app.version = _RELEASE
