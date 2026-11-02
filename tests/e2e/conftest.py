@@ -34,7 +34,21 @@ def logged_in_page(page: Page) -> Page:
     return page
 
 
+def open_mobile_side(page: Page) -> None:
+    side = page.locator("#side")
+    if "open" not in (side.get_attribute("class") or "").split():
+        page.locator(".mobile-menu").click()
+    expect(side).to_have_class(re.compile(r"\bopen\b"))
+
+
+def open_projects(page: Page) -> None:
+    open_mobile_side(page)
+    page.locator(".project-launch").click()
+    expect(page.locator(".project-hub h1")).to_have_text("Projetos")
+
+
 def create_global_chat(page: Page, title: str) -> None:
+    open_mobile_side(page)
     page.locator(".global-chat-header .icon-button").click()
     expect(page.locator("#chatModal")).to_have_class(re.compile(r"\bopen\b"))
     page.locator("#newChatTitle").fill(title)
