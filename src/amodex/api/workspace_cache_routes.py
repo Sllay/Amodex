@@ -7,7 +7,7 @@ payloads live only in IndexedDB through the browser cache layer.
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import Response
 
 _SERVICE_WORKER = r'''const SHELL_CACHE='amodex-private-shell-p0-v1';
@@ -93,3 +93,19 @@ def build_workspace_cache_router() -> APIRouter:
         )
 
     return router
+
+
+def install_private_cache_boundary(app: FastAPI) -> None:
+    """Keep private shell data out of shared caches and purge local data on logout."""
+
+    @app.middleware("http")
+    async def private_cache_boundary(request: Request, call_next):
+        response = await call_next(request)
+        path = request.url.path
+        if path == "/":
+            response.headers["Cache-Control"] = "private, no-cache, max-age=0, must-revalidate"
+            response.headers["Vary"] = "Cookie"
+        elif path == "/auth/logout":
+            response.headers["Cache-Control"] = "no-store"
+            response.headers["Clear-Site-Data"] = '"cache", "storage"'
+        return response
