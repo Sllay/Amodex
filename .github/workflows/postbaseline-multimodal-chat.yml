@@ -17,6 +17,7 @@ on:
       - 'src/amodex/api/workspace_v2.py'
       - 'src/amodex/api/workspace_ui_routes.py'
       - 'src/amodex/api/theme_web.py'
+      - 'src/amodex/api/ui_stability_web.py'
       - 'src/amodex/api/global_chat_routes.py'
       - 'src/amodex/api/access_gate.py'
       - 'src/amodex/api/connector_web.py'
@@ -29,6 +30,7 @@ on:
       - 'tests/unit/test_production_deployment.py'
       - 'tests/unit/test_access_gate.py'
       - 'tests/unit/test_workspace_v2_theme.py'
+      - 'tests/unit/test_ui_stability_web.py'
       - '.github/workflows/postbaseline-multimodal-chat.yml'
       - 'docs/POST_BASELINE_MULTIMODAL_CHAT_V1.md'
       - 'docs/DEPLOY_RENDER_NEON_CLOUDINARY_V1.md'
@@ -91,6 +93,7 @@ jobs:
               src/amodex/api/multimodal_web.py \
               src/amodex/api/access_gate.py \
               src/amodex/api/theme_web.py \
+              src/amodex/api/ui_stability_web.py \
               src/amodex/api/global_chat_routes.py \
               src/amodex/api/workspace_ui_routes.py \
               src/amodex/api/workspace_v2.py \
@@ -147,7 +150,8 @@ jobs:
           env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --extra dev --frozen pytest -q \
             tests/unit/test_production_deployment.py \
             tests/unit/test_access_gate.py \
-            tests/unit/test_workspace_v2_theme.py
+            tests/unit/test_workspace_v2_theme.py \
+            tests/unit/test_ui_stability_web.py
           export AMODEX_DATABASE_URL="$AMODEX_TEST_DATABASE_URL"
           export AMODEX_MIGRATION_DATABASE_URL="$AMODEX_TEST_DATABASE_URL"
           export AMODEX_DATABASE_ENDPOINT_GUARD="127"
@@ -168,6 +172,9 @@ jobs:
           grep -q 'AMODEX_ACCESS_SESSION_SECRET' render.yaml
           grep -q 'AMODEX_THEME_COLORS' render.yaml
           grep -q 'AMODEX_THEME_MODE' render.yaml
+          grep -q 'AMODEX_STT_ENABLED' render.yaml
+          grep -q 'GROQ_API_KEY' render.yaml
+          grep -q 'AMODEX_STT_BILLING_CLASS' render.yaml
           grep -q 'sync: false' render.yaml
           if grep -R -I --exclude-dir='__pycache__' -E \
             '(^|[[:space:]])(from[[:space:]]+amodex\.providers\.routing|import[[:space:]]+amodex\.providers\.routing)|ModelLifecycle|promote_model|demote_model|model_leaderboard' \
@@ -206,6 +213,7 @@ jobs:
             exit 1
           fi
           grep -q "addEventListener('click',()=>mmSpeak(m.content))" src/amodex/api/multimodal_web.py
+          grep -q 'uiStable.sending' src/amodex/api/ui_stability_web.py
           echo 'MULTIMODAL_BROWSER_HANDLER_BOUNDARY_OK'
 
       - name: Repository hygiene
