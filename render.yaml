@@ -33,3 +33,7 @@ services:
         sync: false
       - key: AMODEX_ACCESS_SESSION_TTL_SECONDS
         value: "43200"
+      - key: AMODEX_THEME_COLORS
+        value: "#8b5cf6"
+      - key: AMODEX_THEME_MODE
+        value: single
