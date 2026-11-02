@@ -44,10 +44,7 @@ from amodex.storage.connectors import PostgresConnectorRepository
 from amodex.storage.model_intelligence import PostgresModelIntelligenceRepository
 from amodex.storage.multimodal import PostgresMultimodalRepository
 from amodex.storage.routing import PostgresRoutingRepository
-from amodex.storage.runtime_pool import (
-    close_runtime_connection_pools,
-    install_runtime_connection_pool,
-)
+from amodex.storage.runtime_pool import install_runtime_connection_pool
 from amodex.storage.workspace import PostgresWorkspaceRepository
 
 _RELEASE = "0.7.4-performance-structural"
@@ -102,7 +99,9 @@ def create_workspace_app(
     # Runtime repository methods historically call psycopg.connect directly.
     # Install the bounded compatibility pool before any control-plane repository
     # can perform I/O. Production migrations run in a separate process and keep
-    # their one-shot direct connection semantics.
+    # their one-shot direct connection semantics. Pool cleanup is registered at
+    # process exit by the pool module itself, so it does not depend on a specific
+    # FastAPI/Starlette lifecycle API version.
     if database_url:
         install_runtime_connection_pool()
 
@@ -241,9 +240,6 @@ def create_workspace_app(
     # Server-side boundary: when AMODEX_ACCESS_PASSCODE is configured, every
     # route except the explicit health/login surface requires a signed session.
     install_access_gate(base_app)
-
-    if database_url:
-        base_app.add_event_handler("shutdown", close_runtime_connection_pools)
 
     base_app.title = "Amodex Web Workspace"
     base_app.version = _RELEASE
