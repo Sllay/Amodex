@@ -1,0 +1,240 @@
+"""Workspace V2 product shell augmentation.
+
+This layer intentionally sits over the stable workspace contracts instead of
+forking them. It reshapes navigation for global chats vs project chat folders,
+turns the composer into a compact mobile surface, and gives Memory/Cook explicit
+product semantics while keeping execution authority unchanged.
+"""
+
+from __future__ import annotations
+
+
+_V2_CSS = r'''
+.ui-v2-hidden{display:none!important}.side{display:flex;flex-direction:column;gap:10px}.side .brand{padding:3px 2px 8px}.project-launch{display:flex;align-items:center;gap:10px;padding:12px 11px!important;font-weight:700}.project-launch .project-icon{font-size:1.05rem}.global-chat-section{display:flex;min-height:0;flex:1;flex-direction:column}.global-chat-header{display:flex;align-items:center;justify-content:space-between;padding:4px 2px}.global-chat-header h3{margin:0!important}.icon-button{display:grid;place-items:center;width:40px;height:40px;padding:0;border-radius:13px;background:transparent;font-size:1.15rem}.global-chats-scroll{min-height:0;overflow:auto;overscroll-behavior:contain;padding-right:2px}.global-chats-scroll .item{padding:10px 9px}.side-system{margin-top:auto;padding-top:8px;border-top:1px solid color-mix(in srgb,var(--line) 70%,transparent)}
+.project-hub,.project-detail{max-width:960px;margin:0 auto;padding:8px 0 48px}.hub-head,.project-detail-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:24px}.hub-head h1,.project-detail-head h1{margin:0 0 6px;font-size:clamp(1.8rem,4vw,2.6rem)}.hub-head p,.project-detail-head p{margin:0;color:var(--muted);line-height:1.55}.project-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px}.project-card{min-height:145px;padding:16px;border:1px solid var(--line);border-radius:18px;background:linear-gradient(145deg,color-mix(in srgb,var(--local-accent,var(--accent)) 8%,var(--panel2)),var(--panel));text-align:left;transition:transform .16s ease,border-color .16s ease}.project-card:hover{transform:translateY(-2px)}.project-card h3{margin:0 0 8px;font-size:1.05rem}.project-card p{margin:0;color:var(--muted);line-height:1.45}.project-card .folder-meta{margin-top:18px;font-size:.72rem;color:var(--muted)}.project-chat-list{display:flex;flex-direction:column;gap:8px}.project-chat-row{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;padding:13px 14px;border:1px solid var(--line);border-radius:15px;background:var(--panel);text-align:left}.project-chat-row strong{display:block}.project-chat-row small{display:block;color:var(--muted);margin-top:4px}.project-empty{padding:34px 18px;border:1px dashed var(--line);border-radius:18px;text-align:center;color:var(--muted)}.optimistic{opacity:.62;pointer-events:none}.project-back{margin-bottom:12px}
+.composer-wrap{padding-bottom:max(10px,env(safe-area-inset-bottom))!important}.composer{position:relative;padding:8px!important;border-radius:22px!important}.composer-row{display:grid;grid-template-columns:44px minmax(0,1fr) 44px 44px;gap:6px;align-items:end}.composer-row textarea{min-height:44px!important;max-height:160px!important;padding:11px 8px!important}.composer-round{width:44px;height:44px;padding:0!important;display:grid;place-items:center;border-radius:50%!important;background:transparent;font-size:1.25rem}.composer-send{background:var(--theme-base)!important;color:var(--theme-white)!important;border-color:transparent!important;font-weight:900}.composer-send:disabled{opacity:.35}.tool-drawer{display:grid;grid-template-columns:repeat(4,48px);gap:8px;position:absolute;left:7px;bottom:58px;padding:8px;border:1px solid var(--line);border-radius:18px;background:color-mix(in srgb,var(--panel) 96%,transparent);backdrop-filter:blur(18px);box-shadow:0 18px 50px rgba(0,0,0,.35);transform:translateY(8px) scale(.96);transform-origin:bottom left;opacity:0;pointer-events:none;transition:opacity .15s ease,transform .15s ease;z-index:12}.tool-drawer.open{opacity:1;transform:none;pointer-events:auto}.tool-drawer button{width:48px;height:48px;padding:0;display:grid;place-items:center;border-radius:15px;font-size:1.3rem;background:var(--panel2)}.composer-meta{min-height:0;padding:5px 8px 0;font-size:.68rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.composer-meta:empty{display:none}.ui-v2-composer-hidden{display:none}.mm-tray{padding:2px 4px 7px!important}.mm-chip{border-radius:14px!important}.mm-recording{border-color:var(--bad)!important;box-shadow:0 0 0 4px color-mix(in srgb,var(--bad) 13%,transparent)}
+#memoryModal .memory-help,#draftModal .cook-help{border:1px solid var(--line);border-radius:12px;padding:10px;background:var(--panel2);font-size:.78rem;color:var(--muted);line-height:1.5}.topbar{gap:10px}.topbar .title{max-width:min(48vw,520px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media(max-width:700px){.side{padding-bottom:max(14px,env(safe-area-inset-bottom))}.chat{padding-top:14px}.project-hub,.project-detail{padding:0 2px 32px}.hub-head,.project-detail-head{align-items:center}.hub-head h1,.project-detail-head h1{font-size:1.65rem}.project-grid{grid-template-columns:1fr}.project-card{min-height:118px}.composer-row{grid-template-columns:42px minmax(0,1fr) 42px 42px;gap:4px}.composer-round{width:42px;height:42px}.tool-drawer{grid-template-columns:repeat(4,46px);bottom:56px}.tool-drawer button{width:46px;height:46px}.topbar .muted{max-width:46vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
+'''
+
+
+_V2_PREBOOT_SCRIPT = r'''
+// Workspace V2 overrides are installed before the legacy boot() call so the
+// stable API layer can be reused without a second application shell.
+Object.assign(state,{globalWorkspace:null,globalChats:[],project:null,projectChats:[],chatScope:null,view:'boot',chatCreateScope:'global'});
+const GLOBAL_SENTINEL='__amodex_global_chat_container_v1__';
+
+function uiInstallShell(){
+  side.innerHTML=`
+    <div class="brand"><span>Amodex</span><span id="statusBadge" class="badge">workspace</span></div>
+    <button class="item project-launch" onclick="openProjectsHub()"><span class="project-icon">▦</span><span>Projetos</span></button>
+    <div class="section global-chat-section">
+      <div class="global-chat-header"><h3>Chats</h3><button class="icon-button" onclick="openChatModal('global')" title="Novo chat" aria-label="Novo chat">＋</button></div>
+      <div id="globalChatList" class="stack global-chats-scroll"></div>
+    </div>
+    <div class="side-system">
+      <button class="item" onclick="location.href='/connections'">Conexões</button>
+      <button class="item" onclick="location.href='/models'">Modelos</button>
+    </div>
+    <div class="ui-v2-hidden"><div id="workspaceList"></div><div id="chatList"></div><div id="environmentList"></div></div>`;
+
+  const shell=document.querySelector('.composer');
+  shell.innerHTML=`
+    <div id="toolDrawer" class="tool-drawer" aria-hidden="true">
+      <button type="button" onclick="uiTool('file')" title="Arquivos" aria-label="Arquivos">📂</button>
+      <button type="button" onclick="uiTool('research')" title="Pesquisar na web" aria-label="Pesquisar na web">🌎</button>
+      <button type="button" onclick="uiTool('memory')" title="Memória" aria-label="Memória">🧠</button>
+      <button type="button" onclick="uiTool('cook')" title="Cozinhar" aria-label="Cozinhar">🍳</button>
+    </div>
+    <input id="mmFileInput" type="file" multiple hidden onchange="mmFilesSelected(this)">
+    <div id="mmTray" class="mm-tray"></div>
+    <div class="composer-row">
+      <button id="toolToggle" class="composer-round" type="button" onclick="uiToggleTools()" title="Ferramentas" aria-label="Ferramentas">＋</button>
+      <textarea id="composer" placeholder="Digite aqui…" disabled></textarea>
+      <button id="mmMic" class="composer-round" type="button" onclick="mmToggleMic()" title="Falar" aria-label="Falar">🎤</button>
+      <button id="uiSend" class="composer-round composer-send" type="button" onclick="sendMessage()" title="Enviar" aria-label="Enviar">⏫</button>
+    </div>
+    <select id="activeEnvironment" class="ui-v2-hidden"><option value="">Sem ambiente</option></select>
+    <div id="composerMeta" class="composer-meta"></div>`;
+  composer.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();sendMessage()}});
+
+  const memoryHelp=document.querySelector('#memoryModal p.muted');
+  if(memoryHelp){memoryHelp.className='memory-help';memoryHelp.textContent='Memória guarda decisões e restrições duráveis deste projeto. Ela nasce como candidata e só entra no contexto confiável depois de aprovada.'}
+  const draftHelp=document.querySelector('#draftModal p.muted');
+  if(draftHelp){draftHelp.className='cook-help';draftHelp.textContent='Cozinhar organiza o texto sem executar nada: separa novidade de decisões já aprovadas, remove repetição e prepara um draft verificável.'}
+}
+
+function uiToggleTools(force){
+  const drawer=document.getElementById('toolDrawer');
+  const open=typeof force==='boolean'?force:!drawer.classList.contains('open');
+  drawer.classList.toggle('open',open);drawer.setAttribute('aria-hidden',String(!open));
+  toolToggle.textContent=open?'×':'＋';
+}
+function uiTool(name){
+  uiToggleTools(false);
+  if(name==='file')return typeof mmChooseFiles==='function'?mmChooseFiles():err(new Error('Arquivos ainda não estão prontos'));
+  if(name==='research')return typeof mmResearch==='function'?mmResearch():err(new Error('Pesquisa ainda não está pronta'));
+  if(name==='memory')return openMemoryModal();
+  if(name==='cook')return uiCookDraft();
+}
+
+function uiSetComposerVisible(visible){
+  document.querySelector('.composer-wrap').classList.toggle('ui-v2-composer-hidden',!visible);
+}
+function uiProjectCountLabel(){return `${state.workspaces.length} projeto${state.workspaces.length===1?'':'s'}`}
+function renderGlobalChats(){
+  const target=document.getElementById('globalChatList');if(!target)return;
+  target.innerHTML=state.globalChats.length?state.globalChats.map(c=>`<button class="item ${state.chatScope==='global'&&state.chat?.chat_id===c.chat_id?'active':''} ${c.__pending?'optimistic':''}" onclick="selectGlobalChat('${esc(c.chat_id)}')"><strong>${esc(c.title)}</strong><small>${c.__pending?'Criando…':'Chat global'}</small></button>`).join(''):'<div class="muted" style="padding:9px 4px">Nenhum chat.</div>';
+}
+function renderWorkspaces(){if(state.view==='projects')renderProjectsHub();else if(state.view==='project')renderProjectView()}
+function renderChats(){renderGlobalChats();if(state.view==='project')renderProjectView()}
+
+function openProjectsHub(){
+  state.view='projects';state.project=null;state.workspace=null;state.chat=null;state.chatScope=null;state.messages=[];state.drafts=[];state.memories=[];state.envBindings=[];
+  composer.disabled=true;uiSetComposerVisible(false);chatTitle.textContent='Projetos';workspaceTitle.textContent=uiProjectCountLabel();renderProjectsHub();renderGlobalChats();
+  memoryList.innerHTML='<div class="muted">Abra um projeto ou chat.</div>';draftList.innerHTML='<div class="muted">Abra um chat.</div>';boundEnvironmentList.innerHTML='<div class="muted">Abra um projeto.</div>';side.classList.remove('open');
+}
+function renderProjectsHub(){
+  if(state.view!=='projects')return;
+  const cards=state.workspaces.length?state.workspaces.map(w=>`<button class="project-card ${w.__pending?'optimistic':''}" onclick="selectWorkspace('${esc(w.workspace_id)}')"><h3>${esc(w.name)}</h3><p>${esc(w.description||'Projeto sem descrição')}</p><div class="folder-meta">${w.__pending?'Criando…':'Abrir pasta de chats →'}</div></button>`).join(''):'<div class="project-empty">Nenhum projeto ainda. Crie o primeiro quando quiser separar chats, memória e ambientes.</div>';
+  messages.innerHTML=`<div class="project-hub"><div class="hub-head"><div><h1>Projetos</h1><p>Projetos são pastas de contexto: cada um mantém seus próprios chats, memórias e ambientes.</p></div><button class="primary" onclick="openWorkspaceModal()">＋ Projeto</button></div><div class="project-grid">${cards}</div></div>`;
+}
+function renderProjectView(pending=false){
+  if(state.view!=='project'||!state.project)return;
+  const chats=state.projectChats.length?state.projectChats.map(c=>`<button class="project-chat-row ${c.__pending?'optimistic':''}" onclick="selectProjectChat('${esc(c.chat_id)}')"><span><strong>${esc(c.title)}</strong><small>${c.__pending?'Criando…':(c.active_environment_id?'Environment ativo':'Planejamento')}</small></span><span>›</span></button>`).join(''):'<div class="project-empty">Este projeto ainda não tem chats.</div>';
+  messages.innerHTML=`<div class="project-detail"><button class="item project-back" onclick="openProjectsHub()">← Todos os projetos</button><div class="project-detail-head"><div><h1>${esc(state.project.name)}</h1><p>${esc(state.project.description||'Chats e memória exclusivos deste projeto.')}</p></div><button class="primary" onclick="openChatModal('project')">＋ Chat</button></div>${pending?'<div class="muted">Criando projeto…</div>':`<div class="project-chat-list">${chats}</div>`}</div>`;
+}
+
+async function uiLoadWorkspaceContext(workspace){
+  state.workspace=workspace;
+  [state.memories,state.envBindings]=await Promise.all([
+    api(`/v1/workspaces/${workspace.workspace_id}/memories`),
+    api(`/v1/workspaces/${workspace.workspace_id}/environments`)
+  ]);
+  renderContext();
+}
+async function selectWorkspace(id){
+  const local=state.workspaces.find(w=>w.workspace_id===id);if(local?.__pending)return;
+  try{
+    const project=local||await api('/v1/workspaces/'+id);
+    state.project=project;state.workspace=project;state.view='project';state.chat=null;state.chatScope='project';state.messages=[];state.drafts=[];
+    [state.projectChats,state.memories,state.envBindings]=await Promise.all([
+      api(`/v1/workspaces/${id}/chats`),api(`/v1/workspaces/${id}/memories`),api(`/v1/workspaces/${id}/environments`)
+    ]);
+    chatTitle.textContent=project.name;workspaceTitle.textContent=`Projeto · ${state.projectChats.length} chats`;composer.disabled=true;uiSetComposerVisible(false);renderProjectView();renderGlobalChats();renderContext();side.classList.remove('open');
+  }catch(e){err(e)}
+}
+async function selectGlobalChat(id){return selectChat(id,'global')}
+async function selectProjectChat(id){return selectChat(id,'project')}
+async function selectChat(id,forcedScope=null){
+  try{
+    const globalMatch=state.globalChats.find(c=>c.chat_id===id);
+    const scope=forcedScope||(globalMatch?'global':'project');
+    if((scope==='global'&&globalMatch?.__pending)||(scope==='project'&&state.projectChats.find(c=>c.chat_id===id)?.__pending))return;
+    if(scope==='global'){
+      state.project=null;await uiLoadWorkspaceContext(state.globalWorkspace);
+    }else{
+      if(!state.project)throw new Error('Abra o projeto deste chat primeiro');
+      await uiLoadWorkspaceContext(state.project);
+    }
+    state.chat=await api('/v1/chats/'+id);state.chatScope=scope;state.view='chat';
+    [state.messages,state.drafts]=await Promise.all([api(`/v1/chats/${id}/messages`),api(`/v1/chats/${id}/drafts`)]);
+    chatTitle.textContent=state.chat.title;workspaceTitle.textContent=scope==='global'?'Chat global':state.workspace.name;composer.disabled=false;composer.readOnly=false;uiSetComposerVisible(true);renderGlobalChats();renderMessages();renderContext();fillEnvironmentSelects();side.classList.remove('open');
+    composerMeta.textContent=scope==='global'?'Contexto global':'Contexto: '+state.workspace.name;
+  }catch(e){err(e)}
+}
+
+function openWorkspaceModal(){openModal('workspaceModal');setTimeout(()=>newWorkspaceName.focus(),20)}
+async function createWorkspace(e){
+  e.preventDefault();const name=newWorkspaceName.value.trim();const description=newWorkspaceDescription.value.trim()||null;if(!name)return;
+  const temp={workspace_id:`pending-project-${Date.now()}`,name,description,__pending:true};
+  closeModal('workspaceModal');e.target.reset();state.workspaces.unshift(temp);state.project=temp;state.workspace=temp;state.projectChats=[];state.view='project';state.chat=null;uiSetComposerVisible(false);chatTitle.textContent=name;workspaceTitle.textContent='Criando projeto…';renderProjectView(true);
+  try{
+    const created=await api('/v1/workspaces',{method:'POST',body:JSON.stringify({name,description})});
+    state.workspaces=state.workspaces.map(w=>w.workspace_id===temp.workspace_id?created:w);state.project=created;state.workspace=created;state.memories=[];state.envBindings=[];state.projectChats=[];workspaceTitle.textContent='Projeto · 0 chats';renderProjectView();renderGlobalChats();
+  }catch(x){state.workspaces=state.workspaces.filter(w=>w.workspace_id!==temp.workspace_id);openProjectsHub();err(x)}
+}
+async function openChatModal(scope='global'){
+  state.chatCreateScope=scope;
+  if(scope==='project'&&!state.project)return err(new Error('Abra um projeto primeiro'));
+  if(scope==='project'){state.workspace=state.project;fillEnvironmentSelects()}else{newChatEnvironment.innerHTML='<option value="">Nenhum</option>'}
+  openModal('chatModal');setTimeout(()=>newChatTitle.focus(),20);
+}
+async function createChat(e){
+  e.preventDefault();const title=newChatTitle.value.trim();if(!title)return;const scope=state.chatCreateScope||'global';const env=scope==='project'?(newChatEnvironment.value||null):null;
+  const temp={chat_id:`pending-chat-${Date.now()}`,title,active_environment_id:env,__pending:true};
+  closeModal('chatModal');e.target.reset();
+  if(scope==='global')state.globalChats.unshift(temp);else state.projectChats.unshift(temp);
+  state.chat=temp;state.chatScope=scope;state.view='chat';chatTitle.textContent=title;workspaceTitle.textContent='Criando chat…';uiSetComposerVisible(true);composer.disabled=true;messages.innerHTML='<div class="empty"><h1>'+esc(title)+'</h1><p>Criando chat…</p></div>';renderGlobalChats();
+  try{
+    const path=scope==='global'?'/v1/global-chats':`/v1/workspaces/${state.project.workspace_id}/chats`;
+    const created=await api(path,{method:'POST',body:JSON.stringify({title,active_environment_id:env})});
+    if(scope==='global')state.globalChats=state.globalChats.map(c=>c.chat_id===temp.chat_id?created:c);else state.projectChats=state.projectChats.map(c=>c.chat_id===temp.chat_id?created:c);
+    await selectChat(created.chat_id,scope);
+  }catch(x){if(scope==='global')state.globalChats=state.globalChats.filter(c=>c.chat_id!==temp.chat_id);else state.projectChats=state.projectChats.filter(c=>c.chat_id!==temp.chat_id);if(scope==='project'){state.view='project';state.chat=null;renderProjectView()}else openProjectsHub();err(x)}
+}
+
+function uiUnits(text){return text.replace(/([.!?])\s+/g,'$1\n').split(/\n+/).map(x=>x.trim()).filter(Boolean)}
+function uiNorm(text){return text.toLocaleLowerCase('pt-BR').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9\s]/g,' ').replace(/\s+/g,' ').trim()}
+function uiSimilarity(a,b){const A=new Set(uiNorm(a).split(' ').filter(x=>x.length>2)),B=new Set(uiNorm(b).split(' ').filter(x=>x.length>2));if(!A.size||!B.size)return 0;let hit=0;A.forEach(x=>{if(B.has(x))hit++});return hit/Math.max(A.size,B.size)}
+function uiCookDraft(){
+  if(!state.chat)return err(new Error('Abra um chat antes de cozinhar'));
+  const text=composer.value.trim();if(!text)return err(new Error('Digite a ideia ou tarefa que deseja cozinhar'));
+  const ideas=[...new Set(uiUnits(text))];
+  const approved=state.memories.filter(m=>m.status==='APPROVED').map(m=>m.content);
+  const previous=state.messages.filter(m=>m.role==='OWNER').slice(-30).map(m=>m.content);
+  const known=[...approved,...previous];const repeated=[],fresh=[];
+  for(const idea of ideas){(known.some(old=>uiSimilarity(idea,old)>=.72)?repeated:fresh).push(idea)}
+  const objective=(fresh[0]||ideas[0]||text).slice(0,100000);
+  const freshBody=(fresh.length?fresh:ideas).map(x=>'• '+x).join('\n');
+  const knownBody=repeated.length?`\n\nJÁ DECIDIDO — NÃO REABRIR SEM CONFLITO NOVO:\n${repeated.map(x=>'• '+x).join('\n')}`:'';
+  draftTitle.value=(fresh[0]||ideas[0]||'Tarefa preparada').slice(0,200);
+  draftObjective.value=objective;
+  draftInstructions.value=`NOVO / EXECUTAR:\n${freshBody}${knownBody}\n\nDISCIPLINA:\n• Preservar decisões aprovadas e arquitetura estável.\n• Não repetir investigação já resolvida sem evidência nova.\n• Se houver bloqueio, apontar o bloqueio concreto e a menor mudança necessária.`;
+  draftValidation.value='Validar somente as mudanças novas; confirmar ausência de regressão; comparar com memórias aprovadas e relatar evidência objetiva.';
+  fillEnvironmentSelects();openModal('draftModal');
+}
+
+boot=async function(){
+  uiInstallShell();
+  try{
+    const [status,spaces,envs,globalWorkspace,globalChats]=await Promise.all([
+      api('/v1/workspace/status'),api('/v1/workspaces'),api('/v1/environments').catch(()=>[]),api('/v1/global-workspace'),api('/v1/global-chats')
+    ]);
+    statusBadge.textContent=status.workspace_schema_ready?'ready':'not ready';inferenceBadge.textContent=status.chat_inference==='GATED_BENCHMARK_PENDING'?'AI gated':'AI';
+    state.globalWorkspace=globalWorkspace;state.globalChats=globalChats;state.workspaces=spaces.filter(w=>w.description!==GLOBAL_SENTINEL);state.allEnvironments=envs;renderGlobalChats();
+    if(globalChats.length)await selectGlobalChat(globalChats[0].chat_id);else openProjectsHub();
+  }catch(e){err(e)}
+};
+
+window.addEventListener('load',()=>{
+  if(typeof mmToggleMic!=='function')return;
+  const nativeMic=mmToggleMic;let baseline=new Set();
+  mmToggleMic=async function(){
+    const stopping=Boolean(mm.recorder&&mm.recorder.state==='recording');
+    if(!stopping){baseline=new Set(mm.pending.map(a=>a.attachment_id));composer.readOnly=true;composer.placeholder='Gravando… toque 🎤 para finalizar';}
+    await nativeMic();
+    if(!stopping){
+      if(mm.recorder&&mm.recorder.state==='recording'){mmMic.textContent='⏹';composerMeta.textContent='Gravando áudio — a transcrição só entra no campo quando você finalizar.'}
+      else{composer.readOnly=false;composer.placeholder='Digite aqui…'}
+      return;
+    }
+    const poll=setInterval(()=>{
+      if(mm.recorder)return;
+      clearInterval(poll);composer.readOnly=false;composer.placeholder='Digite aqui…';mmMic.textContent='🎤';
+      if(mm.status?.stt?.ready){mm.pending=mm.pending.filter(a=>baseline.has(a.attachment_id)||!a.media_type.startsWith('audio/'));mmRenderPending()}
+      composerMeta.textContent=state.chatScope==='global'?'Contexto global':'Contexto: '+(state.workspace?.name||'projeto');composer.focus();
+    },80);
+  };
+});
+'''
+
+
+def augment_workspace_v2_html(html: str) -> str:
+    """Install the V2 UX without changing durable workspace API contracts."""
+
+    result = html.replace("</style>", _V2_CSS + "</style>", 1)
+    marker = "boot();\n</script>"
+    if marker not in result:
+        raise ValueError("workspace V2 boot marker not found")
+    return result.replace(marker, _V2_PREBOOT_SCRIPT + "\nboot();\n</script>", 1)
