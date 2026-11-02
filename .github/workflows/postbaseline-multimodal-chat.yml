@@ -14,6 +14,7 @@ on:
       - 'src/amodex/api/workspace_app.py'
       - 'migrations/postbaseline/0005_multimodal_chat.sql'
       - 'tests/integration/test_postbaseline_multimodal_chat.py'
+      - 'tests/unit/test_cloudinary_media_store.py'
       - '.github/workflows/postbaseline-multimodal-chat.yml'
       - 'docs/POST_BASELINE_MULTIMODAL_CHAT_V1.md'
 
@@ -95,7 +96,8 @@ jobs:
         run: |
           set -euo pipefail
           env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --extra dev --frozen pytest -q \
-            tests/integration/test_postbaseline_multimodal_chat.py
+            tests/integration/test_postbaseline_multimodal_chat.py \
+            tests/unit/test_cloudinary_media_store.py
 
       - name: Run Step 1 and Step 2 checkpoint regressions
         shell: bash
