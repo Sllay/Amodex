@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 
 import pytest
 from playwright.sync_api import Page, expect
@@ -35,7 +36,7 @@ def logged_in_page(page: Page) -> Page:
 
 def create_global_chat(page: Page, title: str) -> None:
     page.locator(".global-chat-header .icon-button").click()
-    expect(page.locator("#chatModal")).to_have_class(lambda value: value is not None and "open" in value)
+    expect(page.locator("#chatModal")).to_have_class(re.compile(r"\bopen\b"))
     page.locator("#newChatTitle").fill(title)
     page.locator("#chatModal button.primary").click()
     expect(page.locator("#chatTitle")).to_have_text(title)
