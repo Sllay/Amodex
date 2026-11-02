@@ -26,6 +26,14 @@ def wait_for_shell_cache(page: Page) -> None:
         }""",
         timeout=15_000,
     )
+    active = page.evaluate(
+        """async () => {
+          if (!('serviceWorker' in navigator)) return false;
+          const registration = await navigator.serviceWorker.ready;
+          return Boolean(registration.active);
+        }"""
+    )
+    assert active is True
 
 
 def test_private_gate_home_and_mobile_drawer(logged_in_page: Page) -> None:
@@ -179,10 +187,14 @@ def test_cached_chat_survives_offline_reload(logged_in_page: Page) -> None:
     )
     wait_for_shell_cache(page)
 
-    # One online reload guarantees the now-active worker controls this document.
+    # Give the active worker one normal navigation before the real acceptance
+    # check. Browser-specific controller timing is not the product contract: the
+    # next navigation must actually succeed while the network is disabled.
     page.reload(wait_until="domcontentloaded")
     expect(page.locator("#chatTitle")).to_have_text(chat)
-    page.wait_for_function("Boolean(navigator.serviceWorker && navigator.serviceWorker.controller)", timeout=10_000)
+    assert page.evaluate(
+        """async () => Boolean((await navigator.serviceWorker.ready).active)"""
+    ) is True
 
     page.context.set_offline(True)
     try:
