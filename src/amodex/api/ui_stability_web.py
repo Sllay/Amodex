@@ -1,8 +1,8 @@
-"""Final browser stability layer for the composed Amodex web workspace.
+"""Single browser runtime authority for the composed Amodex web workspace.
 
-This script runs after Workspace, multimodal and model-intelligence augmentations.
-It owns the final send/microphone actions so stacked feature wrappers cannot cause
-duplicate message writes or expose expected capability-gating as fatal UI errors.
+Feature augmenters may contribute hooks, but they must not replace shared browser
+actions such as sendMessage, selectChat, renderMessages or microphone dispatch.
+This module is intentionally installed last and owns the public runtime surface.
 """
 
 from __future__ import annotations
@@ -17,129 +17,145 @@ _STABILITY_CSS = r'''
 
 
 _STABILITY_SCRIPT = r'''
-<script id="amodex-ui-stability">
-const uiStable={sending:false,lastNotice:'',lastNoticeAt:0};
+<script id="amodex-ui-runtime">
+(function(){
+const hookNames=['beforeSend','afterOwnerSaved','afterSend','afterChatSelected','afterRenderMessages','toggleMic'];
+const hookMap=Object.fromEntries(hookNames.map(name=>[name,[]]));
+const runtimeState={sending:false,lastNotice:'',lastNoticeAt:0};
+const AppState={
+  data:state,
+  patch(values){Object.assign(state,values||{});return state},
+  snapshot(){return {...state}},
+  get chat(){return state.chat},
+  get workspace(){return state.workspace},
+  get view(){return state.view},
+};
 
+function registerHook(name,handler){
+  if(!hookMap[name])throw new Error(`Unknown Amodex hook: ${name}`);
+  if(typeof handler!=='function')throw new TypeError(`Hook ${name} must be a function`);
+  hookMap[name].push(handler);
+  return ()=>{const i=hookMap[name].indexOf(handler);if(i>=0)hookMap[name].splice(i,1)};
+}
+async function runHooks(name,context){
+  for(const handler of [...(hookMap[name]||[])])await handler(context);
+}
+function runHooksSync(name,context){
+  for(const handler of [...(hookMap[name]||[])]){
+    try{const result=handler(context);if(result&&typeof result.then==='function')result.catch(console.warn)}catch(e){console.warn(`hook ${name} failed`,e)}
+  }
+}
 function uiNotice(message,kind='notice'){
   const el=document.getElementById('composerMeta');
   if(!el)return;
   el.textContent=message||'';
   el.className='composer-meta '+kind;
 }
-
-api=async function(path,opt={}){
+async function runtimeApi(path,opt={}){
   const r=await fetch(path,{headers:{'content-type':'application/json',...(opt.headers||{})},...opt});
   let body=null;try{body=await r.json()}catch{}
   if(!r.ok){
     const d=body?.detail;
     const message=d?.message||d?.code||(typeof d==='string'?d:null)||r.statusText||`HTTP ${r.status}`;
-    const x=new Error(message);
-    x.code=d?.code||body?.code||`HTTP_${r.status}`;
-    x.status=r.status;x.detail=d;x.body=body;
-    throw x;
+    const x=new Error(message);x.code=d?.code||body?.code||`HTTP_${r.status}`;x.status=r.status;x.detail=d;x.body=body;throw x;
   }
   return body;
-};
-
-err=function(e){
+}
+function runtimeError(e){
   const code=e?.code||'';
   if(['NO_MEASURED_ROUTE','BENCHMARK_REQUIRED','STT_NOT_CONFIGURED','STT_CONFIGURATION_INCOMPLETE'].includes(code)){
-    uiNotice(e?.message||code,'warn');
-    return;
+    uiNotice(e?.message||code,'warn');return;
   }
-  const text=e?.message||String(e||'Erro inesperado');
-  const now=Date.now();
-  if(uiStable.lastNotice===text&&now-uiStable.lastNoticeAt<2500)return;
-  uiStable.lastNotice=text;uiStable.lastNoticeAt=now;
+  const text=e?.message||String(e||'Erro inesperado');const now=Date.now();
+  if(runtimeState.lastNotice===text&&now-runtimeState.lastNoticeAt<2500)return;
+  runtimeState.lastNotice=text;runtimeState.lastNoticeAt=now;
   const x=document.getElementById('error');if(!x)return;
-  x.textContent=text;x.style.display='block';clearTimeout(window.__err);
-  window.__err=setTimeout(()=>x.style.display='none',4200);
-};
-
-async function uiAutomaticReply(owner){
-  if(!owner||!state.chat)return;
-  try{
-    let status=(typeof mi!=='undefined'&&mi.status)||null;
-    if(!status){
-      try{status=await api('/v1/model-intelligence/status');if(typeof mi!=='undefined')mi.status=status}catch{}
-    }
-    if(status?.automatic_chat_inference!=='READY'){
-      uiNotice('Mensagem salva · resposta automática aguardando benchmark de uma rota gratuita.','warn');
-      return;
-    }
-    document.querySelector('.composer-wrap')?.classList.add('mi-busy');
-    await api(`/v1/chats/${state.chat.chat_id}/respond`,{method:'POST',body:JSON.stringify({owner_message_id:owner.message_id,profile:null})});
-    state.messages=await api(`/v1/chats/${state.chat.chat_id}/messages`);
-    renderMessages();
-    uiNotice('Resposta concluída.','good');
-    if(typeof mmRefreshChat==='function')Promise.resolve(mmRefreshChat()).then(()=>renderMessages()).catch(console.warn);
-    if(typeof miBoot==='function')Promise.resolve(miBoot()).catch(console.warn);
-  }catch(e){
-    if(e?.code==='NO_MEASURED_ROUTE'||e?.code==='BENCHMARK_REQUIRED'){
-      uiNotice('Mensagem salva · nenhuma rota gratuita medida está elegível ainda.','warn');
-    }else if(e?.code==='DECISION_ALREADY_EXISTS'){
-      console.warn('model decision already exists',e);
-    }else{
-      err(e);
-    }
-  }finally{
-    document.querySelector('.composer-wrap')?.classList.remove('mi-busy');
-  }
+  x.textContent=text;x.style.display='block';clearTimeout(window.__err);window.__err=setTimeout(()=>x.style.display='none',4200);
 }
 
-sendMessage=async function(){
-  if(uiStable.sending||!state.chat)return null;
-  const text=(document.getElementById('composer')?.value||'').trim();
-  const pending=(typeof mm!=='undefined'&&Array.isArray(mm.pending))?mm.pending:[];
-  if(!text&&!pending.length)return null;
-  uiStable.sending=true;
-  const send=document.getElementById('uiSend');
+const baseRenderMessages=renderMessages;
+function runtimeRenderMessages(){
+  baseRenderMessages();
+  runHooksSync('afterRenderMessages',{app:window.AmodexApp,state:AppState.data});
+}
+
+const baseSelectChat=selectChat;
+async function runtimeSelectChat(...args){
+  const result=await baseSelectChat(...args);
+  await runHooks('afterChatSelected',{app:window.AmodexApp,state:AppState.data,args,result});
+  return result;
+}
+
+async function runtimeSendMessage(){
+  if(runtimeState.sending||!state.chat)return null;
   const input=document.getElementById('composer');
+  const send=document.getElementById('uiSend');
+  const text=(input?.value||'').trim();
+  const ctx={app:null,state:AppState.data,text,content:text,allowEmpty:false,owner:null,featureData:{}};
+  runtimeState.sending=true;
   if(send){send.disabled=true;send.classList.add('is-busy');send.textContent='…'}
   if(input)input.readOnly=true;
   uiNotice('Enviando…');
   try{
-    const content=text||'Arquivo anexado.';
-    const owner=await api(`/v1/chats/${state.chat.chat_id}/messages`,{method:'POST',body:JSON.stringify({role:'OWNER',content})});
-    if(pending.length){
-      await api(`/v1/messages/${owner.message_id}/attachments`,{method:'POST',body:JSON.stringify({attachment_ids:pending.map(a=>a.attachment_id)})});
-      mm.pending=[];if(typeof mmRenderPending==='function')mmRenderPending();
-    }
-    if(input)input.value='';
+    ctx.app=window.AmodexApp;
+    await runHooks('beforeSend',ctx);
+    if(!ctx.content&&!ctx.allowEmpty){uiNotice('');return null}
+    const owner=await runtimeApi(`/v1/chats/${state.chat.chat_id}/messages`,{method:'POST',body:JSON.stringify({role:'OWNER',content:ctx.content})});
+    ctx.owner=owner;
     const existing=new Set((state.messages||[]).map(m=>m.message_id));
     if(!existing.has(owner.message_id))state.messages=[...(state.messages||[]),owner];
-    renderMessages();
+    await runHooks('afterOwnerSaved',ctx);
+    if(input)input.value='';
+    runtimeRenderMessages();
     uiNotice('Mensagem salva.','good');
-    if(typeof mmRefreshChat==='function')Promise.resolve(mmRefreshChat()).then(()=>renderMessages()).catch(console.warn);
-    void uiAutomaticReply(owner);
+    void runHooks('afterSend',ctx).catch(runtimeError);
     return owner;
-  }catch(e){
-    err(e);return null;
-  }finally{
-    uiStable.sending=false;
+  }catch(e){runtimeError(e);return null}
+  finally{
+    runtimeState.sending=false;
     if(send){send.disabled=false;send.classList.remove('is-busy');send.textContent='⏫'}
     if(input){input.readOnly=false;input.focus()}
   }
-};
-
-if(typeof mmToggleMic==='function'){
-  const uiNativeMic=mmToggleMic;
-  mmToggleMic=async function(){
-    if(!state.chat){uiNotice('Abra um chat antes de usar o microfone.','warn');return}
-    if(!mm.status&&typeof mmBoot==='function')await mmBoot();
-    if(!mm.status?.stt?.ready){
-      const reason=mm.status?.stt?.reason||'STT_NOT_CONFIGURED';
-      uiNotice(`🎤 Transcrição indisponível: ${reason}. Configure o STT gratuito no Render.`,'warn');
-      return;
-    }
-    try{return await uiNativeMic()}catch(e){err(e)}
-  };
 }
+
+async function runtimeToggleMic(){
+  if(!state.chat){uiNotice('Abra um chat antes de usar o microfone.','warn');return null}
+  const handlers=[...(hookMap.toggleMic||[])];
+  if(!handlers.length){uiNotice('Microfone indisponível nesta instalação.','warn');return null}
+  try{return await handlers[0]({app:window.AmodexApp,state:AppState.data})}catch(e){runtimeError(e);return null}
+}
+
+const app={
+  version:'2.0-front-authority',
+  state:AppState,
+  hooks:{register:registerHook,run:runHooks,runSync:runHooksSync},
+  actions:{sendMessage:runtimeSendMessage,toggleMic:runtimeToggleMic},
+  api:runtimeApi,
+  error:runtimeError,
+  notice:uiNotice,
+  renderMessages:runtimeRenderMessages,
+  selectChat:runtimeSelectChat,
+};
+window.AmodexApp=app;
+
+for(const register of window.__amodexFeatureQueue||[]){try{register(app)}catch(e){console.warn('feature registration failed',e)}}
+window.__amodexFeatureQueue=[];
+
+// Compatibility bridges for legacy inline handlers. Only this runtime may bind them.
+api=runtimeApi;
+err=runtimeError;
+renderMessages=runtimeRenderMessages;
+selectChat=runtimeSelectChat;
+sendMessage=runtimeSendMessage;
+
+const sendButton=document.getElementById('uiSend');if(sendButton)sendButton.onclick=()=>app.actions.sendMessage();
+const micButton=document.getElementById('mmMic');if(micButton)micButton.onclick=()=>app.actions.toggleMic();
+})();
 </script>
 '''
 
 
 def augment_ui_stability_html(html: str) -> str:
-    """Install the final browser action authority after all feature scripts."""
+    """Install the single public browser runtime after all feature scripts."""
     result = html.replace("</style>", _STABILITY_CSS + "</style>", 1)
     return result.replace("</body>", _STABILITY_SCRIPT + "</body>", 1)
