@@ -8,11 +8,13 @@ _STEP4_CSS = r'''
 '''
 
 _STEP4_SCRIPT = r'''
-<script>
+<script id="amodex-model-intelligence-feature">
 const mi={status:null};
+function miQueueFeature(register){if(window.AmodexApp)return register(window.AmodexApp);(window.__amodexFeatureQueue||(window.__amodexFeatureQueue=[])).push(register)}
+async function miApi(path,opt={}){return window.AmodexApp?AmodexApp.api(path,opt):api(path,opt)}
 async function miBoot(){
   try{
-    mi.status=await api('/v1/model-intelligence/status');
+    mi.status=await miApi('/v1/model-intelligence/status');
     const badge=document.getElementById('inferenceBadge');
     if(badge){
       const ready=mi.status.automatic_chat_inference==='READY';
@@ -21,37 +23,42 @@ async function miBoot(){
     }
   }catch(e){console.warn('model intelligence unavailable',e)}
 }
-const miBaseSendMessage=sendMessage;
-sendMessage=async function(){
-  if(!state.chat)return miBaseSendMessage();
-  const before=new Set((state.messages||[]).map(m=>m.message_id));
-  await miBaseSendMessage();
-  const fresh=(state.messages||[]).filter(m=>m.role==='OWNER'&&!before.has(m.message_id));
-  const owner=fresh[fresh.length-1];
-  if(!owner)return;
+async function miAutomaticReply(app,ctx){
+  const owner=ctx?.owner;if(!owner||!state.chat)return;
   try{
+    if(!mi.status)await miBoot();
+    if(mi.status?.automatic_chat_inference!=='READY'){
+      app.notice('Mensagem salva · resposta automática aguardando benchmark de uma rota gratuita.','warn');
+      return;
+    }
     const footer=document.querySelector('.composer-wrap');footer?.classList.add('mi-busy');
-    await api(`/v1/chats/${state.chat.chat_id}/respond`,{
-      method:'POST',body:JSON.stringify({owner_message_id:owner.message_id,profile:null})
-    });
-    state.messages=await api(`/v1/chats/${state.chat.chat_id}/messages`);
+    await app.api(`/v1/chats/${state.chat.chat_id}/respond`,{method:'POST',body:JSON.stringify({owner_message_id:owner.message_id,profile:null})});
+    state.messages=await app.api(`/v1/chats/${state.chat.chat_id}/messages`);
     if(typeof mmRefreshChat==='function')await mmRefreshChat();
     renderMessages();
+    app.notice('Resposta concluída.','good');
     await miBoot();
   }catch(e){
-    const code=e?.message||'';
-    console.warn('automatic routed response unavailable',e);
-    if(!code.includes('NO_MEASURED_ROUTE')&&!code.includes('BENCHMARK'))err(e);
+    if(e?.code==='NO_MEASURED_ROUTE'||e?.code==='BENCHMARK_REQUIRED'){
+      app.notice('Mensagem salva · nenhuma rota gratuita medida está elegível ainda.','warn');
+    }else if(e?.code==='DECISION_ALREADY_EXISTS'){
+      console.warn('model decision already exists',e);
+    }else{
+      app.error(e);
+    }
     await miBoot();
-  }finally{document.querySelector('.composer-wrap')?.classList.remove('mi-busy')}
-};
+  }finally{
+    document.querySelector('.composer-wrap')?.classList.remove('mi-busy');
+  }
+}
+miQueueFeature(app=>app.hooks.register('afterSend',ctx=>miAutomaticReply(app,ctx)));
 miBoot();
 </script>
 '''
 
 
 def augment_model_intelligence_html(html: str) -> str:
-    """Enable routed chat only after the Step 3 wrapper has been installed."""
+    """Enable routed chat through the shared browser runtime hook contract."""
     result = html.replace("</style>", _STEP4_CSS + "</style>", 1)
     old_warning = (
         '<div class="warning">Inferência da Amodex continua bloqueada até benchmark/promoção dos modelos. '
