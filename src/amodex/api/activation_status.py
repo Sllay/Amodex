@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import threading
+import time
 from typing import Any
 
 import psycopg
@@ -20,6 +22,10 @@ from amodex.deployment.migrations import discover_production_migrations
 from amodex.model_intelligence.service import ModelIntelligenceService
 from amodex.providers.capabilities import BillingClass
 from amodex.providers.registry import stage5_credential_pools_from_env
+
+_DEFAULT_READINESS_CACHE_SECONDS = 15.0
+_MIN_READINESS_CACHE_SECONDS = 1.0
+_MAX_READINESS_CACHE_SECONDS = 60.0
 
 
 def release_identity(*, app_version: str) -> dict[str, str]:
@@ -34,6 +40,18 @@ def release_identity(*, app_version: str) -> dict[str, str]:
         "git_sha": sha,
         "host": host,
     }
+
+
+def readiness_cache_seconds() -> float:
+    raw = os.environ.get(
+        "AMODEX_READINESS_CACHE_SECONDS",
+        str(_DEFAULT_READINESS_CACHE_SECONDS),
+    ).strip()
+    try:
+        value = float(raw)
+    except ValueError:
+        return _DEFAULT_READINESS_CACHE_SECONDS
+    return max(_MIN_READINESS_CACHE_SECONDS, min(_MAX_READINESS_CACHE_SECONDS, value))
 
 
 def database_readiness(
@@ -188,6 +206,26 @@ def build_activation_router(
     model_intelligence_service: ModelIntelligenceService | None = None,
 ) -> APIRouter:
     router = APIRouter(tags=["activation"])
+    cache_lock = threading.Lock()
+    cached: dict[str, Any] = {"at": 0.0, "snapshot": None}
+
+    def current_snapshot(*, force: bool = False) -> dict[str, Any]:
+        now = time.monotonic()
+        ttl = readiness_cache_seconds()
+        with cache_lock:
+            existing = cached["snapshot"]
+            if not force and existing is not None and now - float(cached["at"]) < ttl:
+                return existing
+
+        snapshot = activation_snapshot(
+            dsn=dsn,
+            app_version=app_version,
+            model_intelligence_service=model_intelligence_service,
+        )
+        with cache_lock:
+            cached["at"] = now
+            cached["snapshot"] = snapshot
+        return snapshot
 
     @router.get("/healthz", include_in_schema=False)
     def healthz() -> dict[str, str]:
@@ -196,11 +234,10 @@ def build_activation_router(
 
     @router.get("/readyz", include_in_schema=False)
     def readyz() -> JSONResponse:
-        snapshot = activation_snapshot(
-            dsn=dsn,
-            app_version=app_version,
-            model_intelligence_service=model_intelligence_service,
-        )
+        # Render may poll health frequently. Keep DB/schema checks bounded without
+        # turning readiness into liveness: the first request is always real and
+        # the cached result expires quickly (default 15 seconds).
+        snapshot = current_snapshot()
         public = {
             "status": snapshot["status"],
             "ready": snapshot["ready"],
@@ -219,10 +256,7 @@ def build_activation_router(
     @router.get("/v1/system/status")
     def system_status() -> dict[str, Any]:
         # Access-gate middleware protects /v1/* when private deployment mode is on.
-        return activation_snapshot(
-            dsn=dsn,
-            app_version=app_version,
-            model_intelligence_service=model_intelligence_service,
-        )
+        # Diagnostics force a fresh probe instead of reusing the public health cache.
+        return current_snapshot(force=True)
 
     return router
