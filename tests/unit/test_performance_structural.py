@@ -169,7 +169,9 @@ def test_streaming_upload_route_never_builds_whole_request_bytearray() -> None:
     source = inspect.getsource(streaming_upload_routes)
     assert "async for chunk in request.stream()" in source
     assert "bytearray(" not in source
-    assert "put_media_file(media_store" in source
+    assert "put_media_file(" in source
+    assert "media_store," in source
+    assert "extension=extension" in source
     assert "tempfile.mkstemp" in source
 
 
