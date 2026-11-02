@@ -12,6 +12,7 @@ from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 
 from amodex.api.access_gate import install_access_gate
+from amodex.api.activation_status import build_activation_router
 from amodex.api.app import create_app as create_control_plane_app
 from amodex.api.connector_routes import build_connector_router
 from amodex.api.connector_web import CONNECTOR_HTML
@@ -49,7 +50,7 @@ from amodex.storage.routing import PostgresRoutingRepository
 from amodex.storage.runtime_pool import install_runtime_connection_pool
 from amodex.storage.workspace import PostgresWorkspaceRepository
 
-_RELEASE = "0.7.5-cache-local-state"
+_RELEASE = "0.7.6-activation-v1"
 
 
 def _media_store_from_runtime() -> MediaObjectStore:
@@ -208,6 +209,17 @@ def create_workspace_app(
     if model_intelligence_service is not None:
         base_app.include_router(build_model_intelligence_router(model_intelligence_service))
 
+    # Activation endpoints are deliberately composed on the same FastAPI object.
+    # /healthz is liveness only; /readyz verifies DB/schema/zero-cost policy;
+    # /v1/system/status is richer and stays behind the private access gate.
+    base_app.include_router(
+        build_activation_router(
+            dsn=database_url,
+            app_version=_RELEASE,
+            model_intelligence_service=model_intelligence_service,
+        )
+    )
+
     @base_app.get("/", response_class=HTMLResponse, include_in_schema=False)
     async def workspace_page() -> str:
         marker = '<div class="section"><h3>Sistema</h3>'
@@ -237,10 +249,6 @@ def create_workspace_app(
     async def legacy_dashboard() -> str:
         return augment_theme_html(DASHBOARD_HTML)
 
-    @base_app.get("/healthz", include_in_schema=False)
-    async def healthz() -> dict[str, str]:
-        return {"status": "ok"}
-
     # Cache policy is installed before the access gate so successful private
     # shell responses are explicitly private and logout purges CacheStorage /
     # IndexedDB through Clear-Site-Data. API snapshot responses set their own
@@ -248,7 +256,7 @@ def create_workspace_app(
     install_private_cache_boundary(base_app)
 
     # Server-side boundary: when AMODEX_ACCESS_PASSCODE is configured, every
-    # route except the explicit health/login surface requires a signed session.
+    # route except the explicit health/readiness/login surface requires a signed session.
     install_access_gate(base_app)
 
     base_app.title = "Amodex Web Workspace"
