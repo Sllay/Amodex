@@ -42,7 +42,7 @@ def _rest_store_with_transport(handler, *, now: float = 1_700_000_000.0) -> Clou
 def test_cloudinary_authenticated_rest_upload_uses_signed_raw_upload_endpoint() -> None:
     data = b"private authenticated rest attachment"
     digest = hashlib.sha256(data).hexdigest()
-    public_id = f"amodex/sha256/{digest[:2]}/{digest}.bin"
+    public_id = f"amodex/sha256/{digest[:2]}/{digest}.dat"
 
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.method == "POST"
@@ -68,7 +68,7 @@ def test_cloudinary_authenticated_rest_upload_uses_signed_raw_upload_endpoint() 
         )
 
     saved = _rest_store_with_transport(handler).put_bytes(data)
-    assert saved.storage_ref == f"media://sha256/{digest}"
+    assert saved.storage_ref == f"media://sha256/{digest}.dat"
     assert saved.sha256 == digest
     assert saved.size_bytes == len(data)
 
