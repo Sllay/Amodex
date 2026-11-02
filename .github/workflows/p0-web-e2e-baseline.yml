@@ -11,6 +11,7 @@ on:
       - 'src/amodex/api/**'
       - 'src/amodex/storage/**'
       - 'tests/e2e/**'
+      - 'tests/unit/test_workspace_frontend_authority.py'
       - '.github/workflows/p0-web-e2e-baseline.yml'
       - 'migrations/**'
       - 'scripts/migrate_production.py'
@@ -76,6 +77,12 @@ jobs:
           env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" python install 3.13.5
           env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" sync --python 3.13.5 --extra dev --frozen
           echo "UV_BIN=$UV_BIN" >> "$GITHUB_ENV"
+
+      - name: Prove frontend runtime authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          .venv/bin/python -m pytest tests/unit/test_workspace_frontend_authority.py -q
 
       - name: Install pinned Playwright test layer
         shell: bash
