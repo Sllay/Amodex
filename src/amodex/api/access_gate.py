@@ -184,7 +184,7 @@ def install_access_gate(app: FastAPI, config: AccessGateConfig | None = None) ->
             max_age=config.session_ttl_seconds,
             httponly=True,
             secure=True,
-            samesite="strict",
+            samesite="lax",
             path="/",
         )
         response.headers["Cache-Control"] = "no-store"
@@ -193,7 +193,7 @@ def install_access_gate(app: FastAPI, config: AccessGateConfig | None = None) ->
     @app.post("/auth/logout", include_in_schema=False)
     async def access_logout() -> Response:
         response = RedirectResponse(url="/auth/passcode", status_code=303)
-        response.delete_cookie(key=_COOKIE_NAME, path="/", secure=True, httponly=True, samesite="strict")
+        response.delete_cookie(key=_COOKIE_NAME, path="/", secure=True, httponly=True, samesite="lax")
         response.headers["Cache-Control"] = "no-store"
         return response
 
