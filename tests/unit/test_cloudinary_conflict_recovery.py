@@ -65,18 +65,37 @@ def test_authenticated_raw_upload_preserves_real_extension_in_public_id_and_ref(
     assert saved.size_bytes == len(data)
 
 
-def test_extension_aware_ref_downloads_with_matching_raw_format() -> None:
+def test_extension_aware_ref_downloads_with_exact_raw_public_id_and_format() -> None:
     data = b"stored png bytes"
     digest = hashlib.sha256(data).hexdigest()
     storage_ref = f"media://sha256/{digest}.png"
-    expected_public_id = f"amodex-production/sha256/{digest[:2]}/{digest}"
+    expected_public_id = f"amodex-production/sha256/{digest[:2]}/{digest}.png"
 
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.method == "GET"
         assert request.url.path.endswith("/raw/download")
+        # Raw Cloudinary IDs include their real extension. The signed download
+        # request must use the same identity that upload created.
         assert request.url.params["public_id"] == expected_public_id
         assert request.url.params["format"] == "png"
         assert request.url.params["type"] == "authenticated"
+        assert request.url.params["api_key"] == "test-key"
+        assert request.url.params["signature"]
+        return httpx.Response(200, content=data)
+
+    assert _store(handler).get_bytes(storage_ref) == data
+
+
+def test_legacy_extensionless_ref_keeps_legacy_bin_download_identity() -> None:
+    data = b"legacy bytes"
+    digest = hashlib.sha256(data).hexdigest()
+    storage_ref = f"media://sha256/{digest}"
+    expected_public_id = f"amodex-production/sha256/{digest[:2]}/{digest}.bin"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/raw/download")
+        assert request.url.params["public_id"] == expected_public_id
+        assert request.url.params["format"] == "bin"
         return httpx.Response(200, content=data)
 
     assert _store(handler).get_bytes(storage_ref) == data
@@ -228,3 +247,17 @@ def test_streaming_upload_route_maps_storage_failures_to_server_side_statuses() 
     assert '"image/png": "png"' in source
     assert 'extension=extension' in source
     assert 'suffix=f".{extension}"' in source
+
+
+def test_workspace_attachment_metadata_retry_is_serialized_and_idempotent() -> None:
+    source = open("src/amodex/storage/workspace.py", encoding="utf-8").read()
+    start = source.index("def create_attachment(")
+    end = source.index("def list_attachments(", start)
+    method = source[start:end]
+    assert "pg_advisory_xact_lock(hashtext(%s))" in method
+    assert "WHERE chat_id=%s AND sha256=%s AND name=%s AND media_type=%s" in method
+    assert "AND size_bytes=%s AND storage_ref=%s" in method
+    assert "if existing is not None:" in method
+    assert "return _attachment(existing)" in method
+    assert method.index("pg_advisory_xact_lock") < method.index("SELECT * FROM amodex_workspace_attachments")
+    assert method.index("SELECT * FROM amodex_workspace_attachments") < method.index("INSERT INTO amodex_workspace_attachments")

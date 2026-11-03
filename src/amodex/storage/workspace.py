@@ -275,18 +275,61 @@ class PostgresWorkspaceRepository:
 
     def create_attachment(self, *, chat_id: str, name: str, media_type: str, size_bytes: int, storage_ref: str, sha256: str | None = None) -> AttachmentRecord:
         attachment_id = new_uuid7()
+        normalized_name = name.strip()
+        normalized_media_type = media_type.strip()
         with psycopg.connect(self._dsn, row_factory=dict_row) as conn:
-            chat = conn.execute("SELECT 1 FROM amodex_workspace_chats WHERE chat_id=%s", (chat_id,)).fetchone()
-            if chat is None:
-                raise KeyError(chat_id)
-            row = conn.execute(
-                """
-                INSERT INTO amodex_workspace_attachments(
-                    attachment_id,chat_id,name,media_type,size_bytes,sha256,storage_ref,created_at
-                ) VALUES (%s,%s,%s,%s,%s,%s,%s,NOW()) RETURNING *
-                """,
-                (attachment_id, chat_id, name, media_type, size_bytes, sha256, storage_ref),
-            ).fetchone()
+            with conn.transaction():
+                chat = conn.execute(
+                    "SELECT 1 FROM amodex_workspace_chats WHERE chat_id=%s FOR SHARE",
+                    (chat_id,),
+                ).fetchone()
+                if chat is None:
+                    raise KeyError(chat_id)
+
+                # Upload retries must not create duplicate metadata rows. Serialize
+                # an exact attachment identity inside this chat without requiring a
+                # schema migration or deleting historical duplicate rows.
+                if sha256 is not None:
+                    identity = (
+                        f"amodex-attachment-v1:{chat_id}:{sha256}:"
+                        f"{normalized_name}:{normalized_media_type}:{size_bytes}:{storage_ref}"
+                    )
+                    conn.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (identity,))
+                    existing = conn.execute(
+                        """
+                        SELECT * FROM amodex_workspace_attachments
+                        WHERE chat_id=%s AND sha256=%s AND name=%s AND media_type=%s
+                          AND size_bytes=%s AND storage_ref=%s
+                        ORDER BY created_at,attachment_id LIMIT 1
+                        """,
+                        (
+                            chat_id,
+                            sha256,
+                            normalized_name,
+                            normalized_media_type,
+                            size_bytes,
+                            storage_ref,
+                        ),
+                    ).fetchone()
+                    if existing is not None:
+                        return _attachment(existing)
+
+                row = conn.execute(
+                    """
+                    INSERT INTO amodex_workspace_attachments(
+                        attachment_id,chat_id,name,media_type,size_bytes,sha256,storage_ref,created_at
+                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,NOW()) RETURNING *
+                    """,
+                    (
+                        attachment_id,
+                        chat_id,
+                        normalized_name,
+                        normalized_media_type,
+                        size_bytes,
+                        sha256,
+                        storage_ref,
+                    ),
+                ).fetchone()
         assert row is not None
         return _attachment(row)
 
