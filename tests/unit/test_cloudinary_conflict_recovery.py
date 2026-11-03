@@ -247,3 +247,17 @@ def test_streaming_upload_route_maps_storage_failures_to_server_side_statuses() 
     assert '"image/png": "png"' in source
     assert 'extension=extension' in source
     assert 'suffix=f".{extension}"' in source
+
+
+def test_workspace_attachment_metadata_retry_is_serialized_and_idempotent() -> None:
+    source = open("src/amodex/storage/workspace.py", encoding="utf-8").read()
+    start = source.index("def create_attachment(")
+    end = source.index("def list_attachments(", start)
+    method = source[start:end]
+    assert "pg_advisory_xact_lock(hashtext(%s))" in method
+    assert "WHERE chat_id=%s AND sha256=%s AND name=%s AND media_type=%s" in method
+    assert "AND size_bytes=%s AND storage_ref=%s" in method
+    assert "if existing is not None:" in method
+    assert "return _attachment(existing)" in method
+    assert method.index("pg_advisory_xact_lock") < method.index("SELECT * FROM amodex_workspace_attachments")
+    assert method.index("SELECT * FROM amodex_workspace_attachments") < method.index("INSERT INTO amodex_workspace_attachments")
