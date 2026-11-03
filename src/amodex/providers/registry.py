@@ -14,7 +14,6 @@ from .base import ProviderClient
 from .capabilities import BillingClass, ModelCandidate
 from .gemini import GeminiProvider
 from .groq import GroqProvider
-from .mistral import MistralProvider
 from .nvidia import NvidiaProvider
 from .openrouter import OpenRouterProvider
 
@@ -51,8 +50,6 @@ class ProviderExecutionRegistry:
             return GeminiProvider(api_key=api_key)
         if pool.provider == "groq":
             return GroqProvider(api_key=api_key)
-        if pool.provider == "mistral":
-            return MistralProvider(api_key=api_key)
         if pool.provider == "openrouter":
             return OpenRouterProvider(
                 api_key=api_key,
@@ -67,7 +64,6 @@ def stage5_credential_pools_from_env() -> tuple[CredentialPoolConfig, ...]:
     return (
         _pool("gemini-free-primary", "gemini", "GEMINI_API_KEY", "AMODEX_GEMINI_BILLING_CLASS"),
         _pool("groq-free-primary", "groq", "GROQ_API_KEY", "AMODEX_GROQ_BILLING_CLASS"),
-        _pool("mistral-free-primary", "mistral", "MISTRAL_API_KEY", "AMODEX_MISTRAL_BILLING_CLASS"),
         _pool(
             "openrouter-free-primary",
             "openrouter",

@@ -74,29 +74,6 @@ def stage5_declared_candidates() -> tuple[ModelCandidate, ...]:
             ),
         ),
         ModelCandidate(
-            provider="mistral",
-            model="mistral-large-4",
-            credential_pool_id="mistral-free-primary",
-            cost_class=BillingClass.FREE,
-            capabilities=frozenset(
-                {
-                    ModelCapability.TEXT,
-                    ModelCapability.STRUCTURED_OUTPUT,
-                    ModelCapability.TOOL_CALLING,
-                    ModelCapability.VISION,
-                    ModelCapability.LONG_CONTEXT,
-                }
-            ),
-            context_capacity_tokens=1_000_000,
-            lifecycle=ModelLifecycle.BENCHMARK_PENDING,
-            provenance=(
-                "Mistral official docs snapshot 2026-11-03: Mistral Large 4 is multimodal with a "
-                "1.6B vision encoder, Chat Completions, structured outputs and 1M context. The route "
-                "remains BENCHMARK_PENDING and zero-cost execution additionally requires a credential "
-                "pool explicitly classified free; catalog declaration alone never proves Free-mode access."
-            ),
-        ),
-        ModelCandidate(
             provider="openrouter",
             model="openrouter/free",
             credential_pool_id="openrouter-free-primary",
@@ -131,8 +108,15 @@ def stage5_declared_candidates() -> tuple[ModelCandidate, ...]:
                     ModelCapability.LONG_CONTEXT,
                 }
             ),
-            context_capacity_tokens=1_000_000,
+            # The hosted Build.NVIDIA free endpoint currently advertises 262K.
+            # Self-hosted NIM profiles may support 1M, but that is a different
+            # execution surface and must not inflate cloud-route admission.
+            context_capacity_tokens=262_144,
             lifecycle=ModelLifecycle.BENCHMARK_PENDING,
-            provenance="NVIDIA NIM Mistral Large 4 official docs snapshot 2026-11-01; Build.NVIDIA labels a free endpoint, but Governor still requires free credential/quota evidence",
+            provenance=(
+                "NVIDIA API Catalog Mistral Large 4 snapshot 2026-11-03: Free Endpoint available; "
+                "text+image input, reasoning, function calling and structured outputs; hosted context "
+                "length 262K. Eligibility still requires measured evidence and an explicitly free NVIDIA pool."
+            ),
         ),
     )
