@@ -11,6 +11,7 @@ from amodex.model_intelligence.models import (
     ReconcileRequest,
 )
 from amodex.model_intelligence.service import ModelIntelligenceService
+from amodex.model_intelligence.vision_benchmark_runner import run_vision_benchmark
 from amodex.providers.capabilities import WorkerProfileKind
 
 
@@ -46,6 +47,18 @@ def build_model_intelligence_router(service: ModelIntelligenceService) -> APIRou
     async def benchmark(payload: BenchmarkRunRequest) -> dict:
         try:
             return await service.benchmark_route(route_id=payload.route_id, force=payload.force)
+        except ModelIntelligenceError as exc:
+            _raise(exc)
+
+    @router.post("/model-intelligence/benchmarks/vision/run")
+    async def vision_benchmark(payload: BenchmarkRunRequest) -> dict:
+        """Explicit owner-triggered pixel-grounded benchmark; never auto-promotes."""
+        try:
+            return await run_vision_benchmark(
+                service,
+                route_id=payload.route_id,
+                force=payload.force,
+            )
         except ModelIntelligenceError as exc:
             _raise(exc)
 
