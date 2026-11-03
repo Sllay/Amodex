@@ -8,12 +8,14 @@ on:
       - 'migrations/postbaseline/0007_retire_direct_mistral_route.sql'
       - 'src/amodex/api/streaming_upload_routes.py'
       - 'src/amodex/api/workspace_app.py'
+      - 'src/amodex/api/workspace_cache_routes.py'
       - 'src/amodex/api/model_intelligence_routes.py'
       - 'src/amodex/api/model_intelligence_web.py'
       - 'src/amodex/model_intelligence/attachment_aware_service.py'
       - 'src/amodex/model_intelligence/vision_benchmarks.py'
       - 'src/amodex/model_intelligence/vision_benchmark_runner.py'
       - 'src/amodex/multimodal/cloudinary_rest_store.py'
+      - 'src/amodex/providers/base.py'
       - 'src/amodex/providers/catalog.py'
       - 'src/amodex/providers/openai_compatible.py'
       - 'src/amodex/providers/vision_chat.py'
@@ -27,6 +29,7 @@ on:
       - 'tests/unit/test_provider_benchmark_transport.py'
       - 'tests/unit/test_cloudinary_media_store.py'
       - 'tests/unit/test_model_attachment_context.py'
+      - 'tests/unit/test_model_route_hardening.py'
       - 'tests/unit/test_vision_benchmark.py'
       - 'tests/unit/test_vision_benchmark_evidence.py'
       - 'tests/unit/test_performance_structural.py'
@@ -69,12 +72,14 @@ jobs:
           .venv/bin/python -m compileall -q \
             src/amodex/api/streaming_upload_routes.py \
             src/amodex/api/workspace_app.py \
+            src/amodex/api/workspace_cache_routes.py \
             src/amodex/api/model_intelligence_routes.py \
             src/amodex/api/model_intelligence_web.py \
             src/amodex/model_intelligence/attachment_aware_service.py \
             src/amodex/model_intelligence/vision_benchmarks.py \
             src/amodex/model_intelligence/vision_benchmark_runner.py \
             src/amodex/multimodal/cloudinary_rest_store.py \
+            src/amodex/providers/base.py \
             src/amodex/providers/catalog.py \
             src/amodex/providers/openai_compatible.py \
             src/amodex/providers/vision_chat.py \
@@ -86,6 +91,7 @@ jobs:
             tests/unit/test_benchmark_suite_isolation.py \
             tests/unit/test_cloudinary_conflict_recovery.py \
             tests/unit/test_model_attachment_context.py \
+            tests/unit/test_model_route_hardening.py \
             tests/unit/test_vision_benchmark.py \
             tests/unit/test_vision_benchmark_evidence.py \
             tests/unit/test_provider_benchmark_transport.py \
@@ -112,6 +118,15 @@ jobs:
           set -euo pipefail
           .venv/bin/python -m pytest -q tests/unit/test_benchmark_suite_isolation.py
 
+      - name: Prove retired routes and model dashboard cache are hard blocked
+        shell: bash
+        run: |
+          set -euo pipefail
+          .venv/bin/python -m pytest -q tests/unit/test_model_route_hardening.py
+          grep -q 'ROUTE_DISABLED' src/amodex/api/model_intelligence_routes.py
+          grep -q 'VISION_ROUTE_DISABLED' src/amodex/model_intelligence/vision_benchmark_runner.py
+          grep -q 'no-store' src/amodex/api/workspace_cache_routes.py
+
       - name: Prove pixel-grounded visual benchmark and saved evidence
         shell: bash
         run: |
@@ -134,6 +149,8 @@ jobs:
             tests/integration/test_stage5_provider_adapters.py
           grep -q 'https://integrate.api.nvidia.com/v1' src/amodex/providers/nvidia.py
           grep -q 'reasoning_effort.*high' src/amodex/providers/nvidia.py
+          grep -q 'max_tokens.*4096' src/amodex/providers/nvidia.py
+          grep -q 'use_response_format=False' src/amodex/providers/nvidia.py
           grep -q 'context_capacity_tokens=262_144' src/amodex/providers/catalog.py
 
       - name: Prove zero-cost policy was not bypassed
