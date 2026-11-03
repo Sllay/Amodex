@@ -179,11 +179,14 @@ class CloudinaryAuthenticatedRestMediaStore(CloudinaryMediaStore):
     def get_bytes(self, storage_ref: str) -> bytes:
         digest, extension = _storage_ref_parts(storage_ref)
         timestamp = int(self._now())
+        # For raw assets the extension is part of the Cloudinary public_id itself.
+        # private_download_url also requires the format as a separate signed field,
+        # so preserve the raw public_id exactly as it was created during upload.
         params = self._signed_params(
             {
                 "expires_at": str(timestamp + 300),
                 "format": extension,
-                "public_id": f"{self.prefix}/sha256/{digest[:2]}/{digest}",
+                "public_id": self._public_id_with_extension(digest, extension),
                 "timestamp": str(timestamp),
                 "type": "authenticated",
             }
