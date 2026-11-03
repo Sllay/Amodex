@@ -38,3 +38,24 @@ def test_stability_layer_deduplicates_repeated_error_toasts() -> None:
     assert "now-runtimeState.lastNoticeAt<2500" in page
     assert "runtimeState.lastNotice=text" in page
     assert "runtimeState.lastNoticeAt=now" in page
+
+
+def test_multimodal_upload_state_machine_prevents_duplicate_selected_file_posts() -> None:
+    assert "uploads:new Map()" in _MULTIMODAL_SCRIPT
+    assert "attachmentKeys:new Map()" in _MULTIMODAL_SCRIPT
+    assert "function mmFileKey(file)" in _MULTIMODAL_SCRIPT
+    assert "file.lastModified||0" in _MULTIMODAL_SCRIPT
+    assert "if(existing.state==='uploading'&&existing.promise)return existing.promise;" in _MULTIMODAL_SCRIPT
+    assert "if(existing.attachment){existing.state='uploaded';mmRememberPending(existing.attachment,key);return existing.attachment}" in _MULTIMODAL_SCRIPT
+    assert "if(!mmPendingHas(attachment.attachment_id))mm.pending.push(attachment)" in _MULTIMODAL_SCRIPT
+    assert "entry.state='linked'" in _MULTIMODAL_SCRIPT
+    assert "mm.uploads.clear()" in _MULTIMODAL_SCRIPT
+    assert "mm.attachmentKeys.clear()" in _MULTIMODAL_SCRIPT
+    assert "app.hooks.register('afterChatSelected',async()=>{mmResetUploadState();" in _MULTIMODAL_SCRIPT
+
+
+def test_multimodal_client_enforces_server_advertised_upload_limit_before_post() -> None:
+    assert "if(!mm.status)await mmBoot();" in _MULTIMODAL_SCRIPT
+    assert "const max=mm.status?.max_upload_bytes||10485760;" in _MULTIMODAL_SCRIPT
+    assert "if(file.size>max)throw new Error" in _MULTIMODAL_SCRIPT
+    assert _MULTIMODAL_SCRIPT.index("if(file.size>max)throw new Error") < _MULTIMODAL_SCRIPT.index("fetch(`/v1/chats/${state.chat.chat_id}/uploads`")
