@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import logging
+import os
+from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Response
 
 from amodex.model_intelligence.models import (
     BenchmarkRunRequest,
@@ -12,6 +14,9 @@ from amodex.model_intelligence.models import (
     ModelIntelligenceError,
     ReconcileRequest,
 )
+from pydantic import BaseModel
+
+from amodex.model_intelligence.nvidia_diagnostics import NvidiaUpstreamDiagnostics
 from amodex.model_intelligence.service import ModelIntelligenceService
 from amodex.model_intelligence.vision_benchmark_runner import (
     run_vision_benchmark,
@@ -21,6 +26,10 @@ from amodex.providers.capabilities import WorkerProfileKind
 
 
 _logger = logging.getLogger("amodex.api.model_intelligence")
+
+
+class NvidiaDiagnosticRequest(BaseModel):
+    mode: Literal["text", "vision"]
 
 
 def _raise(exc: ModelIntelligenceError) -> None:
@@ -42,6 +51,13 @@ def _require_enabled_route(service: ModelIntelligenceService, route_id: str) -> 
 
 def build_model_intelligence_router(service: ModelIntelligenceService) -> APIRouter:
     router = APIRouter(prefix="/v1")
+    nvidia_diagnostics = NvidiaUpstreamDiagnostics(service)
+
+    def require_private_diagnostics() -> None:
+        # This is an operator diagnostic, not a public free-inference endpoint.
+        # The private access_gate validates the session cookie before /v1/.
+        if not os.environ.get("AMODEX_ACCESS_PASSCODE", "").strip():
+            raise HTTPException(status_code=404, detail="diagnostics unavailable")
 
     @router.get("/model-intelligence/status")
     def status() -> dict:
@@ -73,6 +89,20 @@ def build_model_intelligence_router(service: ModelIntelligenceService) -> APIRou
             return vision_benchmark_evidence(service, benchmark_id=benchmark_id)
         except ModelIntelligenceError as exc:
             _raise(exc)
+
+    @router.get("/model-intelligence/diagnostics/nvidia")
+    def nvidia_diagnostic_configuration(response: Response) -> dict:
+        require_private_diagnostics()
+        response.headers["Cache-Control"] = "private, no-store"
+        return nvidia_diagnostics.configuration()
+
+    @router.post("/model-intelligence/diagnostics/nvidia/run")
+    def run_nvidia_diagnostic(payload: NvidiaDiagnosticRequest, response: Response) -> dict:
+        require_private_diagnostics()
+        response.headers["Cache-Control"] = "private, no-store"
+        # Fixed synthetic probe, never user-provided messages or uploads.
+        # This is not a benchmark and cannot change routing/measurement state.
+        return nvidia_diagnostics.run(mode=payload.mode)
 
     @router.post("/model-intelligence/benchmarks/run")
     async def benchmark(payload: BenchmarkRunRequest) -> dict:
