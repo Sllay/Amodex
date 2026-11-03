@@ -26,7 +26,12 @@ def test_openai_compatible_adapters_use_expected_endpoints(monkeypatch: pytest.M
 
     def fake_post(url: str, *, headers: dict, json: dict, timeout: float):
         calls.append((url, headers, json))
-        content = "plain-openrouter" if "openrouter.ai" in url else '{"text":"structured-ok"}'
+        if "openrouter.ai" in url:
+            content = "plain-openrouter"
+        elif "integrate.api.nvidia.com" in url:
+            content = "plain-nvidia"
+        else:
+            content = '{"text":"structured-ok"}'
         return _response(
             200,
             json_body={
@@ -49,7 +54,7 @@ def test_openai_compatible_adapters_use_expected_endpoints(monkeypatch: pytest.M
 
     assert groq_response.text == "structured-ok"
     assert or_response.text == "plain-openrouter"
-    assert nv_response.text == "structured-ok"
+    assert nv_response.text == "plain-nvidia"
     assert groq_response.usage.total_tokens == 6
     assert calls[0][0] == "https://api.groq.com/openai/v1/chat/completions"
     assert calls[1][0] == "https://openrouter.ai/api/v1/chat/completions"
@@ -57,9 +62,12 @@ def test_openai_compatible_adapters_use_expected_endpoints(monkeypatch: pytest.M
     assert calls[0][1]["authorization"] == "Bearer groq-secret"
     assert calls[1][1]["X-Title"] == "Amodex"
     assert calls[2][1]["authorization"] == "Bearer nv-secret"
+    assert calls[2][1]["accept"] == "application/json"
     assert calls[0][2]["response_format"] == {"type": "json_object"}
     assert "response_format" not in calls[1][2]
-    assert calls[2][2]["response_format"] == {"type": "json_object"}
+    assert "response_format" not in calls[2][2]
+    assert calls[2][2]["reasoning_effort"] == "high"
+    assert calls[2][2]["max_tokens"] == 4096
 
 
 def test_provider_errors_are_normalized(monkeypatch: pytest.MonkeyPatch) -> None:
