@@ -16,6 +16,9 @@ on:
       - 'src/amodex/providers/catalog.py'
       - 'src/amodex/providers/openai_compatible.py'
       - 'src/amodex/providers/groq.py'
+      - 'src/amodex/storage/model_intelligence.py'
+      - 'src/amodex/storage/routing.py'
+      - 'tests/unit/test_benchmark_suite_isolation.py'
       - 'tests/unit/test_cloudinary_conflict_recovery.py'
       - 'tests/unit/test_provider_benchmark_transport.py'
       - 'tests/unit/test_cloudinary_media_store.py'
@@ -70,6 +73,9 @@ jobs:
             src/amodex/providers/catalog.py \
             src/amodex/providers/openai_compatible.py \
             src/amodex/providers/groq.py \
+            src/amodex/storage/model_intelligence.py \
+            src/amodex/storage/routing.py \
+            tests/unit/test_benchmark_suite_isolation.py \
             tests/unit/test_cloudinary_conflict_recovery.py \
             tests/unit/test_model_attachment_context.py \
             tests/unit/test_vision_benchmark.py \
@@ -91,6 +97,12 @@ jobs:
           set -euo pipefail
           .venv/bin/python -m pytest -q tests/unit/test_model_attachment_context.py
 
+      - name: Prove text and vision benchmark isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+          .venv/bin/python -m pytest -q tests/unit/test_benchmark_suite_isolation.py
+
       - name: Prove pixel-grounded visual benchmark without auto-promotion
         shell: bash
         run: |
@@ -98,6 +110,7 @@ jobs:
           .venv/bin/python -m pytest -q tests/unit/test_vision_benchmark.py
           grep -q 'promotion_applied.*False' src/amodex/model_intelligence/vision_benchmark_runner.py
           ! grep -q 'set_lifecycle' src/amodex/model_intelligence/vision_benchmark_runner.py
+          ! grep -q 'record_availability' src/amodex/model_intelligence/vision_benchmark_runner.py
 
       - name: Prove Groq benchmark transport and provider compatibility
         shell: bash
