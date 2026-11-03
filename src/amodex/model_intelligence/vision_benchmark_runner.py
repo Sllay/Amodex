@@ -103,6 +103,55 @@ def _case_report(service: Any, benchmark_id: str) -> list[dict[str, Any]]:
     return report
 
 
+def vision_benchmark_evidence(service: Any, *, benchmark_id: str) -> dict[str, Any]:
+    """Read persisted visual proof without making another provider call.
+
+    This lets the owner inspect a recent benchmark even while its cooldown is
+    active. Only runs from the visual suite are accepted, so textual benchmark
+    cases can never be mislabeled as pixel evidence.
+    """
+    run = next(
+        (
+            row
+            for row in service._repository.list_benchmarks(route_id=None, limit=500)
+            if str(row.get("benchmark_id") or "") == benchmark_id
+        ),
+        None,
+    )
+    if run is None or str(run.get("suite_version") or "") != VISION_SUITE_VERSION:
+        raise ModelIntelligenceError(
+            "VISION_BENCHMARK_NOT_FOUND",
+            "visual benchmark evidence was not found",
+            status_code=404,
+        )
+
+    sample_count = int(run.get("sample_count") or 0)
+    passed_count = int(run.get("passed_count") or 0)
+    aggregate = float(run.get("aggregate_score") or 0.0)
+    pass_rate = passed_count / max(sample_count, 1)
+    expected_count = len(vision_benchmark_cases())
+    return {
+        "benchmark_id": benchmark_id,
+        "route_id": str(run.get("route_id") or ""),
+        "suite_version": str(run.get("suite_version") or ""),
+        "status": str(run.get("status") or ""),
+        "sample_count": sample_count,
+        "passed_count": passed_count,
+        "aggregate_score": aggregate,
+        "vision_success_rate": aggregate,
+        "pass_rate": pass_rate,
+        "promotion_candidate": (
+            sample_count == expected_count
+            and aggregate >= VISION_PROMOTION_AGGREGATE
+            and pass_rate >= VISION_PROMOTION_PASS_RATE
+        ),
+        "promotion_applied": False,
+        "cases": _case_report(service, benchmark_id),
+        "replayed_from_storage": True,
+        "provider_call_performed": False,
+    }
+
+
 async def run_vision_benchmark(
     service: Any,
     *,
@@ -140,7 +189,7 @@ async def run_vision_benchmark(
         if isinstance(started, datetime) and service._utcnow() - started < service._benchmark_cooldown:
             raise ModelIntelligenceError(
                 "BENCHMARK_COOLDOWN",
-                "recent vision benchmark exists; wait for cooldown or explicitly force",
+                "recent vision benchmark exists; inspect its saved proof instead of spending quota again",
                 facts=(str(previous_run.get("benchmark_id") or ""),),
             )
 

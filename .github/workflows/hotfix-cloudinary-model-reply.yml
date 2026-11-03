@@ -24,6 +24,7 @@ on:
       - 'tests/unit/test_cloudinary_media_store.py'
       - 'tests/unit/test_model_attachment_context.py'
       - 'tests/unit/test_vision_benchmark.py'
+      - 'tests/unit/test_vision_benchmark_evidence.py'
       - 'tests/unit/test_performance_structural.py'
       - 'tests/integration/test_stage5_provider_adapters.py'
       - '.github/workflows/hotfix-cloudinary-model-reply.yml'
@@ -79,6 +80,7 @@ jobs:
             tests/unit/test_cloudinary_conflict_recovery.py \
             tests/unit/test_model_attachment_context.py \
             tests/unit/test_vision_benchmark.py \
+            tests/unit/test_vision_benchmark_evidence.py \
             tests/unit/test_provider_benchmark_transport.py \
             tests/integration/test_stage5_provider_adapters.py
 
@@ -103,11 +105,13 @@ jobs:
           set -euo pipefail
           .venv/bin/python -m pytest -q tests/unit/test_benchmark_suite_isolation.py
 
-      - name: Prove pixel-grounded visual benchmark without auto-promotion
+      - name: Prove pixel-grounded visual benchmark and saved evidence
         shell: bash
         run: |
           set -euo pipefail
-          .venv/bin/python -m pytest -q tests/unit/test_vision_benchmark.py
+          .venv/bin/python -m pytest -q \
+            tests/unit/test_vision_benchmark.py \
+            tests/unit/test_vision_benchmark_evidence.py
           grep -q 'promotion_applied.*False' src/amodex/model_intelligence/vision_benchmark_runner.py
           ! grep -q 'set_lifecycle' src/amodex/model_intelligence/vision_benchmark_runner.py
           ! grep -q 'record_availability' src/amodex/model_intelligence/vision_benchmark_runner.py
