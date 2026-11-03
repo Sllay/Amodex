@@ -14,6 +14,9 @@ from amodex.model_intelligence.models import AttemptStatus, DecisionStatus
 from amodex.providers.capabilities import ModelCandidate, ModelLifecycle
 
 
+_TEXT_BENCHMARK_SUITE = "step4-live-v1"
+
+
 class PostgresModelIntelligenceRepository:
     def __init__(self, dsn: str) -> None:
         if not dsn:
@@ -201,14 +204,26 @@ class PostgresModelIntelligenceRepository:
             raise KeyError(benchmark_id)
         return dict(row)
 
-    def latest_benchmark(self, route_id: str) -> dict[str, Any] | None:
+    def latest_benchmark(
+        self,
+        route_id: str,
+        *,
+        suite_version: str = _TEXT_BENCHMARK_SUITE,
+    ) -> dict[str, Any] | None:
+        """Return the latest run for one benchmark suite.
+
+        Text routing historically called this method without a suite selector, so
+        the default remains the text benchmark suite. Vision diagnostics must never
+        become the text cooldown/efficiency authority merely because they ran later.
+        """
         with psycopg.connect(self._dsn, row_factory=dict_row) as conn:
             row = conn.execute(
                 """
                 SELECT * FROM amodex_model_benchmark_runs
-                WHERE route_id=%s ORDER BY started_at DESC,benchmark_id DESC LIMIT 1
+                WHERE route_id=%s AND suite_version=%s
+                ORDER BY started_at DESC,benchmark_id DESC LIMIT 1
                 """,
-                (route_id,),
+                (route_id, suite_version),
             ).fetchone()
         return dict(row) if row else None
 

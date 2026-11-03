@@ -2,7 +2,8 @@
 
 Stage 1 measures whether a declared free route can actually inspect pixels. It
 persists benchmark cases plus ``vision_success_rate`` but deliberately leaves the
-route lifecycle unchanged. Promotion is a later, explicit policy step.
+route lifecycle and shared provider availability unchanged. Promotion is a later,
+explicit policy step.
 """
 
 from __future__ import annotations
@@ -24,13 +25,7 @@ from amodex.model_intelligence.vision_benchmarks import (
     vision_benchmark_cases,
 )
 from amodex.providers.base import ProviderFailure
-from amodex.providers.capabilities import (
-    BillingClass,
-    ModelCapability,
-    ModelMeasurement,
-    ProviderAvailability,
-    ProviderHealth,
-)
+from amodex.providers.capabilities import BillingClass, ModelCapability, ModelMeasurement
 from amodex.providers.registry import ProviderExecutionDenied
 
 
@@ -89,6 +84,25 @@ def _measurement_with_vision(
     )
 
 
+def _case_report(service: Any, benchmark_id: str) -> list[dict[str, Any]]:
+    """Return compact post-run proof suitable for the authenticated diagnostics UI."""
+    report: list[dict[str, Any]] = []
+    for row in service._repository.list_benchmark_cases(benchmark_id):
+        evidence = row.get("evidence") if isinstance(row.get("evidence"), dict) else {}
+        report.append(
+            {
+                "case_id": str(row.get("case_id") or ""),
+                "score": float(row.get("score") or 0.0),
+                "passed": bool(row.get("passed")),
+                "latency_ms": float(row.get("latency_ms") or 0.0),
+                "result_excerpt": row.get("result_excerpt"),
+                "field_results": evidence.get("field_results") if isinstance(evidence, dict) else None,
+                "provider_failure": evidence.get("provider_failure") if isinstance(evidence, dict) else None,
+            }
+        )
+    return report
+
+
 async def run_vision_benchmark(
     service: Any,
     *,
@@ -98,8 +112,9 @@ async def run_vision_benchmark(
     """Run five pixel-grounded probes and persist measurement evidence.
 
     ``service`` is the package's existing ``ModelIntelligenceService`` instance.
-    This runner intentionally uses the same repositories and execution registry,
-    so the existing FREE-route + FREE-credential-pool gate remains authoritative.
+    This runner uses the same FREE-route + FREE-credential-pool execution gate,
+    but visual diagnostics are capability-local: they must not downgrade or
+    promote the shared provider pool used by textual chat routing.
     """
 
     stored = service._repository.get_route(route_id)
@@ -154,6 +169,7 @@ async def run_vision_benchmark(
             "fixture_source": "stdlib-deterministic-png",
             "vision_measured": True,
             "automatic_promotion": False,
+            "shared_provider_availability_mutation": False,
             "case_count": len(cases),
         },
     )
@@ -261,6 +277,7 @@ async def run_vision_benchmark(
         error_code=error_code,
         error_message=error_message,
     )
+    case_report = _case_report(service, benchmark_id)
 
     if status == "UNKNOWN_OUTCOME":
         return {
@@ -269,6 +286,8 @@ async def run_vision_benchmark(
             "promotion_applied": False,
             "promotion_candidate": False,
             "pass_rate": pass_rate,
+            "cases": case_report,
+            "shared_provider_availability_mutated": False,
         }
 
     observed_at = service._utcnow()
@@ -284,24 +303,9 @@ async def run_vision_benchmark(
     )
     service._routing_repository.record_measurement(measurement)
 
-    quota_available = not (terminal_failure is not None and service._quota_failure(terminal_failure))
-    healthy = quota_available and aggregate >= VISION_PROMOTION_AGGREGATE and pass_rate >= VISION_PROMOTION_PASS_RATE
-    service._routing_repository.record_availability(
-        ProviderAvailability(
-            provider=candidate.provider,
-            credential_pool_id=candidate.credential_pool_id,
-            billing_class=BillingClass.FREE,
-            health=ProviderHealth.HEALTHY if healthy else ProviderHealth.LIMITED,
-            quota_available=quota_available,
-            free_capacity_ratio=1.0 if quota_available else 0.0,
-            observed_at=observed_at,
-            reason=(
-                f"vision benchmark {VISION_SUITE_VERSION}; aggregate={aggregate:.4f}; "
-                f"pass_rate={pass_rate:.4f}; promotion_not_applied"
-            ),
-        )
-    )
-
+    # Stage 1 intentionally does NOT write ProviderAvailability. Availability is
+    # keyed by provider + credential pool, so a visual diagnostic failure would
+    # otherwise throttle unrelated text routes sharing the same free Groq pool.
     promotion_candidate = (
         sample_count == len(cases)
         and aggregate >= VISION_PROMOTION_AGGREGATE
@@ -317,4 +321,6 @@ async def run_vision_benchmark(
         "promotion_candidate": promotion_candidate,
         "promotion_applied": False,
         "lifecycle_unchanged": stored["lifecycle"],
+        "cases": case_report,
+        "shared_provider_availability_mutated": False,
     }

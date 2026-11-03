@@ -6,6 +6,7 @@ enter this repository.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import psycopg
@@ -34,8 +35,32 @@ class PostgresRoutingRepository:
 
     def record_measurement(self, item: ModelMeasurement) -> str:
         measurement_id = new_uuid7()
-        with psycopg.connect(self._dsn) as conn:
+        with psycopg.connect(self._dsn, row_factory=dict_row) as conn:
             with conn.cursor() as cur:
+                # Capability benchmarks arrive independently. A newer textual
+                # measurement must not erase already measured visual evidence.
+                cur.execute(
+                    """
+                    SELECT measurement_id,sample_count,vision_success_rate
+                    FROM amodex_model_measurements
+                    WHERE provider=%s AND model=%s
+                    ORDER BY observed_at DESC,measurement_id DESC LIMIT 1
+                    """,
+                    (item.provider, item.model),
+                )
+                previous = cur.fetchone()
+                if (
+                    previous is not None
+                    and item.vision_success_rate is None
+                    and previous["vision_success_rate"] is not None
+                ):
+                    item = replace(
+                        item,
+                        sample_count=max(item.sample_count, int(previous["sample_count"])),
+                        vision_success_rate=float(previous["vision_success_rate"]),
+                        source=f"{item.source}|vision-preserved",
+                    )
+
                 cur.execute(
                     """
                     INSERT INTO amodex_model_measurements (
@@ -111,6 +136,7 @@ class PostgresRoutingRepository:
                     """
                     SELECT DISTINCT ON (provider, credential_pool_id) *
                     FROM amodex_provider_availability_observations
+                    WHERE reason NOT LIKE 'vision benchmark %'
                     ORDER BY provider, credential_pool_id, observed_at DESC, availability_id DESC
                     """
                 )
