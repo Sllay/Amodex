@@ -5,6 +5,7 @@ on:
     branches:
       - deploy/render-neon-cloudinary-v1
     paths:
+      - 'migrations/postbaseline/0007_retire_direct_mistral_route.sql'
       - 'src/amodex/api/streaming_upload_routes.py'
       - 'src/amodex/api/workspace_app.py'
       - 'src/amodex/api/model_intelligence_routes.py'
@@ -17,7 +18,7 @@ on:
       - 'src/amodex/providers/openai_compatible.py'
       - 'src/amodex/providers/vision_chat.py'
       - 'src/amodex/providers/groq.py'
-      - 'src/amodex/providers/mistral.py'
+      - 'src/amodex/providers/nvidia.py'
       - 'src/amodex/providers/registry.py'
       - 'src/amodex/storage/model_intelligence.py'
       - 'src/amodex/storage/routing.py'
@@ -78,7 +79,7 @@ jobs:
             src/amodex/providers/openai_compatible.py \
             src/amodex/providers/vision_chat.py \
             src/amodex/providers/groq.py \
-            src/amodex/providers/mistral.py \
+            src/amodex/providers/nvidia.py \
             src/amodex/providers/registry.py \
             src/amodex/storage/model_intelligence.py \
             src/amodex/storage/routing.py \
@@ -124,13 +125,16 @@ jobs:
           ! grep -q 'set_lifecycle' src/amodex/model_intelligence/vision_benchmark_runner.py
           ! grep -q 'record_availability' src/amodex/model_intelligence/vision_benchmark_runner.py
 
-      - name: Prove Groq and Mistral benchmark transport compatibility
+      - name: Prove Groq and NVIDIA Mistral benchmark transport compatibility
         shell: bash
         run: |
           set -euo pipefail
           .venv/bin/python -m pytest -q \
             tests/unit/test_provider_benchmark_transport.py \
             tests/integration/test_stage5_provider_adapters.py
+          grep -q 'https://integrate.api.nvidia.com/v1' src/amodex/providers/nvidia.py
+          grep -q 'reasoning_effort.*high' src/amodex/providers/nvidia.py
+          grep -q 'context_capacity_tokens=262_144' src/amodex/providers/catalog.py
 
       - name: Prove zero-cost policy was not bypassed
         shell: bash
@@ -138,8 +142,9 @@ jobs:
           set -euo pipefail
           grep -q 'BillingClass.FREE' src/amodex/model_intelligence/service.py
           grep -q 'BillingClass.FREE' src/amodex/model_intelligence/vision_benchmark_runner.py
-          grep -q 'mistral-free-primary' src/amodex/providers/registry.py
-          grep -q 'AMODEX_MISTRAL_BILLING_CLASS' src/amodex/providers/registry.py
+          grep -q 'nvidia-free-primary' src/amodex/providers/registry.py
+          grep -q 'AMODEX_NVIDIA_BILLING_CLASS' src/amodex/providers/registry.py
+          ! grep -q 'mistral-free-primary' src/amodex/providers/registry.py
           grep -q 'paid_fallback.*DENIED' src/amodex/model_intelligence/service.py
           grep -q 'unknown_billing.*DENIED' src/amodex/model_intelligence/service.py
           grep -q 'aggregate >= 0.75' src/amodex/model_intelligence/service.py
