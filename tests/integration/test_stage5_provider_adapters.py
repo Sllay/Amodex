@@ -7,7 +7,6 @@ from amodex.providers.base import ProviderFailure
 from amodex.providers.capabilities import BillingClass, ModelLifecycle
 from amodex.providers.catalog import stage5_declared_candidates
 from amodex.providers.groq import GroqProvider
-from amodex.providers.mistral import MistralProvider
 from amodex.providers.nvidia import NvidiaProvider
 from amodex.providers.openrouter import OpenRouterProvider
 from amodex.providers.registry import (
@@ -39,33 +38,28 @@ def test_openai_compatible_adapters_use_expected_endpoints(monkeypatch: pytest.M
     monkeypatch.setattr("amodex.providers.openai_compatible.httpx.post", fake_post)
 
     groq = GroqProvider(api_key="groq-secret")
-    mistral = MistralProvider(api_key="mistral-secret")
     openrouter = OpenRouterProvider(api_key="or-secret")
     nvidia = NvidiaProvider(api_key="nv-secret")
 
     groq_response = groq.generate(model="openai/gpt-oss-20b", prompt="hello", request_key="r1")
-    mistral_response = mistral.generate(model="mistral-large-4", prompt="hello", request_key="r2")
-    or_response = openrouter.generate(model="openrouter/free", prompt="hello", request_key="r3")
+    or_response = openrouter.generate(model="openrouter/free", prompt="hello", request_key="r2")
     nv_response = nvidia.generate(
-        model="mistralai/mistral-large-4-1t-a52b", prompt="hello", request_key="r4"
+        model="mistralai/mistral-large-4-1t-a52b", prompt="hello", request_key="r3"
     )
 
     assert groq_response.text == "structured-ok"
-    assert mistral_response.text == "structured-ok"
     assert or_response.text == "plain-openrouter"
     assert nv_response.text == "structured-ok"
     assert groq_response.usage.total_tokens == 6
     assert calls[0][0] == "https://api.groq.com/openai/v1/chat/completions"
-    assert calls[1][0] == "https://api.mistral.ai/v1/chat/completions"
-    assert calls[2][0] == "https://openrouter.ai/api/v1/chat/completions"
-    assert calls[3][0] == "https://integrate.api.nvidia.com/v1/chat/completions"
+    assert calls[1][0] == "https://openrouter.ai/api/v1/chat/completions"
+    assert calls[2][0] == "https://integrate.api.nvidia.com/v1/chat/completions"
     assert calls[0][1]["authorization"] == "Bearer groq-secret"
-    assert calls[1][1]["authorization"] == "Bearer mistral-secret"
-    assert calls[2][1]["X-Title"] == "Amodex"
+    assert calls[1][1]["X-Title"] == "Amodex"
+    assert calls[2][1]["authorization"] == "Bearer nv-secret"
     assert calls[0][2]["response_format"] == {"type": "json_object"}
-    assert calls[1][2]["response_format"] == {"type": "json_object"}
-    assert "response_format" not in calls[2][2]
-    assert calls[3][2]["response_format"] == {"type": "json_object"}
+    assert "response_format" not in calls[1][2]
+    assert calls[2][2]["response_format"] == {"type": "json_object"}
 
 
 def test_provider_errors_are_normalized(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -89,8 +83,8 @@ def test_provider_errors_are_normalized(monkeypatch: pytest.MonkeyPatch) -> None
 
     monkeypatch.setattr("amodex.providers.openai_compatible.httpx.post", payment)
     with pytest.raises(ProviderFailure) as raised_payment:
-        MistralProvider(api_key="key").generate(
-            model="mistral-large-4", prompt="hello", request_key="r"
+        NvidiaProvider(api_key="key").generate(
+            model="mistralai/mistral-large-4-1t-a52b", prompt="hello", request_key="r"
         )
     assert raised_payment.value.code == "PAYMENT_REQUIRED_OR_BALANCE"
 
@@ -141,30 +135,32 @@ def test_execution_registry_resolves_secrets_only_after_free_admission(monkeypat
         free_registry.client_for(candidate)
 
 
-def test_mistral_registry_requires_explicit_free_pool_and_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_nvidia_mistral_registry_requires_explicit_free_pool_and_secret(monkeypatch: pytest.MonkeyPatch) -> None:
     candidate = next(
-        item for item in stage5_declared_candidates() if item.provider == "mistral" and item.model == "mistral-large-4"
+        item
+        for item in stage5_declared_candidates()
+        if item.provider == "nvidia" and item.model == "mistralai/mistral-large-4-1t-a52b"
     )
-    monkeypatch.setenv("MISTRAL_TEST_SECRET", "mistral-secret")
+    monkeypatch.setenv("NVIDIA_TEST_SECRET", "nvidia-secret")
     free_registry = ProviderExecutionRegistry(
         (
             CredentialPoolConfig(
-                pool_id="mistral-free-primary",
-                provider="mistral",
+                pool_id="nvidia-free-primary",
+                provider="nvidia",
                 billing_class=BillingClass.FREE,
-                secret_env="MISTRAL_TEST_SECRET",
+                secret_env="NVIDIA_TEST_SECRET",
             ),
         )
     )
-    assert free_registry.client_for(candidate).provider_name == "mistral"
+    assert free_registry.client_for(candidate).provider_name == "nvidia"
 
     unknown_registry = ProviderExecutionRegistry(
         (
             CredentialPoolConfig(
-                pool_id="mistral-free-primary",
-                provider="mistral",
+                pool_id="nvidia-free-primary",
+                provider="nvidia",
                 billing_class=BillingClass.UNKNOWN,
-                secret_env="MISTRAL_TEST_SECRET",
+                secret_env="NVIDIA_TEST_SECRET",
             ),
         )
     )
