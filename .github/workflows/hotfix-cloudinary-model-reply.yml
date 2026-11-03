@@ -7,14 +7,20 @@ on:
     paths:
       - 'src/amodex/api/streaming_upload_routes.py'
       - 'src/amodex/api/workspace_app.py'
+      - 'src/amodex/api/model_intelligence_routes.py'
+      - 'src/amodex/api/model_intelligence_web.py'
       - 'src/amodex/model_intelligence/attachment_aware_service.py'
+      - 'src/amodex/model_intelligence/vision_benchmarks.py'
+      - 'src/amodex/model_intelligence/vision_benchmark_runner.py'
       - 'src/amodex/multimodal/cloudinary_rest_store.py'
+      - 'src/amodex/providers/catalog.py'
       - 'src/amodex/providers/openai_compatible.py'
       - 'src/amodex/providers/groq.py'
       - 'tests/unit/test_cloudinary_conflict_recovery.py'
       - 'tests/unit/test_provider_benchmark_transport.py'
       - 'tests/unit/test_cloudinary_media_store.py'
       - 'tests/unit/test_model_attachment_context.py'
+      - 'tests/unit/test_vision_benchmark.py'
       - 'tests/unit/test_performance_structural.py'
       - 'tests/integration/test_stage5_provider_adapters.py'
       - '.github/workflows/hotfix-cloudinary-model-reply.yml'
@@ -55,12 +61,18 @@ jobs:
           .venv/bin/python -m compileall -q \
             src/amodex/api/streaming_upload_routes.py \
             src/amodex/api/workspace_app.py \
+            src/amodex/api/model_intelligence_routes.py \
+            src/amodex/api/model_intelligence_web.py \
             src/amodex/model_intelligence/attachment_aware_service.py \
+            src/amodex/model_intelligence/vision_benchmarks.py \
+            src/amodex/model_intelligence/vision_benchmark_runner.py \
             src/amodex/multimodal/cloudinary_rest_store.py \
+            src/amodex/providers/catalog.py \
             src/amodex/providers/openai_compatible.py \
             src/amodex/providers/groq.py \
             tests/unit/test_cloudinary_conflict_recovery.py \
             tests/unit/test_model_attachment_context.py \
+            tests/unit/test_vision_benchmark.py \
             tests/unit/test_provider_benchmark_transport.py \
             tests/integration/test_stage5_provider_adapters.py
 
@@ -79,6 +91,14 @@ jobs:
           set -euo pipefail
           .venv/bin/python -m pytest -q tests/unit/test_model_attachment_context.py
 
+      - name: Prove pixel-grounded visual benchmark without auto-promotion
+        shell: bash
+        run: |
+          set -euo pipefail
+          .venv/bin/python -m pytest -q tests/unit/test_vision_benchmark.py
+          grep -q 'promotion_applied.*False' src/amodex/model_intelligence/vision_benchmark_runner.py
+          ! grep -q 'set_lifecycle' src/amodex/model_intelligence/vision_benchmark_runner.py
+
       - name: Prove Groq benchmark transport and provider compatibility
         shell: bash
         run: |
@@ -92,6 +112,7 @@ jobs:
         run: |
           set -euo pipefail
           grep -q 'BillingClass.FREE' src/amodex/model_intelligence/service.py
+          grep -q 'BillingClass.FREE' src/amodex/model_intelligence/vision_benchmark_runner.py
           grep -q 'paid_fallback.*DENIED' src/amodex/model_intelligence/service.py
           grep -q 'unknown_billing.*DENIED' src/amodex/model_intelligence/service.py
           grep -q 'aggregate >= 0.75' src/amodex/model_intelligence/service.py

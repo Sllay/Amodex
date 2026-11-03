@@ -54,6 +54,26 @@ def stage5_declared_candidates() -> tuple[ModelCandidate, ...]:
             provenance="Groq official docs snapshot 2026-11-01; eligibility still requires measured evidence and free credential classification",
         ),
         ModelCandidate(
+            provider="groq",
+            model="qwen/qwen3.8-27b",
+            credential_pool_id="groq-free-primary",
+            cost_class=BillingClass.FREE,
+            capabilities=frozenset(
+                {
+                    ModelCapability.TEXT,
+                    ModelCapability.STRUCTURED_OUTPUT,
+                    ModelCapability.TOOL_CALLING,
+                    ModelCapability.VISION,
+                }
+            ),
+            context_capacity_tokens=131_072,
+            lifecycle=ModelLifecycle.BENCHMARK_PENDING,
+            provenance=(
+                "Groq official vision docs snapshot 2026-11-02: Qwen 3.8 27B accepts image inputs, "
+                "JSON mode and tool use; route remains BENCHMARK_PENDING until real pixel-grounded evidence"
+            ),
+        ),
+        ModelCandidate(
             provider="openrouter",
             model="openrouter/free",
             credential_pool_id="openrouter-free-primary",
