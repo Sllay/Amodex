@@ -15,12 +15,16 @@ class ProviderFailure(Exception):
     Exceptions must allow Python/runtime machinery to assign traceback/context
     attributes. Freezing an Exception dataclass breaks that behavior on Python
     3.13 during timeout/error propagation.
+
+    ``http_status`` is deliberately limited to the upstream status code. It is
+    safe diagnostic metadata and never contains credentials, prompts or media.
     """
 
     code: str
     message: str
     retry_after_seconds: float | None = None
     ambiguous_outcome: bool = False
+    http_status: int | None = None
 
     def __str__(self) -> str:
         return f"{self.code}: {self.message}"
