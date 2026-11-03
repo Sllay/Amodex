@@ -1,11 +1,14 @@
 """NVIDIA NIM OpenAI-compatible provider adapter.
 
 The hosted NVIDIA API Catalog endpoint serves Mistral Large 4 as a multimodal
-OpenAI-compatible model. Text requests use the shared compatibility adapter;
-visual benchmark requests use the documented image+text chat payload.
+OpenAI-compatible model. The hosted endpoint reference does not expose an
+OpenAI ``response_format`` field for this recipe, so both text and image paths
+avoid forcing that field and validate their own output contracts client-side.
 """
 
 from __future__ import annotations
+
+from typing import Any
 
 from amodex.runtime.models import ProviderResponse
 from .openai_compatible import OpenAICompatibleProvider
@@ -21,8 +24,27 @@ class NvidiaProvider(OpenAICompatibleProvider):
             base_url="https://integrate.api.nvidia.com/v1",
             api_key=api_key,
             timeout_seconds=timeout_seconds,
-            require_json_object=True,
+            require_json_object=False,
+            extra_headers={"accept": "application/json"},
         )
+
+    def _provider_payload_overrides(
+        self,
+        *,
+        model: str,
+        request_key: str,
+        benchmark: bool,
+    ) -> dict[str, Any]:
+        if model == "mistralai/mistral-large-4-1t-a52b":
+            # Keep text probes bounded/repeatable without enabling the expensive
+            # visual reasoning profile. The hosted API reference explicitly
+            # supports `none` and `high` for this recipe.
+            return {
+                "seed": 7,
+                "reasoning_effort": "none" if benchmark else "high",
+                "max_tokens": 4096,
+            }
+        return {}
 
     def generate_with_image(
         self,
@@ -44,12 +66,6 @@ class NvidiaProvider(OpenAICompatibleProvider):
             media_type=media_type,
             request_key=request_key,
             image_url_shape="object",
-            # The hosted Mistral Large 4 reference/example documents the standard
-            # image_url payload, reasoning_effort=high and max_tokens=4096. Its
-            # model page advertises structured output, but the hosted endpoint
-            # reference does not expose response_format, so the benchmark relies
-            # on the explicit JSON-only prompt and validates/parses the result
-            # client-side instead of sending an undocumented field.
             use_response_format=False,
             extra_headers={"accept": "application/json"},
             payload_overrides={
