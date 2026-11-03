@@ -2,7 +2,7 @@
 
 The hosted NVIDIA API Catalog endpoint serves Mistral Large 4 as a multimodal
 OpenAI-compatible model. Text requests use the shared compatibility adapter;
-visual benchmark requests reuse the strict JSON image transport.
+visual benchmark requests use the documented image+text chat payload.
 """
 
 from __future__ import annotations
@@ -43,15 +43,21 @@ class NvidiaProvider(OpenAICompatibleProvider):
             image_data=image_data,
             media_type=media_type,
             request_key=request_key,
-            # NVIDIA's API Catalog sample uses the OpenAI object form:
-            # {"type":"image_url","image_url":{"url":"data:..."}}.
             image_url_shape="object",
-            # Mistral Large 4 always reasons on NVIDIA NIM; "none" is invalid.
-            # Keep a fixed seed for repeatability and enough output budget for
-            # reasoning plus the tiny JSON answer used by the benchmark.
+            # The hosted Mistral Large 4 reference/example documents the standard
+            # image_url payload, reasoning_effort=high and max_tokens=4096. Its
+            # model page advertises structured output, but the hosted endpoint
+            # reference does not expose response_format, so the benchmark relies
+            # on the explicit JSON-only prompt and validates/parses the result
+            # client-side instead of sending an undocumented field.
+            use_response_format=False,
+            extra_headers={"accept": "application/json"},
             payload_overrides={
                 "seed": 7,
                 "reasoning_effort": "high",
-                "max_tokens": 1024,
+                "max_tokens": 4096,
+                "top_p": 1,
+                "frequency_penalty": 0,
+                "presence_penalty": 0,
             },
         )
