@@ -11,7 +11,10 @@ from amodex.model_intelligence.models import (
     ReconcileRequest,
 )
 from amodex.model_intelligence.service import ModelIntelligenceService
-from amodex.model_intelligence.vision_benchmark_runner import run_vision_benchmark
+from amodex.model_intelligence.vision_benchmark_runner import (
+    run_vision_benchmark,
+    vision_benchmark_evidence,
+)
 from amodex.providers.capabilities import WorkerProfileKind
 
 
@@ -42,6 +45,14 @@ def build_model_intelligence_router(service: ModelIntelligenceService) -> APIRou
     @router.get("/model-intelligence/benchmarks")
     def benchmarks(route_id: str | None = None, limit: int = Query(default=100, ge=1, le=500)) -> tuple[dict, ...]:
         return service.benchmarks(route_id=route_id, limit=limit)
+
+    @router.get("/model-intelligence/benchmarks/vision/{benchmark_id}/evidence")
+    def saved_vision_benchmark_evidence(benchmark_id: str) -> dict:
+        """Read persisted visual case proof without making another provider request."""
+        try:
+            return vision_benchmark_evidence(service, benchmark_id=benchmark_id)
+        except ModelIntelligenceError as exc:
+            _raise(exc)
 
     @router.post("/model-intelligence/benchmarks/run")
     async def benchmark(payload: BenchmarkRunRequest) -> dict:
