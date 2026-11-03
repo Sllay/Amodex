@@ -130,10 +130,25 @@ class _FakeBenchmarkRepository:
         assert route_id == self.candidate.route_id
         assert suite_version == VISION_SUITE_VERSION
         assert provenance["automatic_promotion"] is False
+        assert provenance["shared_provider_availability_mutation"] is False
         return "vision-benchmark-id"
 
     def record_benchmark_case(self, **kwargs) -> None:
         self.cases.append(kwargs)
+
+    def list_benchmark_cases(self, benchmark_id: str):
+        assert benchmark_id == "vision-benchmark-id"
+        return tuple(
+            {
+                "case_id": item["case_id"],
+                "score": item["score"],
+                "passed": item["passed"],
+                "latency_ms": item["latency_ms"],
+                "result_excerpt": item["result_excerpt"],
+                "evidence": item["evidence"],
+            }
+            for item in self.cases
+        )
 
     def finish_benchmark(self, **kwargs):
         self.finished = dict(kwargs)
@@ -204,7 +219,7 @@ class _FakeService:
         return False
 
 
-def test_vision_runner_measures_all_cases_without_promoting_lifecycle() -> None:
+def test_vision_runner_measures_all_cases_without_promoting_or_throttling_text() -> None:
     candidate = next(item for item in stage5_declared_candidates() if item.model == "qwen/qwen3.8-27b")
     service = _FakeService(candidate)
     result = asyncio.run(run_vision_benchmark(service, route_id=candidate.route_id))
@@ -214,8 +229,13 @@ def test_vision_runner_measures_all_cases_without_promoting_lifecycle() -> None:
     assert result["pass_rate"] == 1.0
     assert result["promotion_candidate"] is True
     assert result["promotion_applied"] is False
+    assert result["shared_provider_availability_mutated"] is False
     assert result["lifecycle_unchanged"] == ModelLifecycle.BENCHMARK_PENDING.value
+    assert len(result["cases"]) == 5
+    assert all(item["passed"] is True for item in result["cases"])
+    assert all(item["result_excerpt"] for item in result["cases"])
     assert len(service._repository.cases) == 5
     assert all(item["capability"] == ModelCapability.VISION.value for item in service._repository.cases)
     assert len(service._routing_repository.measurements) == 1
     assert service._routing_repository.measurements[0].vision_success_rate == 1.0
+    assert service._routing_repository.availability == []
