@@ -40,7 +40,7 @@ def _safe_excerpt(value: object, secret: str, limit: int = 250) -> str | None:
     if not isinstance(value, str) or not value.strip():
         return None
     cleaned = value.replace(secret, "[REDACTED]") if secret else value
-    cleaned = re.sub(r"(?i)bearer\\s+[a-z0-9_\\-.]+", "Bearer [REDACTED]", cleaned)
+    cleaned = re.sub(r"(?i)bearer\s+\S+", "Bearer [REDACTED]", cleaned)
     cleaned = re.sub(r"nvapi-[a-zA-Z0-9_-]+", "[REDACTED]", cleaned)
     return cleaned.replace("\\r", " ").replace("\\n", " ")[:limit]
 
