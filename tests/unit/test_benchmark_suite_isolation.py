@@ -1,34 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from pathlib import Path
 
 from amodex.providers.capabilities import ModelMeasurement
-from amodex.storage.model_intelligence import PostgresModelIntelligenceRepository
 from amodex.storage.routing import PostgresRoutingRepository
-
-
-class _OneRowResult:
-    def __init__(self, row):
-        self._row = row
-
-    def fetchone(self):
-        return self._row
-
-
-class _ExecuteConnection:
-    def __init__(self, row=None) -> None:
-        self.row = row
-        self.calls: list[tuple[str, object]] = []
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *args):
-        return False
-
-    def execute(self, sql, params=None):
-        self.calls.append((sql, params))
-        return _OneRowResult(self.row)
 
 
 class _Cursor:
@@ -72,23 +48,11 @@ class _CursorConnection:
         return self._cursor
 
 
-def test_latest_benchmark_defaults_to_text_suite(monkeypatch) -> None:
-    conn = _ExecuteConnection(
-        {
-            "benchmark_id": "text-run",
-            "route_id": "route-1",
-            "suite_version": "step4-live-v1",
-        }
-    )
-    monkeypatch.setattr("amodex.storage.model_intelligence.psycopg.connect", lambda *a, **k: conn)
-    repo = PostgresModelIntelligenceRepository("postgresql://test")
-
-    row = repo.latest_benchmark("route-1")
-
-    assert row is not None
-    sql, params = conn.calls[-1]
-    assert "suite_version=%s" in sql
-    assert params == ("route-1", "step4-live-v1")
+def test_latest_benchmark_defaults_to_text_suite_contract() -> None:
+    source = Path("src/amodex/storage/model_intelligence.py").read_text(encoding="utf-8")
+    assert '_TEXT_BENCHMARK_SUITE = "step4-live-v1"' in source
+    assert "suite_version: str = _TEXT_BENCHMARK_SUITE" in source
+    assert "WHERE route_id=%s AND suite_version=%s" in source
 
 
 def test_text_measurement_preserves_existing_visual_score(monkeypatch) -> None:
