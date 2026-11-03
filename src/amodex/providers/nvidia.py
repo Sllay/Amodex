@@ -36,12 +36,12 @@ class NvidiaProvider(OpenAICompatibleProvider):
         benchmark: bool,
     ) -> dict[str, Any]:
         if model == "mistralai/mistral-large-4-1t-a52b":
-            # Keep text probes bounded/repeatable without enabling the expensive
-            # visual reasoning profile. The hosted API reference explicitly
-            # supports `none` and `high` for this recipe.
+            # Use the same NVIDIA-hosted reasoning profile that passed a live vision
+            # probe. In practice, text benchmarks using `none` returned HTTP 400
+            # even though the hosted API reference lists that value.
             return {
                 "seed": 7,
-                "reasoning_effort": "none" if benchmark else "high",
+                "reasoning_effort": "high",
                 "max_tokens": 4096,
             }
         return {}

@@ -109,7 +109,7 @@ def test_nvidia_text_transport_uses_documented_hosted_shape(monkeypatch) -> None
     assert headers["accept"] == "application/json"
 
 
-def test_nvidia_text_benchmark_disables_reasoning_but_keeps_repeatability(monkeypatch) -> None:
+def test_nvidia_text_benchmark_uses_supported_reasoning_and_keeps_repeatability(monkeypatch) -> None:
     calls: list[dict] = []
 
     def fake_post(url: str, *, headers: dict, json: dict, timeout: float):
@@ -123,6 +123,7 @@ def test_nvidia_text_benchmark_disables_reasoning_but_keeps_repeatability(monkey
         request_key="benchmark:nvidia:text",
     )
     assert response.text == "AMODEX_TEXT_OK"
-    assert calls[0]["reasoning_effort"] == "none"
+    assert calls[0]["reasoning_effort"] == "high"
+    assert calls[0]["max_tokens"] == 4096
     assert calls[0]["seed"] == 7
     assert "response_format" not in calls[0]

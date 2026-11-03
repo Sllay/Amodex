@@ -88,8 +88,8 @@ def test_live_text_probe_is_minimal_documented_nvidia_request(monkeypatch):
     assert received["url"] == URL
     assert received["headers"]["Authorization"] == "Bearer nvapi-super-secret-test-value"
     assert received["body"]["model"] == MODEL
-    assert received["body"]["reasoning_effort"] == "none"
-    assert received["body"]["max_tokens"] == 256
+    assert received["body"]["reasoning_effort"] == "high"
+    assert received["body"]["max_tokens"] == 4096
     assert "response_format" not in received["body"]
     assert isinstance(received["body"]["messages"][0]["content"], str)
     assert "nvapi-super-secret" not in json.dumps(result)
