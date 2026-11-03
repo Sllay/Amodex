@@ -6,12 +6,15 @@ on:
       - deploy/render-neon-cloudinary-v1
     paths:
       - 'src/amodex/api/streaming_upload_routes.py'
+      - 'src/amodex/api/workspace_app.py'
+      - 'src/amodex/model_intelligence/attachment_aware_service.py'
       - 'src/amodex/multimodal/cloudinary_rest_store.py'
       - 'src/amodex/providers/openai_compatible.py'
       - 'src/amodex/providers/groq.py'
       - 'tests/unit/test_cloudinary_conflict_recovery.py'
       - 'tests/unit/test_provider_benchmark_transport.py'
       - 'tests/unit/test_cloudinary_media_store.py'
+      - 'tests/unit/test_model_attachment_context.py'
       - 'tests/unit/test_performance_structural.py'
       - 'tests/integration/test_stage5_provider_adapters.py'
       - '.github/workflows/hotfix-cloudinary-model-reply.yml'
@@ -51,10 +54,13 @@ jobs:
           set -euo pipefail
           .venv/bin/python -m compileall -q \
             src/amodex/api/streaming_upload_routes.py \
+            src/amodex/api/workspace_app.py \
+            src/amodex/model_intelligence/attachment_aware_service.py \
             src/amodex/multimodal/cloudinary_rest_store.py \
             src/amodex/providers/openai_compatible.py \
             src/amodex/providers/groq.py \
             tests/unit/test_cloudinary_conflict_recovery.py \
+            tests/unit/test_model_attachment_context.py \
             tests/unit/test_provider_benchmark_transport.py \
             tests/integration/test_stage5_provider_adapters.py
 
@@ -66,6 +72,12 @@ jobs:
             tests/unit/test_cloudinary_conflict_recovery.py \
             tests/unit/test_cloudinary_media_store.py \
             tests/unit/test_performance_structural.py
+
+      - name: Prove routed attachment context and response language
+        shell: bash
+        run: |
+          set -euo pipefail
+          .venv/bin/python -m pytest -q tests/unit/test_model_attachment_context.py
 
       - name: Prove Groq benchmark transport and provider compatibility
         shell: bash
