@@ -10,7 +10,7 @@ _MULTIMODAL_CSS = r'''
 
 _MULTIMODAL_SCRIPT = r'''
 <script id="amodex-multimodal-feature">
-const mm={status:null,pending:[],links:[],operations:[],recorder:null,chunks:[],stream:null};
+const mm={status:null,pending:[],links:[],operations:[],recorder:null,chunks:[],stream:null,uploads:new Map(),attachmentKeys:new Map()};
 function mmQueueFeature(register){if(window.AmodexApp)return register(window.AmodexApp);(window.__amodexFeatureQueue||(window.__amodexFeatureQueue=[])).push(register)}
 async function mmApi(path,opt={}){return window.AmodexApp?AmodexApp.api(path,opt):api(path,opt)}
 function mmReport(e){return window.AmodexApp?AmodexApp.error(e):err(e)}
@@ -23,12 +23,33 @@ async function mmBoot(){
 }
 function mmPendingHtml(a){const icon=a.media_type.startsWith('image/')?'🖼️':a.media_type.startsWith('audio/')?'🎙️':'📎';return `<div class="mm-chip">${icon}<span>${esc(a.name)}</span><button onclick="mmRemovePending('${esc(a.attachment_id)}')">✕</button></div>`}
 function mmRenderPending(){const tray=document.getElementById('mmTray');if(tray)tray.innerHTML=mm.pending.map(mmPendingHtml).join('')}
+function mmPendingHas(id){return mm.pending.some(a=>a.attachment_id===id)}
+function mmFileKey(file){return [file.name||'upload.dat',file.size||0,file.type||'application/octet-stream',file.lastModified||0].join('\u0000')}
+function mmRememberPending(attachment,key){if(!mmPendingHas(attachment.attachment_id))mm.pending.push(attachment);if(key)mm.attachmentKeys.set(attachment.attachment_id,key);mmRenderPending()}
 function mmRemovePending(id){mm.pending=mm.pending.filter(a=>a.attachment_id!==id);mmRenderPending()}
+function mmResetUploadState(){mm.pending=[];mm.uploads.clear();mm.attachmentKeys.clear();mmRenderPending()}
 async function mmChooseFiles(){if(!state.chat)return mmReport(new Error('Selecione um chat'));document.getElementById('mmFileInput').click()}
 async function mmFilesSelected(input){for(const file of [...input.files]){try{await mmUploadFile(file)}catch(e){mmReport(e)}}input.value=''}
 async function mmUploadFile(file){
-  if(!state.chat)throw new Error('Selecione um chat');const max=mm.status?.max_upload_bytes||26214400;if(file.size>max)throw new Error(`Arquivo maior que o limite (${Math.round(max/1024/1024)} MB)`);
-  const r=await fetch(`/v1/chats/${state.chat.chat_id}/uploads`,{method:'POST',headers:{'content-type':file.type||'application/octet-stream','x-file-name':encodeURIComponent(file.name||'upload.bin')},body:file});let body=null;try{body=await r.json()}catch{}if(!r.ok){const d=body?.detail;throw new Error(d?.message||d?.code||r.statusText)}mm.pending.push(body);mmRenderPending();return body
+  if(!state.chat)throw new Error('Selecione um chat');
+  if(!mm.status)await mmBoot();
+  const max=mm.status?.max_upload_bytes||10485760;
+  if(file.size>max)throw new Error(`Arquivo maior que o limite (${Math.round(max/1024/1024)} MB)`);
+  const key=mmFileKey(file);
+  const existing=mm.uploads.get(key);
+  if(existing){
+    if(existing.state==='uploading'&&existing.promise)return existing.promise;
+    if(existing.attachment){existing.state='uploaded';mmRememberPending(existing.attachment,key);return existing.attachment}
+  }
+  const entry={state:'uploading',attachment:null,promise:null};
+  const promise=(async()=>{
+    const r=await fetch(`/v1/chats/${state.chat.chat_id}/uploads`,{method:'POST',headers:{'content-type':file.type||'application/octet-stream','x-file-name':encodeURIComponent(file.name||'upload.dat')},body:file});
+    let body=null;try{body=await r.json()}catch{}
+    if(!r.ok){const d=body?.detail;throw new Error(d?.message||d?.code||r.statusText)}
+    entry.state='uploaded';entry.attachment=body;mmRememberPending(body,key);return body
+  })();
+  entry.promise=promise;mm.uploads.set(key,entry);
+  try{return await promise}catch(e){if(mm.uploads.get(key)===entry)mm.uploads.delete(key);throw e}finally{entry.promise=null}
 }
 async function mmRefreshChat(){
   if(!state.chat){mm.links=[];mm.operations=[];return}
@@ -48,8 +69,8 @@ const mmNativeToggleMic=mmToggleMic;
 
 mmQueueFeature(app=>{
   app.hooks.register('beforeSend',async ctx=>{const pending=[...mm.pending];if(!ctx.text&&pending.length){ctx.content='Arquivo anexado.';ctx.allowEmpty=true}ctx.featureData.multimodal={attachmentIds:pending.map(a=>a.attachment_id)}});
-  app.hooks.register('afterOwnerSaved',async ctx=>{const ids=ctx.featureData.multimodal?.attachmentIds||[];if(!ids.length)return;await app.api(`/v1/messages/${ctx.owner.message_id}/attachments`,{method:'POST',body:JSON.stringify({attachment_ids:ids})});const used=new Set(ids);mm.pending=mm.pending.filter(a=>!used.has(a.attachment_id));mmRenderPending();await mmRefreshChat()});
-  app.hooks.register('afterChatSelected',async()=>{mm.pending=[];mmRenderPending();await mmRefreshChat();renderMessages()});
+  app.hooks.register('afterOwnerSaved',async ctx=>{const ids=ctx.featureData.multimodal?.attachmentIds||[];if(!ids.length)return;await app.api(`/v1/messages/${ctx.owner.message_id}/attachments`,{method:'POST',body:JSON.stringify({attachment_ids:ids})});const used=new Set(ids);mm.pending=mm.pending.filter(a=>!used.has(a.attachment_id));for(const id of used){const key=mm.attachmentKeys.get(id);const entry=key?mm.uploads.get(key):null;if(entry)entry.state='linked'}mmRenderPending();await mmRefreshChat()});
+  app.hooks.register('afterChatSelected',async()=>{mmResetUploadState();await mmRefreshChat();renderMessages()});
   app.hooks.register('afterRenderMessages',()=>mmDecorateMessages());
   app.hooks.register('toggleMic',async()=>{if(!state.chat){app.notice('Abra um chat antes de usar o microfone.','warn');return}if(!mm.status)await mmBoot();if(!mm.status?.stt?.ready){const reason=mm.status?.stt?.reason||'STT_NOT_CONFIGURED';app.notice(`🎤 Transcrição indisponível: ${reason}. Configure o STT gratuito no Render.`,'warn');return}const input=document.getElementById('composer');const stopping=Boolean(mm.recorder&&mm.recorder.state==='recording');if(!stopping&&input){input.readOnly=true;input.placeholder='Gravando… toque 🎤 para finalizar';app.notice('Gravando áudio — toque no microfone para finalizar.')}try{await mmNativeToggleMic()}catch(e){app.error(e)}if(stopping&&input){input.readOnly=false;input.placeholder='Digite aqui…';input.focus()}})
 });
