@@ -51,7 +51,7 @@ self.addEventListener('fetch',event=>{
   if(request.mode==='navigate'){
     event.respondWith((async()=>{
       try{
-        const response=await fetch(request);
+        const response=await fetch(request,{cache:'no-store'});
         if(response.ok&&url.pathname==='/'){
           const cache=await caches.open(SHELL_CACHE);
           await cache.put('/',response.clone());
@@ -104,6 +104,13 @@ def install_private_cache_boundary(app: FastAPI) -> None:
         path = request.url.path
         if path == "/":
             response.headers["Cache-Control"] = "private, no-cache, max-age=0, must-revalidate"
+            response.headers["Vary"] = "Cookie"
+        elif path == "/models":
+            # The benchmark dashboard is operational/diagnostic state. Serving a
+            # cached copy can resurrect retired route IDs and make an old client
+            # submit requests against obsolete provider adapters.
+            response.headers["Cache-Control"] = "private, no-store, max-age=0, must-revalidate"
+            response.headers["Pragma"] = "no-cache"
             response.headers["Vary"] = "Cookie"
         elif path == "/auth/logout":
             response.headers["Cache-Control"] = "no-store"
