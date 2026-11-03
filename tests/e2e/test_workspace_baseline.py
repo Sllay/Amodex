@@ -108,7 +108,10 @@ def test_tool_drawer_and_disabled_stt_feedback(logged_in_page: Page) -> None:
 def test_large_attachment_upload_reaches_streaming_pipeline(logged_in_page: Page) -> None:
     page = logged_in_page
     create_global_chat(page, unique("E2E-Upload"))
-    filename = unique("streaming") + ".bin"
+    # .bin is deliberately blocked by the production raw-upload security policy.
+    # Use a neutral allowed extension so this test proves the bounded streaming
+    # path rather than weakening the blocked-extension contract just for CI.
+    filename = unique("streaming") + ".dat"
     payload = (b"amodex-stream-boundary-" * 100_000) + b"tail"
     assert len(payload) > 2 * 1024 * 1024
 
