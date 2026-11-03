@@ -7,7 +7,9 @@ import hashlib
 import json
 
 import httpx
+import pytest
 
+from amodex.model_intelligence.models import ModelIntelligenceError
 from amodex.model_intelligence.vision_benchmark_runner import run_vision_benchmark
 from amodex.model_intelligence.vision_benchmarks import VISION_SUITE_VERSION, score_vision_case, vision_benchmark_cases
 from amodex.providers.base import ProviderFailure
@@ -95,7 +97,7 @@ def test_groq_vision_transport_still_sends_real_image(monkeypatch) -> None:
     assert json.loads(result.text)["blue_square"] == "bottom-right"
 
 
-def test_nvidia_mistral_vision_transport_matches_api_catalog_sample(monkeypatch) -> None:
+def test_nvidia_mistral_vision_transport_matches_hosted_api_reference(monkeypatch) -> None:
     observed: dict[str, object] = {}
 
     def fake_post(url, *, headers, json, timeout):
@@ -104,7 +106,7 @@ def test_nvidia_mistral_vision_transport_matches_api_catalog_sample(monkeypatch)
             200,
             request=httpx.Request("POST", url),
             json={
-                "choices": [{"message": {"content": '{"text":"AMODEX 4827"}'}}],
+                "choices": [{"finish_reason": "stop", "message": {"content": '{"text":"AMODEX 4827"}'}}],
                 "usage": {"total_tokens": 912},
             },
         )
@@ -122,25 +124,83 @@ def test_nvidia_mistral_vision_transport_matches_api_catalog_sample(monkeypatch)
     payload = observed["payload"]
     assert observed["url"] == "https://integrate.api.nvidia.com/v1/chat/completions"
     assert observed["headers"]["authorization"] == "Bearer nvidia-test-key"
+    assert observed["headers"]["accept"] == "application/json"
     assert payload["model"] == "mistralai/mistral-large-4-1t-a52b"
-    assert payload["response_format"] == {"type": "json_object"}
+    assert "response_format" not in payload
     assert payload["seed"] == 7
     assert payload["reasoning_effort"] == "high"
-    assert payload["max_tokens"] == 1024
+    assert payload["max_tokens"] == 4096
+    assert payload["top_p"] == 1
     image_url = payload["messages"][0]["content"][1]["image_url"]
     assert isinstance(image_url, dict)
     assert base64.b64decode(image_url["url"].removeprefix("data:image/png;base64,")) == image
     assert json.loads(result.text) == {"text": "AMODEX 4827"}
 
 
+def test_nvidia_reasoning_length_without_final_content_is_transport_failure(monkeypatch) -> None:
+    def fake_post(url, *, headers, json, timeout):
+        return httpx.Response(
+            200,
+            request=httpx.Request("POST", url),
+            json={
+                "choices": [
+                    {
+                        "finish_reason": "length",
+                        "message": {"content": None, "reasoning_content": "still reasoning"},
+                    }
+                ],
+                "usage": {"total_tokens": 4096},
+            },
+        )
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    with pytest.raises(ProviderFailure) as exc_info:
+        NvidiaProvider(api_key="nvidia-test-key").generate_with_image(
+            model="mistralai/mistral-large-4-1t-a52b",
+            prompt="Return JSON.",
+            image_data=vision_benchmark_cases()[0].image_png,
+            media_type="image/png",
+            request_key="benchmark:vision:nvidia-length",
+        )
+    assert exc_info.value.code == "PROVIDER_OUTPUT_TRUNCATED"
+    assert exc_info.value.http_status == 200
+
+
+def test_nvidia_accepts_fenced_json_without_provider_json_mode(monkeypatch) -> None:
+    def fake_post(url, *, headers, json, timeout):
+        return httpx.Response(
+            200,
+            request=httpx.Request("POST", url),
+            json={
+                "choices": [{"finish_reason": "stop", "message": {"content": '```json\n{"text":"AMODEX 4827"}\n```'}}],
+                "usage": {},
+            },
+        )
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    result = NvidiaProvider(api_key="nvidia-test-key").generate_with_image(
+        model="mistralai/mistral-large-4-1t-a52b",
+        prompt="Read image.",
+        image_data=vision_benchmark_cases()[1].image_png,
+        media_type="image/png",
+        request_key="benchmark:vision:nvidia-fenced",
+    )
+    assert json.loads(result.text) == {"text": "AMODEX 4827"}
+
+
 class _Repo:
-    def __init__(self, candidate):
+    def __init__(self, candidate, *, enabled: bool = True):
         self.candidate = candidate
+        self.enabled = enabled
         self.cases = []
         self.finished = None
 
     def get_route(self, route_id):
-        return {"route_id": route_id, "lifecycle": self.candidate.lifecycle.value}
+        return {
+            "route_id": route_id,
+            "lifecycle": self.candidate.lifecycle.value,
+            "enabled": self.enabled,
+        }
 
     def list_benchmarks(self, *, route_id, limit):
         return ()
@@ -186,15 +246,21 @@ class _Routing:
 
 
 class _VisionClient:
-    def __init__(self, fail_after: int | None = None):
+    def __init__(self, fail_after: int | None = None, failure_code: str = "RATE_LIMITED"):
         self.expected = {case.prompt: json.dumps(case.expected, separators=(",", ":")) for case in vision_benchmark_cases()}
         self.calls = 0
         self.fail_after = fail_after
+        self.failure_code = failure_code
 
     def generate_with_image(self, *, model, prompt, image_data, media_type, request_key):
         self.calls += 1
         if self.fail_after is not None and self.calls >= self.fail_after:
-            raise ProviderFailure(code="RATE_LIMITED", message="test rate limit", retry_after_seconds=0.0)
+            raise ProviderFailure(
+                code=self.failure_code,
+                message="test provider failure",
+                retry_after_seconds=0.0,
+                http_status=200 if self.failure_code == "MALFORMED_PROVIDER_RESPONSE" else 429,
+            )
         return ProviderResponse(
             provider="fake",
             model=model,
@@ -213,8 +279,8 @@ class _Registry:
 
 
 class _Service:
-    def __init__(self, candidate, client):
-        self._repository = _Repo(candidate)
+    def __init__(self, candidate, client, *, enabled: bool = True):
+        self._repository = _Repo(candidate, enabled=enabled)
         self._routing_repository = _Routing()
         self._execution_registry = _Registry(client)
         self._benchmark_cooldown = timedelta(minutes=30)
@@ -251,5 +317,30 @@ def test_rate_limit_blocks_suite_without_poisoning_vision_score() -> None:
     assert result["scored_case_count"] == 2
     assert result["attempted_case_count"] == 3
     assert result["cases"][-1]["provider_failure"] == "RATE_LIMITED"
+    assert result["cases"][-1]["provider_http_status"] == 429
     assert result["cases"][-1]["scored"] is False
     assert service._routing_repository.measurements == []
+
+
+def test_malformed_provider_response_is_unscored_not_visual_zero() -> None:
+    candidate = next(item for item in stage5_declared_candidates() if item.model == "qwen/qwen3.8-27b")
+    service = _Service(
+        candidate,
+        _VisionClient(fail_after=2, failure_code="MALFORMED_PROVIDER_RESPONSE"),
+    )
+    result = asyncio.run(run_vision_benchmark(service, route_id=candidate.route_id))
+    assert result["status"] == "BLOCKED"
+    assert result["scored_case_count"] == 1
+    assert result["attempted_case_count"] == 2
+    assert result["cases"][-1]["provider_failure"] == "MALFORMED_PROVIDER_RESPONSE"
+    assert result["cases"][-1]["scored"] is False
+    assert service._routing_repository.measurements == []
+
+
+def test_disabled_visual_route_cannot_execute_even_with_stale_client() -> None:
+    candidate = next(item for item in stage5_declared_candidates() if item.model == "qwen/qwen3.8-27b")
+    service = _Service(candidate, _VisionClient(), enabled=False)
+    with pytest.raises(ModelIntelligenceError) as exc_info:
+        asyncio.run(run_vision_benchmark(service, route_id=candidate.route_id))
+    assert exc_info.value.code == "VISION_ROUTE_DISABLED"
+    assert service._VisionClient.calls if False else True

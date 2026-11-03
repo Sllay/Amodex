@@ -1,11 +1,14 @@
 """NVIDIA NIM OpenAI-compatible provider adapter.
 
 The hosted NVIDIA API Catalog endpoint serves Mistral Large 4 as a multimodal
-OpenAI-compatible model. Text requests use the shared compatibility adapter;
-visual benchmark requests reuse the strict JSON image transport.
+OpenAI-compatible model. The hosted endpoint reference does not expose an
+OpenAI ``response_format`` field for this recipe, so both text and image paths
+avoid forcing that field and validate their own output contracts client-side.
 """
 
 from __future__ import annotations
+
+from typing import Any
 
 from amodex.runtime.models import ProviderResponse
 from .openai_compatible import OpenAICompatibleProvider
@@ -21,8 +24,27 @@ class NvidiaProvider(OpenAICompatibleProvider):
             base_url="https://integrate.api.nvidia.com/v1",
             api_key=api_key,
             timeout_seconds=timeout_seconds,
-            require_json_object=True,
+            require_json_object=False,
+            extra_headers={"accept": "application/json"},
         )
+
+    def _provider_payload_overrides(
+        self,
+        *,
+        model: str,
+        request_key: str,
+        benchmark: bool,
+    ) -> dict[str, Any]:
+        if model == "mistralai/mistral-large-4-1t-a52b":
+            # Keep text probes bounded/repeatable without enabling the expensive
+            # visual reasoning profile. The hosted API reference explicitly
+            # supports `none` and `high` for this recipe.
+            return {
+                "seed": 7,
+                "reasoning_effort": "none" if benchmark else "high",
+                "max_tokens": 4096,
+            }
+        return {}
 
     def generate_with_image(
         self,
@@ -43,15 +65,15 @@ class NvidiaProvider(OpenAICompatibleProvider):
             image_data=image_data,
             media_type=media_type,
             request_key=request_key,
-            # NVIDIA's API Catalog sample uses the OpenAI object form:
-            # {"type":"image_url","image_url":{"url":"data:..."}}.
             image_url_shape="object",
-            # Mistral Large 4 always reasons on NVIDIA NIM; "none" is invalid.
-            # Keep a fixed seed for repeatability and enough output budget for
-            # reasoning plus the tiny JSON answer used by the benchmark.
+            use_response_format=False,
+            extra_headers={"accept": "application/json"},
             payload_overrides={
                 "seed": 7,
                 "reasoning_effort": "high",
-                "max_tokens": 1024,
+                "max_tokens": 4096,
+                "top_p": 1,
+                "frequency_penalty": 0,
+                "presence_penalty": 0,
             },
         )

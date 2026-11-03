@@ -1,15 +1,15 @@
 """Live vision benchmark execution without automatic lifecycle promotion.
 
 The benchmark measures whether a declared free route can actually inspect pixels.
-Provider transport failures (rate limits, quota windows, timeouts, auth/config)
-never count as visual mistakes: incomplete suites are persisted as BLOCKED evidence
-and do not write ``vision_success_rate``. Only a fully scored suite can create a
-visual measurement or become a promotion candidate.
+Provider transport/configuration failures never count as visual mistakes: incomplete
+suites are persisted as BLOCKED evidence and do not write ``vision_success_rate``.
+Only a fully scored suite can create a visual measurement or promotion candidate.
 """
 
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import replace
 from datetime import datetime, timedelta
 from statistics import median
@@ -30,6 +30,7 @@ from amodex.providers.capabilities import BillingClass, ModelCapability, ModelMe
 from amodex.providers.registry import ProviderExecutionDenied
 
 
+_logger = logging.getLogger("amodex.model_intelligence.vision_benchmark")
 _RETRYABLE_FAILURE_CODES = frozenset(
     {
         "RATE_LIMITED",
@@ -39,9 +40,11 @@ _RETRYABLE_FAILURE_CODES = frozenset(
         "PROVIDER_INTERNAL",
         "REQUEST_TIMEOUT",
         "NETWORK_TRANSIENT",
+        "PROVIDER_OUTPUT_TRUNCATED",
     }
 )
-_SCORABLE_PROVIDER_FAILURE_CODES = frozenset({"MALFORMED_PROVIDER_RESPONSE"})
+# Provider/transport failures are diagnostic failures, not visual mistakes. A case
+# is scored only after a valid JSON answer reaches the pixel-grounded scorer.
 _MAX_PROVIDER_ATTEMPTS_PER_CASE = 2
 _MAX_INLINE_RETRY_WAIT_SECONDS = 20.0
 _DEFAULT_RETRY_WAIT_SECONDS = 1.0
@@ -114,7 +117,6 @@ def _retry_wait_seconds(exc: ProviderFailure, *, attempt: int) -> float:
 
 
 def _case_report(service: Any, benchmark_id: str) -> list[dict[str, Any]]:
-    """Return compact post-run proof suitable for the authenticated diagnostics UI."""
     report: list[dict[str, Any]] = []
     for row in service._repository.list_benchmark_cases(benchmark_id):
         evidence = row.get("evidence") if isinstance(row.get("evidence"), dict) else {}
@@ -132,9 +134,8 @@ def _case_report(service: Any, benchmark_id: str) -> list[dict[str, Any]]:
                 "result_excerpt": row.get("result_excerpt"),
                 "field_results": evidence.get("field_results") if isinstance(evidence, dict) else None,
                 "provider_failure": provider_failure,
-                "retry_after_seconds": (
-                    evidence.get("retry_after_seconds") if isinstance(evidence, dict) else None
-                ),
+                "provider_http_status": evidence.get("provider_http_status") if isinstance(evidence, dict) else None,
+                "retry_after_seconds": evidence.get("retry_after_seconds") if isinstance(evidence, dict) else None,
             }
         )
     return report
@@ -146,6 +147,7 @@ def _suite_complete(case_report: list[dict[str, Any]], expected_count: int) -> b
 
 def vision_benchmark_evidence(service: Any, *, benchmark_id: str) -> dict[str, Any]:
     """Read persisted visual proof without making another provider call."""
+
     run = next(
         (
             row
@@ -161,6 +163,9 @@ def vision_benchmark_evidence(service: Any, *, benchmark_id: str) -> dict[str, A
             status_code=404,
         )
 
+    route_id = str(run.get("route_id") or "")
+    route = service._repository.get_route(route_id)
+    route_enabled = bool(route and route.get("enabled", True))
     cases = _case_report(service, benchmark_id)
     expected_count = len(vision_benchmark_cases())
     complete = _suite_complete(cases, expected_count)
@@ -171,14 +176,14 @@ def vision_benchmark_evidence(service: Any, *, benchmark_id: str) -> dict[str, A
     stored_status = str(run.get("status") or "")
     effective_status = stored_status
     if stored_status == "SUCCEEDED" and not complete:
-        # Older runner versions incorrectly marked rate-limited partial suites as
-        # SUCCEEDED. Replaying the saved evidence must not repeat that claim.
         effective_status = "BLOCKED"
 
-    measured = effective_status == "SUCCEEDED" and complete
+    measured = effective_status == "SUCCEEDED" and complete and route_enabled
     return {
         "benchmark_id": benchmark_id,
-        "route_id": str(run.get("route_id") or ""),
+        "route_id": route_id,
+        "route_enabled": route_enabled,
+        "route_retired": not route_enabled,
         "suite_version": str(run.get("suite_version") or ""),
         "status": effective_status,
         "stored_status": stored_status,
@@ -216,6 +221,14 @@ async def run_vision_benchmark(
     stored = service._repository.get_route(route_id)
     if stored is None:
         raise ModelIntelligenceError("ROUTE_NOT_FOUND", route_id, status_code=404)
+    if not bool(stored.get("enabled", True)):
+        raise ModelIntelligenceError(
+            "VISION_ROUTE_DISABLED",
+            "the selected visual route is retired or disabled",
+            status_code=409,
+            facts=(route_id,),
+        )
+
     candidate = service._candidate_from_row(stored)
     if ModelCapability.VISION not in candidate.capabilities:
         raise ModelIntelligenceError(
@@ -276,6 +289,14 @@ async def run_vision_benchmark(
             "case_count": len(cases),
         },
     )
+    _logger.info(
+        "vision_benchmark_started benchmark_id=%s route_id=%s provider=%s model=%s cases=%s",
+        benchmark_id,
+        route_id,
+        candidate.provider,
+        candidate.model,
+        len(cases),
+    )
 
     scores: list[float] = []
     weights: list[float] = []
@@ -306,8 +327,6 @@ async def run_vision_benchmark(
                 break
             except ProviderFailure as exc:
                 failure = exc
-                if exc.code in _SCORABLE_PROVIDER_FAILURE_CODES:
-                    break
                 if not _is_retryable_failure(exc) or attempts >= _MAX_PROVIDER_ATTEMPTS_PER_CASE:
                     break
                 wait_seconds = _retry_wait_seconds(exc, attempt=attempts)
@@ -318,29 +337,6 @@ async def run_vision_benchmark(
         latency_ms = (perf_counter() - case_started) * 1000.0
 
         if response is None and failure is not None:
-            if failure.code in _SCORABLE_PROVIDER_FAILURE_CODES:
-                service._repository.record_benchmark_case(
-                    benchmark_id=benchmark_id,
-                    case_id=case.case_id,
-                    capability=ModelCapability.VISION.value,
-                    score=0.0,
-                    passed=False,
-                    latency_ms=latency_ms,
-                    total_tokens=None,
-                    result_excerpt=None,
-                    evidence={
-                        "provider_failure": failure.code,
-                        "scored": True,
-                        "attempts": attempts,
-                        "retry_after_seconds": failure.retry_after_seconds,
-                        "fixture_bytes": len(case.image_png),
-                    },
-                )
-                scores.append(0.0)
-                weights.append(case.weight)
-                latencies.append(latency_ms)
-                continue
-
             terminal_failure = failure
             service._repository.record_benchmark_case(
                 benchmark_id=benchmark_id,
@@ -353,6 +349,7 @@ async def run_vision_benchmark(
                 result_excerpt=None,
                 evidence={
                     "provider_failure": failure.code,
+                    "provider_http_status": failure.http_status,
                     "scored": False,
                     "attempts": attempts,
                     "retryable": _is_retryable_failure(failure),
@@ -361,8 +358,15 @@ async def run_vision_benchmark(
                     "fixture_bytes": len(case.image_png),
                 },
             )
-            # Once the provider cannot serve a case, hammering the remaining
-            # fixtures would only spend quota and cannot yield a complete suite.
+            _logger.warning(
+                "vision_benchmark_case_blocked benchmark_id=%s route_id=%s case_id=%s code=%s upstream_status=%s attempts=%s",
+                benchmark_id,
+                route_id,
+                case.case_id,
+                failure.code,
+                failure.http_status,
+                attempts,
+            )
             break
 
         assert response is not None
@@ -440,12 +444,23 @@ async def run_vision_benchmark(
     }
 
     if status != "SUCCEEDED" or not complete:
+        _logger.warning(
+            "vision_benchmark_finished benchmark_id=%s route_id=%s status=%s scored=%s attempted=%s error_code=%s upstream_status=%s",
+            benchmark_id,
+            route_id,
+            status,
+            sample_count,
+            len(case_report),
+            error_code,
+            terminal_failure.http_status if terminal_failure else None,
+        )
         return {
             **base_result,
             "vision_measured": False,
             "vision_success_rate": None,
             "retryable": bool(terminal_failure and _is_retryable_failure(terminal_failure)),
             "retry_after_seconds": terminal_failure.retry_after_seconds if terminal_failure else None,
+            "provider_http_status": terminal_failure.http_status if terminal_failure else None,
         }
 
     observed_at = service._utcnow()
@@ -461,9 +476,13 @@ async def run_vision_benchmark(
     )
     service._routing_repository.record_measurement(measurement)
 
-    promotion_candidate = (
-        aggregate >= VISION_PROMOTION_AGGREGATE
-        and pass_rate >= VISION_PROMOTION_PASS_RATE
+    promotion_candidate = aggregate >= VISION_PROMOTION_AGGREGATE and pass_rate >= VISION_PROMOTION_PASS_RATE
+    _logger.info(
+        "vision_benchmark_finished benchmark_id=%s route_id=%s status=SUCCEEDED score=%.4f pass_rate=%.4f",
+        benchmark_id,
+        route_id,
+        aggregate,
+        pass_rate,
     )
     return {
         **base_result,
@@ -475,4 +494,5 @@ async def run_vision_benchmark(
         "lifecycle_unchanged": stored["lifecycle"],
         "retryable": False,
         "retry_after_seconds": None,
+        "provider_http_status": 200,
     }

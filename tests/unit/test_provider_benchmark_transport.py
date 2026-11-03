@@ -85,22 +85,44 @@ def test_groq_benchmark_prefix_also_enables_deterministic_mode(monkeypatch) -> N
     assert calls[0]["seed"] == 7
 
 
-def test_other_json_mode_provider_keeps_system_user_split(monkeypatch) -> None:
-    calls: list[dict] = []
+def test_nvidia_text_transport_uses_documented_hosted_shape(monkeypatch) -> None:
+    calls: list[tuple[dict, dict]] = []
 
     def fake_post(url: str, *, headers: dict, json: dict, timeout: float):
-        calls.append(json)
-        return _ok_response()
+        calls.append((headers, json))
+        return _ok_response("normal answer")
 
     monkeypatch.setattr("amodex.providers.openai_compatible.httpx.post", fake_post)
-    NvidiaProvider(api_key="test-key").generate(
+    response = NvidiaProvider(api_key="test-key").generate(
         model="mistralai/mistral-large-4-1t-a52b",
         prompt="hello",
         request_key="r1",
     )
 
-    payload = calls[0]
+    headers, payload = calls[0]
+    assert response.text == "normal answer"
     assert [item["role"] for item in payload["messages"]] == ["system", "user"]
-    assert "include_reasoning" not in payload
-    assert "reasoning_effort" not in payload
-    assert "seed" not in payload
+    assert "response_format" not in payload
+    assert payload["reasoning_effort"] == "high"
+    assert payload["seed"] == 7
+    assert payload["max_tokens"] == 4096
+    assert headers["accept"] == "application/json"
+
+
+def test_nvidia_text_benchmark_disables_reasoning_but_keeps_repeatability(monkeypatch) -> None:
+    calls: list[dict] = []
+
+    def fake_post(url: str, *, headers: dict, json: dict, timeout: float):
+        calls.append(json)
+        return _ok_response("AMODEX_TEXT_OK")
+
+    monkeypatch.setattr("amodex.providers.openai_compatible.httpx.post", fake_post)
+    response = NvidiaProvider(api_key="test-key").generate(
+        model="mistralai/mistral-large-4-1t-a52b",
+        prompt="Return exactly AMODEX_TEXT_OK and nothing else.",
+        request_key="benchmark:nvidia:text",
+    )
+    assert response.text == "AMODEX_TEXT_OK"
+    assert calls[0]["reasoning_effort"] == "none"
+    assert calls[0]["seed"] == 7
+    assert "response_format" not in calls[0]
