@@ -34,6 +34,7 @@ from amodex.api.workspace_web import WORKSPACE_HTML
 from amodex.connectors.clients import GitHubAppConnector, RobloxOAuthConnector
 from amodex.connectors.oauth import GitHubAppConfig, RobloxOAuthConfig
 from amodex.connectors.vault import CredentialVault, vault_from_environment
+from amodex.model_intelligence.attachment_aware_service import AttachmentAwareModelIntelligenceService
 from amodex.model_intelligence.service import ModelIntelligenceService
 from amodex.multimodal.clients import MultimodalClients, multimodal_clients_from_environment
 from amodex.multimodal.cloudinary_rest_store import CloudinaryAuthenticatedRestMediaStore
@@ -150,11 +151,13 @@ def create_workspace_app(
             provider_execution_registry = provider_execution_registry or ProviderExecutionRegistry(
                 stage5_credential_pools_from_env()
             )
-            model_intelligence_service = ModelIntelligenceService(
+            model_intelligence_service = AttachmentAwareModelIntelligenceService(
                 repository=model_intelligence_repository,
                 routing_repository=routing_repository,
                 workspace_repository=workspace_repository,
                 execution_registry=provider_execution_registry,
+                multimodal_repository=multimodal_repository,
+                media_store=media_store,
             )
 
     # The legacy control-plane root is a projection only. Every pre-existing API
