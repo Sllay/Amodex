@@ -136,6 +136,7 @@ class PostgresRoutingRepository:
                     """
                     SELECT DISTINCT ON (provider, credential_pool_id) *
                     FROM amodex_provider_availability_observations
+                    WHERE reason NOT LIKE 'vision benchmark %'
                     ORDER BY provider, credential_pool_id, observed_at DESC, availability_id DESC
                     """
                 )
