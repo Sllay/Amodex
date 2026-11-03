@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import base64
 import json
-import os
 
 import httpx
 import pytest
@@ -126,7 +125,7 @@ def test_vision_probe_really_sends_png_in_documented_image_url_shape(monkeypatch
     assert content[0]["type"] == "text"
     assert content[1]["type"] == "image_url"
     raw = base64.b64decode(content[1]["image_url"]["url"].removeprefix("data:image/png;base64,"))
-    assert raw.startswith(b"\\x89PNG\\r\\n\\x1a\\n")
+    assert raw.startswith(bytes.fromhex("89504e470d0a1a0a"))
     assert len(raw) == result["request"]["image_bytes"]
     assert "image_url" not in json.dumps(result)  # Never return pixel data to client
 
