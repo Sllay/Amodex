@@ -15,7 +15,10 @@ on:
       - 'src/amodex/multimodal/cloudinary_rest_store.py'
       - 'src/amodex/providers/catalog.py'
       - 'src/amodex/providers/openai_compatible.py'
+      - 'src/amodex/providers/vision_chat.py'
       - 'src/amodex/providers/groq.py'
+      - 'src/amodex/providers/mistral.py'
+      - 'src/amodex/providers/registry.py'
       - 'src/amodex/storage/model_intelligence.py'
       - 'src/amodex/storage/routing.py'
       - 'tests/unit/test_benchmark_suite_isolation.py'
@@ -73,7 +76,10 @@ jobs:
             src/amodex/multimodal/cloudinary_rest_store.py \
             src/amodex/providers/catalog.py \
             src/amodex/providers/openai_compatible.py \
+            src/amodex/providers/vision_chat.py \
             src/amodex/providers/groq.py \
+            src/amodex/providers/mistral.py \
+            src/amodex/providers/registry.py \
             src/amodex/storage/model_intelligence.py \
             src/amodex/storage/routing.py \
             tests/unit/test_benchmark_suite_isolation.py \
@@ -113,10 +119,12 @@ jobs:
             tests/unit/test_vision_benchmark.py \
             tests/unit/test_vision_benchmark_evidence.py
           grep -q 'promotion_applied.*False' src/amodex/model_intelligence/vision_benchmark_runner.py
+          grep -q 'provider_failures_are_unscored' src/amodex/model_intelligence/vision_benchmark_runner.py
+          grep -q 'status = "BLOCKED"' src/amodex/model_intelligence/vision_benchmark_runner.py
           ! grep -q 'set_lifecycle' src/amodex/model_intelligence/vision_benchmark_runner.py
           ! grep -q 'record_availability' src/amodex/model_intelligence/vision_benchmark_runner.py
 
-      - name: Prove Groq benchmark transport and provider compatibility
+      - name: Prove Groq and Mistral benchmark transport compatibility
         shell: bash
         run: |
           set -euo pipefail
@@ -130,6 +138,8 @@ jobs:
           set -euo pipefail
           grep -q 'BillingClass.FREE' src/amodex/model_intelligence/service.py
           grep -q 'BillingClass.FREE' src/amodex/model_intelligence/vision_benchmark_runner.py
+          grep -q 'mistral-free-primary' src/amodex/providers/registry.py
+          grep -q 'AMODEX_MISTRAL_BILLING_CLASS' src/amodex/providers/registry.py
           grep -q 'paid_fallback.*DENIED' src/amodex/model_intelligence/service.py
           grep -q 'unknown_billing.*DENIED' src/amodex/model_intelligence/service.py
           grep -q 'aggregate >= 0.75' src/amodex/model_intelligence/service.py

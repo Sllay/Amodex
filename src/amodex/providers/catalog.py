@@ -74,6 +74,29 @@ def stage5_declared_candidates() -> tuple[ModelCandidate, ...]:
             ),
         ),
         ModelCandidate(
+            provider="mistral",
+            model="mistral-large-4",
+            credential_pool_id="mistral-free-primary",
+            cost_class=BillingClass.FREE,
+            capabilities=frozenset(
+                {
+                    ModelCapability.TEXT,
+                    ModelCapability.STRUCTURED_OUTPUT,
+                    ModelCapability.TOOL_CALLING,
+                    ModelCapability.VISION,
+                    ModelCapability.LONG_CONTEXT,
+                }
+            ),
+            context_capacity_tokens=1_000_000,
+            lifecycle=ModelLifecycle.BENCHMARK_PENDING,
+            provenance=(
+                "Mistral official docs snapshot 2026-11-03: Mistral Large 4 is multimodal with a "
+                "1.6B vision encoder, Chat Completions, structured outputs and 1M context. The route "
+                "remains BENCHMARK_PENDING and zero-cost execution additionally requires a credential "
+                "pool explicitly classified free; catalog declaration alone never proves Free-mode access."
+            ),
+        ),
+        ModelCandidate(
             provider="openrouter",
             model="openrouter/free",
             credential_pool_id="openrouter-free-primary",
