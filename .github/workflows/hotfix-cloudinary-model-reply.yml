@@ -13,6 +13,7 @@ on:
       - 'src/amodex/api/model_intelligence_web.py'
       - 'src/amodex/model_intelligence/attachment_aware_service.py'
       - 'src/amodex/model_intelligence/vision_benchmarks.py'
+      - 'src/amodex/model_intelligence/nvidia_diagnostics.py'
       - 'src/amodex/model_intelligence/vision_benchmark_runner.py'
       - 'src/amodex/multimodal/cloudinary_rest_store.py'
       - 'src/amodex/providers/base.py'
@@ -31,6 +32,7 @@ on:
       - 'tests/unit/test_model_attachment_context.py'
       - 'tests/unit/test_model_route_hardening.py'
       - 'tests/unit/test_vision_benchmark.py'
+      - 'tests/unit/test_nvidia_upstream_diagnostics.py'
       - 'tests/unit/test_vision_benchmark_evidence.py'
       - 'tests/unit/test_performance_structural.py'
       - 'tests/integration/test_stage5_provider_adapters.py'
@@ -77,6 +79,7 @@ jobs:
             src/amodex/api/model_intelligence_web.py \
             src/amodex/model_intelligence/attachment_aware_service.py \
             src/amodex/model_intelligence/vision_benchmarks.py \
+            src/amodex/model_intelligence/nvidia_diagnostics.py \
             src/amodex/model_intelligence/vision_benchmark_runner.py \
             src/amodex/multimodal/cloudinary_rest_store.py \
             src/amodex/providers/base.py \
@@ -93,6 +96,7 @@ jobs:
             tests/unit/test_model_attachment_context.py \
             tests/unit/test_model_route_hardening.py \
             tests/unit/test_vision_benchmark.py \
+            tests/unit/test_nvidia_upstream_diagnostics.py \
             tests/unit/test_vision_benchmark_evidence.py \
             tests/unit/test_provider_benchmark_transport.py \
             tests/integration/test_stage5_provider_adapters.py
@@ -139,6 +143,14 @@ jobs:
           grep -q 'status = "BLOCKED"' src/amodex/model_intelligence/vision_benchmark_runner.py
           ! grep -q 'set_lifecycle' src/amodex/model_intelligence/vision_benchmark_runner.py
           ! grep -q 'record_availability' src/amodex/model_intelligence/vision_benchmark_runner.py
+
+      - name: Prove NVIDIA diagnostic calls are private, fixed, free, and do not alter benchmarks
+        shell: bash
+        run: |
+          set -euo pipefail
+          .venv/bin/python -m pytest -q tests/unit/test_nvidia_upstream_diagnostics.py
+          grep -q 'LOCAL_ADMISSION_DENIED' src/amodex/model_intelligence/nvidia_diagnostics.py
+          grep -q 'diagnostics/nvidia' src/amodex/api/model_intelligence_routes.py
 
       - name: Prove Groq and NVIDIA Mistral benchmark transport compatibility
         shell: bash
