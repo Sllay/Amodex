@@ -174,14 +174,16 @@ class NvidiaUpstreamDiagnostics:
         else:
             content = "Reply with exactly AMODEX_DIAG_TEXT_OK and no extra words."
 
-        # Fixed, provider-documented request: no response_format, model selection,
+        # Use the empirically accepted NVIDIA hosted profile for both text and vision.
+        # An actual text-only request with reasoning_effort=none returned HTTP 400.
+        # Fixed request: no response_format, model selection,
         # user prompt, upload, or arbitrary endpoint can enter this path.
         payload = {
             "model": MODEL,
             "messages": [{"role": "user", "content": content}],
             "stream": False,
-            "max_tokens": 4096 if mode == "vision" else 256,
-            "reasoning_effort": "high" if mode == "vision" else "none",
+            "max_tokens": 4096,
+            "reasoning_effort": "high",
             "temperature": 0.5,
             "top_p": 1,
             "frequency_penalty": 0,
