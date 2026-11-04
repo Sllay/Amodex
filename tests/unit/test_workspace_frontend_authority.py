@@ -219,3 +219,16 @@ def test_chat_progress_uses_measured_server_phases_not_invented_reasoning() -> N
     assert "mi-live-progress" in _STEP4_CSS
     assert "reasoning_content" not in _STEP4_SCRIPT
     assert "stream:true" not in _STEP4_SCRIPT
+
+
+def test_chat_sse_is_read_only_and_falls_back_to_measured_polling() -> None:
+    from amodex.api.model_intelligence_web import _STEP4_SCRIPT
+
+    assert "new EventSource(url)" in _STEP4_SCRIPT
+    assert "respond/events?owner_message_id=" in _STEP4_SCRIPT
+    assert "feed.onmessage=event=>" in _STEP4_SCRIPT
+    assert "feed.addEventListener('done'" in _STEP4_SCRIPT
+    assert "feed.onerror=()" in _STEP4_SCRIPT
+    assert "if(interval===null)interval=setInterval" in _STEP4_SCRIPT
+    assert "feed?.close();" in _STEP4_SCRIPT
+    assert "reasoning_content" not in _STEP4_SCRIPT
