@@ -10,6 +10,7 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from amodex.contracts.ids import new_uuid7
+from amodex.providers.catalog import RETIRED_DIRECT_MISTRAL_ROUTE_ID
 from amodex.model_intelligence.models import AttemptStatus, DecisionStatus
 from amodex.providers.capabilities import ModelCandidate, ModelLifecycle
 
@@ -69,6 +70,18 @@ class PostgresModelIntelligenceRepository:
                             item.enabled,
                         ),
                     )
+                # A previously seeded direct Mistral route can survive a one-time
+                # SQL migration or be re-enabled by older catalog synchronizations.
+                # Enforce retirement at every startup without deleting historical
+                # benchmark/decision rows that refer to the old route ID.
+                conn.execute(
+                    """
+                    UPDATE amodex_model_routes
+                    SET enabled=FALSE, updated_at=NOW()
+                    WHERE route_id=%s AND enabled=TRUE
+                    """,
+                    (RETIRED_DIRECT_MISTRAL_ROUTE_ID,),
+                )
 
     def list_routes(self) -> tuple[dict[str, Any], ...]:
         with psycopg.connect(self._dsn, row_factory=dict_row) as conn:

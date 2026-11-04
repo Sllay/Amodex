@@ -6,6 +6,9 @@ BENCHMARK_PENDING by default: catalog discovery alone never makes a model eligib
 
 from __future__ import annotations
 
+RETIRED_DIRECT_MISTRAL_ROUTE_ID = "mistral:mistral-large-4:mistral-free-primary"
+
+
 from .capabilities import (
     BillingClass,
     ModelCandidate,

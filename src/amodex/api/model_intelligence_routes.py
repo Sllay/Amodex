@@ -23,6 +23,7 @@ from amodex.model_intelligence.vision_benchmark_runner import (
     vision_benchmark_evidence,
 )
 from amodex.providers.capabilities import WorkerProfileKind
+from amodex.providers.catalog import RETIRED_DIRECT_MISTRAL_ROUTE_ID
 
 
 _logger = logging.getLogger("amodex.api.model_intelligence")
@@ -40,7 +41,7 @@ def _require_enabled_route(service: ModelIntelligenceService, route_id: str) -> 
     row = service._repository.get_route(route_id)
     if row is None:
         raise ModelIntelligenceError("ROUTE_NOT_FOUND", route_id, status_code=404)
-    if not bool(row.get("enabled", True)):
+    if route_id == RETIRED_DIRECT_MISTRAL_ROUTE_ID or not bool(row.get("enabled", True)):
         raise ModelIntelligenceError(
             "ROUTE_DISABLED",
             "the selected model route is retired or disabled",
@@ -68,7 +69,11 @@ def build_model_intelligence_router(service: ModelIntelligenceService) -> APIRou
         # Active UI/API discovery must never depend on a particular frontend
         # version to hide retired routes. Historical evidence remains available
         # through the explicit benchmark evidence endpoint.
-        return tuple(row for row in service.routes() if bool(row.get("enabled", True)))
+        return tuple(
+            row for row in service.routes()
+            if bool(row.get("enabled", True))
+            and str(row.get("route_id")) != RETIRED_DIRECT_MISTRAL_ROUTE_ID
+        )
 
     @router.get("/model-intelligence/leaderboard")
     def leaderboard(
