@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from typing import Literal
@@ -143,12 +144,19 @@ def build_model_intelligence_router(service: ModelIntelligenceService) -> APIRou
         return {"reconciled": service.reconcile_stale(stale_after_seconds=payload.stale_after_seconds)}
 
     @router.post("/chats/{chat_id}/respond")
-    async def respond(chat_id: str, payload: ChatRespondRequest) -> dict:
+    def respond(chat_id: str, payload: ChatRespondRequest) -> dict:
+        # FastAPI runs sync handlers in its thread pool. The routed service
+        # currently performs synchronous Neon reads/writes around its async
+        # provider call; executing its coroutine in a worker keeps those DB
+        # calls off Uvicorn's event loop so liveness requests remain responsive.
+        # Do not change the service's no-retry-on-ambiguous-outcome semantics.
         try:
-            return await service.respond(
-                chat_id=chat_id,
-                owner_message_id=payload.owner_message_id,
-                profile=payload.profile,
+            return asyncio.run(
+                service.respond(
+                    chat_id=chat_id,
+                    owner_message_id=payload.owner_message_id,
+                    profile=payload.profile,
+                )
             )
         except ModelIntelligenceError as exc:
             _raise(exc)
