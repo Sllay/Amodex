@@ -204,3 +204,18 @@ def test_explicit_manual_recovery_reuses_saved_owner_message_and_never_auto_retr
     assert "mi-recover-btn" in _STEP4_CSS
     assert "miRememberDecisions(chatId,outcome)" in _STEP4_SCRIPT
     assert "/messages`,{method:'POST'" not in _STEP4_SCRIPT
+
+
+
+def test_chat_progress_uses_measured_server_phases_not_invented_reasoning() -> None:
+    from amodex.api.model_intelligence_web import _STEP4_SCRIPT, _STEP4_CSS
+
+    assert "miProgressLabel(decision)" in _STEP4_SCRIPT
+    assert "progress:provider_wait:" in _STEP4_SCRIPT
+    assert "Aguardando resposta do provedor" in _STEP4_SCRIPT
+    assert "Aguardando confirmação do servidor" in _STEP4_SCRIPT
+    assert "4000" in _STEP4_SCRIPT
+    assert "clearInterval(interval)" in _STEP4_SCRIPT
+    assert "mi-live-progress" in _STEP4_CSS
+    assert "reasoning_content" not in _STEP4_SCRIPT
+    assert "stream:true" not in _STEP4_SCRIPT
