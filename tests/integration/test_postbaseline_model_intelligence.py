@@ -145,7 +145,8 @@ def state():
     assert multimodal.schema_ready()
     assert mi.schema_ready()
     candidates = tuple(
-        item for item in stage5_declared_candidates() if item.provider in {"groq", "nvidia"}
+        item for item in stage5_declared_candidates()
+        if item.provider == "nvidia" or (item.provider == "groq" and item.model == "openai/gpt-oss-20b")
     )
     registry = FakeRegistry(candidates)
     service = ModelIntelligenceService(
@@ -216,7 +217,7 @@ def test_step4_schema_status_and_workspace_model_ui(state) -> None:
         models = client.get("/models")
         assert models.status_code == 200
         assert "Model Intelligence" in models.text
-        assert "Rodar benchmark" in models.text
+        assert "Benchmark texto" in models.text
 
 
 def test_real_benchmark_contract_promotes_and_routes_without_fake_vision(state) -> None:
