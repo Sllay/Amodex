@@ -337,6 +337,30 @@ class PostgresModelIntelligenceRepository:
             ).fetchone()
         return row is not None
 
+    def append_progress_fact(self, *, decision_id: str, stage: str, elapsed_ms: float) -> None:
+        """Append a bounded, redacted progress marker to the existing audit record.
+
+        Do not store prompt text, credentials, model reasoning or response deltas.
+        This uses the existing JSONB field and requires no schema migration.
+        """
+        permitted = {
+            "context_ready", "route_selected", "provider_wait",
+            "provider_done", "reply_saved", "failed", "unknown",
+        }
+        if stage not in permitted or not 0 <= elapsed_ms < 86_400_000:
+            raise ValueError("invalid execution progress marker")
+        fact = f"progress:{stage}:{round(elapsed_ms)}"
+        with psycopg.connect(self._dsn) as conn:
+            conn.execute(
+                """
+                UPDATE amodex_model_route_decisions
+                SET selection_facts=selection_facts || %s::jsonb,
+                    updated_at=NOW()
+                WHERE decision_id=%s
+                """,
+                (Jsonb([fact]), decision_id),
+            )
+
     def start_attempt(
         self,
         *,
