@@ -5,11 +5,15 @@ from __future__ import annotations
 
 _STEP4_CSS = r'''
 .mi-ready{border-color:var(--good)!important}.mi-busy{opacity:.62;pointer-events:none}.mi-note{font-size:.76rem;color:var(--muted);line-height:1.4}
+.mi-route-footnote{font-size:.73rem;margin-top:13px;padding-top:8px;border-top:1px solid var(--line);color:var(--muted);overflow-wrap:anywhere}
+.mi-route-footnote.is-fallback{color:var(--warn)}
 '''
 
 _STEP4_SCRIPT = r'''
 <script id="amodex-model-intelligence-feature">
 const mi={status:null};
+const MI_PRIMARY_ROUTE="nvidia:mistralai/mistral-large-4-1t-a52b:nvidia-free-primary";
+const miDecisionsByChat=new Map();
 function miQueueFeature(register){if(window.AmodexApp)return register(window.AmodexApp);(window.__amodexFeatureQueue||(window.__amodexFeatureQueue=[])).push(register)}
 async function miApi(path,opt={}){return window.AmodexApp?AmodexApp.api(path,opt):api(path,opt)}
 async function miBoot(){
@@ -23,8 +27,58 @@ async function miBoot(){
     }
   }catch(e){console.warn('model intelligence unavailable',e)}
 }
+const MI_PROVIDER_NAMES={
+  "nvidia:mistralai/mistral-large-4-1t-a52b:nvidia-free-primary":"nvidia-mistral-large-4",
+  "groq:openai/gpt-oss-20b:groq-free-primary":"groq-gpt-oss-20b",
+  "gemini:gemini-3.5-flash-lite:gemini-free-primary":"gemini-flash-lite",
+  "openrouter:openrouter/free:openrouter-free-primary":"openrouter-free",
+  "groq:qwen/qwen3.8-27b:groq-free-primary":"groq-qwen"
+};
+function miRouteFootnote(decision){
+  if(decision?.status!=="SUCCEEDED"||!decision?.result_message_id||!decision?.final_route_id)return null;
+  const route=decision.final_route_id;
+  const name=MI_PROVIDER_NAMES[route];
+  if(!name)return null; // Unknown or untrusted routes must not be mislabelled.
+  const facts=Array.isArray(decision.selection_facts)?decision.selection_facts:[];
+  const policyFallback=facts.includes('chat_primary_policy=PRIMARY_UNAVAILABLE');
+  const isFallback=route!==MI_PRIMARY_ROUTE&&(decision.fallback_used===true||policyFallback);
+  return {label:(isFallback?'fallback/':'modelo/')+name,isFallback};
+}
+function miRememberDecisions(chatId,rows){
+  const before=miDecisionsByChat.get(chatId)||[];
+  const unique=new Map(before.map(d=>[d.decision_id,d]));
+  (Array.isArray(rows)?rows:[rows]).forEach(d=>{if(d?.decision_id)unique.set(d.decision_id,d)});
+  miDecisionsByChat.set(chatId,[...unique.values()]);
+}
+function miDecorateMessages(){
+  const chatId=state.chat?.chat_id;
+  if(!chatId||!Array.isArray(state.messages))return;
+  const stored=miDecisionsByChat.get(chatId)||[];
+  const byMessage=new Map(stored.filter(d=>d.result_message_id).map(d=>[d.result_message_id,d]));
+  const nodes=[...document.querySelectorAll('#messages .message')];
+  state.messages.forEach((m,index)=>{
+    if(m.role!=='AMODEX')return;
+    const bubble=nodes[index]?.querySelector('.bubble');
+    if(!bubble)return;
+    const result=miRouteFootnote(byMessage.get(m.message_id));
+    let footer=bubble.querySelector('.mi-route-footnote');
+    if(!result){footer?.remove();return}
+    if(!footer){footer=document.createElement('div');footer.className='mi-route-footnote';bubble.appendChild(footer)}
+    footer.classList.toggle('is-fallback',result.isFallback);
+    footer.textContent='('+result.label+')'; // Presentation only: never append metadata to saved model text.
+  });
+}
+async function miLoadDecisions(chatId,app){
+  if(!chatId)return;
+  try{
+    const rows=await app.api('/v1/chats/'+encodeURIComponent(chatId)+'/model-decisions?limit=500');
+    miRememberDecisions(chatId,rows);
+    if(state.chat?.chat_id===chatId)miDecorateMessages();
+  }catch(e){console.warn('model decision metadata unavailable',e)}
+}
 async function miAutomaticReply(app,ctx){
   const owner=ctx?.owner;if(!owner||!state.chat)return;
+  const chatId=state.chat.chat_id;
   try{
     if(!mi.status)await miBoot();
     if(mi.status?.automatic_chat_inference!=='READY'){
@@ -32,10 +86,14 @@ async function miAutomaticReply(app,ctx){
       return;
     }
     const footer=document.querySelector('.composer-wrap');footer?.classList.add('mi-busy');
-    await app.api(`/v1/chats/${state.chat.chat_id}/respond`,{method:'POST',body:JSON.stringify({owner_message_id:owner.message_id,profile:null})});
-    state.messages=await app.api(`/v1/chats/${state.chat.chat_id}/messages`);
-    if(typeof mmRefreshChat==='function')await mmRefreshChat();
-    renderMessages();
+    const decision=await app.api(`/v1/chats/${chatId}/respond`,{method:'POST',body:JSON.stringify({owner_message_id:owner.message_id,profile:null})});
+    miRememberDecisions(chatId,decision);
+    const updated=await app.api(`/v1/chats/${chatId}/messages`);
+    if(state.chat?.chat_id===chatId){
+      state.messages=updated;
+      if(typeof mmRefreshChat==='function')await mmRefreshChat();
+      renderMessages();
+    }
     app.notice('Resposta concluída.','good');
     await miBoot();
   }catch(e){
@@ -51,7 +109,11 @@ async function miAutomaticReply(app,ctx){
     document.querySelector('.composer-wrap')?.classList.remove('mi-busy');
   }
 }
-miQueueFeature(app=>app.hooks.register('afterSend',ctx=>miAutomaticReply(app,ctx)));
+miQueueFeature(app=>{
+  app.hooks.register('afterSend',ctx=>miAutomaticReply(app,ctx));
+  app.hooks.register('afterChatSelected',()=>{void miLoadDecisions(state.chat?.chat_id,app)});
+  app.hooks.register('afterRenderMessages',()=>miDecorateMessages());
+});
 miBoot();
 </script>
 '''

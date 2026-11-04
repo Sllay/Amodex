@@ -16,7 +16,7 @@ from amodex.multimodal.clients import MultimodalClients
 from amodex.multimodal.object_store import MemoryMediaStore
 from amodex.providers.base import ProviderFailure
 from amodex.providers.capabilities import BillingClass, WorkerProfileKind
-from amodex.providers.catalog import stage5_declared_candidates
+from amodex.providers.catalog import AMODEX_PRIMARY_CHAT_ROUTE_ID, stage5_declared_candidates
 from amodex.providers.registry import ProviderExecutionDenied
 from amodex.runtime.models import ProviderResponse, ProviderUsage
 from amodex.storage.environment import PostgresEnvironmentRepository
@@ -145,7 +145,8 @@ def state():
     assert multimodal.schema_ready()
     assert mi.schema_ready()
     candidates = tuple(
-        item for item in stage5_declared_candidates() if item.provider in {"groq", "nvidia"}
+        item for item in stage5_declared_candidates()
+        if item.provider == "nvidia" or (item.provider == "groq" and item.model == "openai/gpt-oss-20b")
     )
     registry = FakeRegistry(candidates)
     service = ModelIntelligenceService(
@@ -216,7 +217,7 @@ def test_step4_schema_status_and_workspace_model_ui(state) -> None:
         models = client.get("/models")
         assert models.status_code == 200
         assert "Model Intelligence" in models.text
-        assert "Rodar benchmark" in models.text
+        assert "Benchmark texto" in models.text
 
 
 def test_real_benchmark_contract_promotes_and_routes_without_fake_vision(state) -> None:
@@ -251,7 +252,7 @@ def test_chat_primary_failure_uses_one_bounded_fallback_and_is_idempotent(state)
 
     asyncio.run(_benchmark_all(service, candidates))
     ranking = service.leaderboard(WorkerProfileKind.REPOSITORY_ANALYST)
-    primary = ranking[0].route_id
+    primary = AMODEX_PRIMARY_CHAT_ROUTE_ID
     registry.clients[primary].fail_chat = "SERVER_TRANSIENT"
 
     client = _client(state)
@@ -267,6 +268,7 @@ def test_chat_primary_failure_uses_one_bounded_fallback_and_is_idempotent(state)
         )
         assert response.status_code == 200, response.text
         decision = response.json()
+        assert decision["selected_route_id"] == primary
         assert decision["attempt_count"] == 2
         assert decision["fallback_used"] is True
         assert decision["final_route_id"] != primary
@@ -280,6 +282,36 @@ def test_chat_primary_failure_uses_one_bounded_fallback_and_is_idempotent(state)
         messages = client.get(f"/v1/chats/{chat['chat_id']}/messages").json()
         assert len([item for item in messages if item["role"] == "AMODEX"]) == 1
         assert sum(fake.chat_calls for fake in registry.clients.values()) == 2
+
+
+def test_chat_prefers_measured_mistral_without_reordering_agent_leaderboard(state) -> None:
+    *_, candidates, registry, service = state
+    import asyncio
+
+    asyncio.run(_benchmark_all(service, candidates))
+    ranking_before = service.leaderboard(WorkerProfileKind.REPOSITORY_ANALYST)
+    assert len(ranking_before) == 2
+    client = _client(state)
+    with client:
+        _, chat = _make_chat(client)
+        owner = client.post(
+            f"/v1/chats/{chat['chat_id']}/messages",
+            json={"role": "OWNER", "content": "Ola, Amodex!"},
+        ).json()
+        result = client.post(
+            f"/v1/chats/{chat['chat_id']}/respond",
+            json={"owner_message_id": owner["message_id"], "profile": "repository-analyst"},
+        )
+        assert result.status_code == 200, result.text
+        decision = result.json()
+        assert decision["selected_route_id"] == AMODEX_PRIMARY_CHAT_ROUTE_ID
+        assert decision["final_route_id"] == AMODEX_PRIMARY_CHAT_ROUTE_ID
+        assert decision["attempt_count"] == 1
+        assert decision["fallback_used"] is False
+        assert "chat_primary_policy=PRIMARY_ELIGIBLE" in decision["selection_facts"]
+        assert registry.clients[AMODEX_PRIMARY_CHAT_ROUTE_ID].chat_calls == 1
+        assert sum(fake.chat_calls for fake in registry.clients.values()) == 1
+        assert service.leaderboard(WorkerProfileKind.REPOSITORY_ANALYST) == ranking_before
 
 
 def test_ambiguous_outcome_stops_without_blind_retry_or_fallback(state) -> None:

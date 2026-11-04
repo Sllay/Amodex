@@ -7,6 +7,7 @@ BENCHMARK_PENDING by default: catalog discovery alone never makes a model eligib
 from __future__ import annotations
 
 RETIRED_DIRECT_MISTRAL_ROUTE_ID = "mistral:mistral-large-4:mistral-free-primary"
+AMODEX_PRIMARY_CHAT_ROUTE_ID = "nvidia:mistralai/mistral-large-4-1t-a52b:nvidia-free-primary"
 
 
 from .capabilities import (

@@ -61,3 +61,75 @@ def test_runtime_send_has_one_write_boundary_and_lock() -> None:
 def test_v2_shell_does_not_rebind_microphone_after_load() -> None:
     assert "mmToggleMic=async function" not in _V2_PREBOOT_SCRIPT
     assert "window.addEventListener('load'" not in _V2_PREBOOT_SCRIPT
+
+
+def test_chat_model_provenance_hooks_and_no_model_text_mutation() -> None:
+    from amodex.api.model_intelligence_web import _STEP4_SCRIPT, _STEP4_CSS
+
+    assert "app.hooks.register('afterChatSelected'" in _STEP4_SCRIPT
+    assert "app.hooks.register('afterRenderMessages'" in _STEP4_SCRIPT
+    assert "app.hooks.register('afterSend'" in _STEP4_SCRIPT
+    assert "mi-route-footnote" in _STEP4_CSS
+    assert "footer.textContent='('+result.label+')'" in _STEP4_SCRIPT
+    assert "miDecisionsByChat" in _STEP4_SCRIPT
+    assert "byMessage.get(m.message_id)" in _STEP4_SCRIPT
+    assert "decision.fallback_used===true||policyFallback" in _STEP4_SCRIPT
+    assert "chat_primary_policy=PRIMARY_UNAVAILABLE" in _STEP4_SCRIPT
+    assert "miRememberDecisions(chatId,decision)" in _STEP4_SCRIPT
+    assert "updated=await app.api" in _STEP4_SCRIPT
+    assert "if(state.chat?.chat_id===chatId)" in _STEP4_SCRIPT
+    assert "role:'AMODEX',content:" not in _STEP4_SCRIPT
+
+
+def test_chat_provenance_javascript_parses() -> None:
+    import shutil
+    import subprocess
+
+    import pytest
+    from amodex.api.model_intelligence_web import _STEP4_SCRIPT
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js not installed")
+    code = _STEP4_SCRIPT.split("<script", 1)[1].split(">", 1)[1].split("</script>", 1)[0]
+    result = subprocess.run([node, "--check"], input=code, capture_output=True, text=True, timeout=15)
+    assert result.returncode == 0, result.stderr
+
+
+def test_chat_model_footer_reports_provenance_without_false_legacy_fallback() -> None:
+    import json
+    import shutil
+    import subprocess
+
+    import pytest
+    from amodex.api.model_intelligence_web import _STEP4_SCRIPT
+    from amodex.providers.catalog import AMODEX_PRIMARY_CHAT_ROUTE_ID
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is unavailable")
+    helpers = _STEP4_SCRIPT.split("const MI_PROVIDER_NAMES=", 1)[1].split(
+        "function miRememberDecisions(", 1
+    )[0]
+    javascript = (
+        "const MI_PRIMARY_ROUTE=" + json.dumps(AMODEX_PRIMARY_CHAT_ROUTE_ID) + ";\n"
+        "const MI_PROVIDER_NAMES=" + helpers + "\n"
+        "const base={status:'SUCCEEDED',result_message_id:'msg-1',final_route_id:MI_PRIMARY_ROUTE,"
+        "selection_facts:[],fallback_used:false};\n"
+        "const groq='groq:openai/gpt-oss-20b:groq-free-primary';\n"
+        "const primary=miRouteFootnote(base);\n"
+        "const historical=miRouteFootnote({...base,final_route_id:groq});\n"
+        "const substitution=miRouteFootnote({...base,final_route_id:groq,"
+        "selection_facts:['chat_primary_policy=PRIMARY_UNAVAILABLE']});\n"
+        "const retry=miRouteFootnote({...base,final_route_id:groq,fallback_used:true});\n"
+        "const missing=miRouteFootnote({...base,result_message_id:null});\n"
+        "if(primary.label!=='modelo/nvidia-mistral-large-4'||primary.isFallback)throw Error('primary');\n"
+        "if(historical.label!=='modelo/groq-gpt-oss-20b'||historical.isFallback)throw Error('legacy');\n"
+        "if(substitution.label!=='fallback/groq-gpt-oss-20b'||!substitution.isFallback)throw Error('substitution');\n"
+        "if(retry.label!=='fallback/groq-gpt-oss-20b'||!retry.isFallback)throw Error('retry');\n"
+        "if(missing!==null)throw Error('missing');\n"
+    )
+    result = subprocess.run(
+        [node, "-e", javascript], capture_output=True, text=True, check=False, timeout=15
+    )
+    assert result.returncode == 0, result.stderr
