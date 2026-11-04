@@ -31,7 +31,11 @@ from amodex.providers.capabilities import (
     WorkerProfileKind,
     stage5_worker_profiles,
 )
-from amodex.providers.catalog import RETIRED_DIRECT_MISTRAL_ROUTE_ID, stage5_declared_candidates
+from amodex.providers.catalog import (
+    AMODEX_PRIMARY_CHAT_ROUTE_ID,
+    RETIRED_DIRECT_MISTRAL_ROUTE_ID,
+    stage5_declared_candidates,
+)
 from amodex.providers.registry import ProviderExecutionDenied, ProviderExecutionRegistry
 from amodex.providers.routing import CapabilityRouter
 from amodex.storage.model_intelligence import PostgresModelIntelligenceRepository
@@ -102,6 +106,8 @@ class ModelIntelligenceService:
             "promotion": "MEASURED_POLICY_ONLY",
             "visual_routing": "REQUIRES_REAL_VISION_MEASUREMENT",
             "execution_authority": "ENVIRONMENT_ONLY",
+            "primary_chat_route_id": AMODEX_PRIMARY_CHAT_ROUTE_ID,
+            "primary_chat_policy": "PREFERRED_WHEN_MEASURED_AND_AVAILABLE",
         }
 
     def routes(self) -> tuple[dict[str, Any], ...]:
@@ -380,6 +386,12 @@ class ModelIntelligenceService:
                 status_code=503,
             )
 
+        # Prefer the product's underlying Mistral route for conversational chat,
+        # without overriding the measured capability / free-quota admission gates.
+        preferred = next((item for item in ranked if item.route_id == AMODEX_PRIMARY_CHAT_ROUTE_ID), None)
+        if preferred is not None:
+            ranked = (preferred, *(item for item in ranked if item.route_id != preferred.route_id))
+        primary_policy = "PRIMARY_ELIGIBLE" if preferred is not None else "PRIMARY_UNAVAILABLE"
         decision_id = self._repository.create_decision(
             chat_id=chat_id,
             owner_message_id=owner.message_id,
@@ -387,7 +399,11 @@ class ModelIntelligenceService:
             selected_route_id=ranked[0].route_id,
             ranked_route_ids=[item.route_id for item in ranked],
             rejected_reasons=list(ranked[0].rejected_reasons),
-            selection_facts=list(ranked[0].selection_facts),
+            selection_facts=[
+                *ranked[0].selection_facts,
+                f"chat_primary_route={AMODEX_PRIMARY_CHAT_ROUTE_ID}",
+                f"chat_primary_policy={primary_policy}",
+            ],
         )
 
         attempts = 0
@@ -708,9 +724,13 @@ class ModelIntelligenceService:
         memory_text = "\n".join(f"- {item.content}" for item in approved)
         chat_text = "\n".join(f"{item.role.value}: {item.content}" for item in recent)
         return (
-            "You are Amodex inside a project workspace. Answer the owner's latest message directly and "
-            "usefully. Do not claim that repository/code execution happened merely because you can chat. "
-            "Execution requires an authorized Environment.\n\n"
+            "You are Amodex, the product assistant inside a project workspace, not the name of a specific "
+            "foundation model. The underlying provider/model can vary under explicit routing policy. "
+            "Do not claim you were trained by OpenAI, NVIDIA, or another model provider, and do not claim "
+            "to know the user's verified account identity or the product creator without verified context. "
+            "Answer the owner's latest message directly and usefully, in their language. "
+            "Do not claim that repository/code execution happened merely because you can chat. "
+            "Execution requires an authorized Environment.\\n\\n"
             f"APPROVED PROJECT MEMORY:\n{memory_text or '(none)'}\n\n"
             f"RECENT CHAT:\n{chat_text}\n\n"
             f"SOURCE_OWNER_MESSAGE_ID:{owner_message_id}"
