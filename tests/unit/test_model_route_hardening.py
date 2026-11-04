@@ -107,3 +107,26 @@ def test_model_dashboard_keeps_failed_routes_for_validation_but_prioritizes_meas
     assert "Falhas anteriores" not in html  # Never misstate failed benchmarking as model removal.
     assert "Não está validado." in html
     assert "pending.forEach(r=>details.appendChild(routeCard(r,runs)))" in html
+
+
+def test_model_dashboard_javascript_parses() -> None:
+    import shutil
+    import subprocess
+
+    import pytest
+
+    from amodex.api.model_intelligence_web import MODEL_INTELLIGENCE_HTML
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is unavailable in this environment")
+    script = MODEL_INTELLIGENCE_HTML.split("<script>", 1)[1].split("</script>", 1)[0]
+    result = subprocess.run(
+        [node, "--check"],
+        input=script,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=15,
+    )
+    assert result.returncode == 0, result.stderr
