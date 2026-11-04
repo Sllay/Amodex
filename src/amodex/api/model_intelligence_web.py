@@ -10,6 +10,8 @@ _STEP4_CSS = r'''
 .mi-reply-state{font-size:.73rem;margin-top:9px;color:var(--warn);overflow-wrap:anywhere}
 .mi-reconcile-btn{display:block;margin-top:8px;padding:6px 10px;font-size:.78rem}
 .mi-recover-btn{display:block;margin-top:8px;padding:7px 10px;font-size:.78rem;border:1px solid var(--line);color:var(--text)}
+.mi-live-progress{font-size:.79rem;color:var(--muted);margin:7px 10px;line-height:1.4}
+.mi-live-progress strong{color:var(--text)}
 '''
 
 _STEP4_SCRIPT = r'''
@@ -153,6 +155,21 @@ async function miLoadDecisions(chatId,app){
     if(state.chat?.chat_id===chatId)miDecorateMessages();
   }catch(e){console.warn('model decision metadata unavailable',e)}
 }
+function miProgressLabel(decision){
+  if(!decision)return 'Preparando contexto no servidor';
+  if(decision.status==='SUCCEEDED')return 'Resposta registrada';
+  if(decision.status==='UNKNOWN_OUTCOME')return 'Resultado incerto · sem repetição automática';
+  if(decision.status==='FAILED')return 'Falha registrada · sem resposta';
+  const facts=Array.isArray(decision.selection_facts)?decision.selection_facts:[];
+  const marks=facts.filter(f=>typeof f==='string'&&f.startsWith('progress:'));
+  const last=marks.at(-1)||'';
+  if(last.startsWith('progress:provider_wait:'))return 'Aguardando resposta do provedor';
+  if(last.startsWith('progress:provider_done:'))return 'Resposta recebida · salvando';
+  if(last.startsWith('progress:reply_saved:'))return 'Resposta salva · finalizando';
+  if(last.startsWith('progress:route_selected:'))return 'Rota escolhida · preparando chamada';
+  if(last.startsWith('progress:context_ready:'))return 'Contexto carregado';
+  return 'Solicitação registrada';
+}
 async function miAutomaticReply(app,ctx){
   const owner=ctx?.owner;if(!owner||!state.chat)return;
   const chatId=state.chat.chat_id;
@@ -163,16 +180,41 @@ async function miAutomaticReply(app,ctx){
       return;
     }
     const footer=document.querySelector('.composer-wrap');footer?.classList.add('mi-busy');
-    const decision=await app.api(`/v1/chats/${chatId}/respond`,{method:'POST',body:JSON.stringify({owner_message_id:owner.message_id,profile:null})});
-    miRememberDecisions(chatId,decision);
-    const updated=await app.api(`/v1/chats/${chatId}/messages`);
-    if(state.chat?.chat_id===chatId){
-      state.messages=updated;
-      if(typeof mmRefreshChat==='function')await mmRefreshChat();
-      renderMessages();
+    const progress=document.createElement('div');progress.className='mi-live-progress';
+    const statusText=document.createElement('strong');statusText.textContent='Preparando contexto no servidor';
+    progress.appendChild(statusText);
+    footer?.appendChild(progress);
+    const startedAt=Date.now();
+    let refreshing=false;
+    const refresh=async()=>{
+      if(refreshing||state.chat?.chat_id!==chatId)return;
+      refreshing=true;
+      try{
+        const rows=await app.api('/v1/chats/'+encodeURIComponent(chatId)+'/model-decisions?limit=50');
+        miRememberDecisions(chatId,rows);
+        const current=rows.find(d=>d.owner_message_id===owner.message_id);
+        const seconds=Math.floor((Date.now()-startedAt)/1000);
+        statusText.textContent=miProgressLabel(current)+' · '+seconds+'s';
+      }catch(e){statusText.textContent='Aguardando confirmação do servidor';}
+      finally{refreshing=false}
+    };
+    const interval=setInterval(()=>{void refresh()},4000);
+    try{
+      const decision=await app.api(`/v1/chats/${chatId}/respond`,{method:'POST',body:JSON.stringify({owner_message_id:owner.message_id,profile:null})});
+      miRememberDecisions(chatId,decision);
+      const updated=await app.api(`/v1/chats/${chatId}/messages`);
+      if(state.chat?.chat_id===chatId){
+        state.messages=updated;
+        if(typeof mmRefreshChat==='function')await mmRefreshChat();
+        renderMessages();
+      }
+      app.notice('Resposta concluída.','good');
+      await miBoot();
+    }finally{
+      clearInterval(interval);
+      progress.remove();
     }
-    app.notice('Resposta concluída.','good');
-    await miBoot();
+    return;
   }catch(e){
     if(e?.code==='NO_MEASURED_ROUTE'||e?.code==='BENCHMARK_REQUIRED'){
       app.notice('Mensagem salva · nenhuma rota gratuita medida está elegível ainda.','warn');
