@@ -124,3 +124,19 @@ def test_workspace_release_is_activation_v1() -> None:
     source = Path("src/amodex/api/workspace_app.py").read_text(encoding="utf-8")
     assert '_RELEASE = "0.7.6-activation-v1"' in source
     assert "build_activation_router" in source
+
+
+def test_render_liveness_probe_remains_separate_from_database_readiness() -> None:
+    from pathlib import Path
+
+    config = Path("render.yaml").read_text(encoding="utf-8")
+    assert "healthCheckPath: /healthz" in config
+    from amodex.api.activation_status import build_activation_router
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    app = FastAPI()
+    app.include_router(build_activation_router(dsn="", app_version="test"))
+    client = TestClient(app)
+    assert client.get("/healthz").status_code == 200
+    assert client.get("/readyz").status_code == 503
