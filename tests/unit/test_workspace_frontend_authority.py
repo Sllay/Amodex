@@ -177,3 +177,15 @@ def test_routed_error_ui_javascript_parses() -> None:
             [node, "--check"], input=body, text=True, capture_output=True, timeout=15
         )
         assert result.returncode == 0, result.stderr
+
+
+def test_stale_chat_decision_has_explicit_safe_recovery_without_provider_retry() -> None:
+    from amodex.api.model_intelligence_web import _STEP4_SCRIPT, _STEP4_CSS
+
+    assert "decision.status==='STARTED'&&Number.isFinite(age)&&age>=300000" in _STEP4_SCRIPT
+    assert "Reconciliar estado" in _STEP4_SCRIPT
+    assert "stale_after_seconds:300" in _STEP4_SCRIPT
+    assert "await miLoadDecisions(chatId,window.AmodexApp)" in _STEP4_SCRIPT
+    assert "mi-reconcile-btn" in _STEP4_CSS
+    assert "model-intelligence/reconcile" in _STEP4_SCRIPT
+    assert "Não reenviar automaticamente." in _STEP4_SCRIPT
