@@ -309,6 +309,11 @@ def test_chat_prefers_measured_mistral_without_reordering_agent_leaderboard(stat
         assert decision["attempt_count"] == 1
         assert decision["fallback_used"] is False
         assert "chat_primary_policy=PRIMARY_ELIGIBLE" in decision["selection_facts"]
+        stages = [str(fact).split(":")[1] for fact in decision["selection_facts"]
+                  if str(fact).startswith("progress:")]
+        assert stages == [
+            "context_ready", "route_selected", "provider_wait", "provider_done", "reply_saved"
+        ]
         assert registry.clients[AMODEX_PRIMARY_CHAT_ROUTE_ID].chat_calls == 1
         assert sum(fake.chat_calls for fake in registry.clients.values()) == 1
         assert service.leaderboard(WorkerProfileKind.REPOSITORY_ANALYST) == ranking_before
