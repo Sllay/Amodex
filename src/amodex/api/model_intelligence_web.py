@@ -7,6 +7,7 @@ _STEP4_CSS = r'''
 .mi-ready{border-color:var(--good)!important}.mi-busy{opacity:.62;pointer-events:none}.mi-note{font-size:.76rem;color:var(--muted);line-height:1.4}
 .mi-route-footnote{font-size:.73rem;margin-top:13px;padding-top:8px;border-top:1px solid var(--line);color:var(--muted);overflow-wrap:anywhere}
 .mi-route-footnote.is-fallback{color:var(--warn)}
+.mi-reply-state{font-size:.73rem;margin-top:9px;color:var(--warn);overflow-wrap:anywhere}
 '''
 
 _STEP4_SCRIPT = r'''
@@ -55,11 +56,25 @@ function miDecorateMessages(){
   if(!chatId||!Array.isArray(state.messages))return;
   const stored=miDecisionsByChat.get(chatId)||[];
   const byMessage=new Map(stored.filter(d=>d.result_message_id).map(d=>[d.result_message_id,d]));
+  const byOwner=new Map(stored.filter(d=>d.owner_message_id).map(d=>[d.owner_message_id,d]));
   const nodes=[...document.querySelectorAll('#messages .message')];
   state.messages.forEach((m,index)=>{
-    if(m.role!=='AMODEX')return;
     const bubble=nodes[index]?.querySelector('.bubble');
     if(!bubble)return;
+    if(m.role==='OWNER'){
+      const decision=byOwner.get(m.message_id);
+      const failed=decision&&['FAILED','UNKNOWN_OUTCOME','STARTED'].includes(decision.status);
+      let mark=bubble.querySelector('.mi-reply-state');
+      if(!failed){mark?.remove();return}
+      if(!mark){mark=document.createElement('div');mark.className='mi-reply-state';bubble.appendChild(mark)}
+      mark.textContent=decision.status==='UNKNOWN_OUTCOME'
+        ?'Resposta não confirmada ('+(decision.error_code||'resultado incerto')+'). Não reenviar automaticamente.'
+        :decision.status==='FAILED'
+          ?'Resposta falhou ('+(decision.error_code||'erro')+'). Mensagem preservada.'
+          :'Processamento iniciado; estado final ainda não confirmado.';
+      return;
+    }
+    if(m.role!=='AMODEX')return;
     const result=miRouteFootnote(byMessage.get(m.message_id));
     let footer=bubble.querySelector('.mi-route-footnote');
     if(!result){footer?.remove();return}
@@ -100,10 +115,17 @@ async function miAutomaticReply(app,ctx){
     if(e?.code==='NO_MEASURED_ROUTE'||e?.code==='BENCHMARK_REQUIRED'){
       app.notice('Mensagem salva · nenhuma rota gratuita medida está elegível ainda.','warn');
     }else if(e?.code==='DECISION_ALREADY_EXISTS'){
-      console.warn('model decision already exists',e);
+      app.notice('Mensagem já possui uma decisão. Consulte o estado registrado antes de reenviar.','warn');
+    }else if(e?.code==='PROVIDER_OUTCOME_UNKNOWN'){
+      app.notice('Mensagem salva, mas a resposta não foi confirmada (timeout/provedor). Não reenvie automaticamente.','warn');
+    }else if(e?.code==='ROUTED_RESPONSE_FAILED'){
+      app.notice('Mensagem salva, porém nenhuma rota gratuita concluiu a resposta. Consulte o estado.','warn');
+    }else if(e?.status>=500||/bad gateway/i.test(e?.message||'')){
+      app.notice('Mensagem salva, mas a conexão com a IA falhou. Confira o histórico antes de repetir.','warn');
     }else{
       app.error(e);
     }
+    await miLoadDecisions(chatId,app);
     await miBoot();
   }finally{
     document.querySelector('.composer-wrap')?.classList.remove('mi-busy');
