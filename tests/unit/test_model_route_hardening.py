@@ -391,3 +391,64 @@ def test_progress_markers_require_known_nonnegative_stages(monkeypatch) -> None:
             repo.append_progress_fact(decision_id="decision", stage=stage, elapsed_ms=1)
     with pytest.raises(ValueError):
         repo.append_progress_fact(decision_id="decision", stage="provider_wait", elapsed_ms=-1)
+
+
+def test_chat_sse_replays_redacted_progress_and_respects_last_event_id() -> None:
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    service = _Service()
+    service.progress_snapshot = lambda **kwargs: {
+        "decision_id": "decision-1",
+        "status": "SUCCEEDED",
+        "phases": [
+            {"stage": "context_ready", "elapsed_ms": 11},
+            {"stage": "provider_wait", "elapsed_ms": 25},
+            {"stage": "reply_saved", "elapsed_ms": 93},
+        ],
+    }
+    app = FastAPI()
+    app.include_router(build_model_intelligence_router(service))
+    response = TestClient(app).get(
+        "/v1/chats/chat-1/respond/events?owner_message_id=owner-1",
+        headers={"Last-Event-ID": "1"},
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert "no-store" in response.headers["cache-control"]
+    assert response.headers["x-accel-buffering"] == "no"
+    assert "id: 1" not in response.text
+    assert "id: 2" in response.text
+    assert "provider_wait" in response.text
+    assert "event: done" in response.text
+    assert "SUCCEEDED" in response.text
+
+
+def test_progress_snapshot_rejects_other_chat_and_filters_unknown_facts() -> None:
+    from types import SimpleNamespace
+    import pytest
+    from amodex.model_intelligence.models import ModelIntelligenceError
+    from amodex.model_intelligence.service import ModelIntelligenceService
+
+    record = {
+        "decision_id": "decision-1",
+        "chat_id": "chat-1",
+        "status": "STARTED",
+        "selection_facts": [
+            "credential_pool=free", "progress:context_ready:42",
+            "progress:provider_wait:88", "progress:reasoning_content:99",
+            "progress:reply_saved:not-a-number",
+        ],
+    }
+    service = object.__new__(ModelIntelligenceService)
+    service._repository = SimpleNamespace(
+        get_decision_for_owner_message=lambda value: record
+    )
+    progress = service.progress_snapshot(chat_id="chat-1", owner_message_id="owner-1")
+    assert progress["status"] == "STARTED"
+    assert progress["phases"] == [
+        {"stage": "context_ready", "elapsed_ms": 42},
+        {"stage": "provider_wait", "elapsed_ms": 88},
+    ]
+    with pytest.raises(ModelIntelligenceError):
+        service.progress_snapshot(chat_id="other-chat", owner_message_id="owner-1")
