@@ -100,6 +100,15 @@ async function runtimeSendMessage(){
     ctx.app=window.AmodexApp;
     await runHooks('beforeSend',ctx);
     if(!ctx.content&&!ctx.allowEmpty){uiNotice('');return null}
+    // A recent, identical saved owner turn must not be posted again just
+    // because the provider timed out or the gateway dropped its response.
+    const previous=(state.messages||[]).at(-1);
+    const previousAgeMs=previous?.created_at?Date.now()-Date.parse(previous.created_at):Infinity;
+    if(previous?.role==='OWNER'&&String(previous.content||'').trim()===String(ctx.content||'').trim()
+       &&Number.isFinite(previousAgeMs)&&previousAgeMs>=0&&previousAgeMs<600000){
+      uiNotice('Essa pergunta já está salva sem resposta confirmada. Consulte o estado antes de repetir.','warn');
+      return null;
+    }
     const owner=await runtimeApi(`/v1/chats/${state.chat.chat_id}/messages`,{method:'POST',body:JSON.stringify({role:'OWNER',content:ctx.content})});
     ctx.owner=owner;
     const existing=new Set((state.messages||[]).map(m=>m.message_id));
@@ -108,7 +117,9 @@ async function runtimeSendMessage(){
     if(input)input.value='';
     runtimeRenderMessages();
     uiNotice('Mensagem salva.','good');
-    void runHooks('afterSend',ctx).catch(runtimeError);
+    // Keep the single-send guard active during routed inference.
+    // Otherwise a second click can create a second owner message.
+    await runHooks('afterSend',ctx);
     return owner;
   }catch(e){runtimeError(e);return null}
   finally{

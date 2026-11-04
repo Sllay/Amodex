@@ -302,3 +302,14 @@ def test_chat_prefers_primary_model_even_when_agent_scores_higher() -> None:
     assert result["attempt_count"] == 1
     assert result["fallback_used"] is False  # No second network attempt; UI marks primary substitution.
     assert "chat_primary_policy=PRIMARY_UNAVAILABLE" in result["selection_facts"]
+
+
+def test_provider_timeout_remains_ambiguous_and_is_logged_without_secrets() -> None:
+    import inspect
+    from amodex.model_intelligence.service import ModelIntelligenceService
+
+    source = inspect.getsource(ModelIntelligenceService.respond)
+    assert "chat_provider_failure route_id=%s decision_id=%s code=%s" in source
+    safe_segment = source.split("chat_provider_failure route_id=", 1)[1].split("if ambiguous:", 1)[0]
+    assert "exc.message" not in safe_segment
+    assert "provider outcome is ambiguous; no blind retry or fallback was performed" in source

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from statistics import median
@@ -43,6 +44,8 @@ from amodex.storage.routing import PostgresRoutingRepository
 from amodex.storage.workspace import PostgresWorkspaceRepository
 from amodex.workspace.models import ChatRole
 
+
+_logger = logging.getLogger(__name__)
 
 _SENSITIVE_PROFILES = frozenset(
     {
@@ -440,6 +443,10 @@ class ModelIntelligenceService:
                     error_message=exc.message,
                 )
                 last_code, last_message = exc.code, exc.message
+                _logger.warning(
+                    "chat_provider_failure route_id=%s decision_id=%s code=%s ambiguous=%s latency_ms=%.0f",
+                    item.route_id, decision_id, exc.code, ambiguous, latency_ms,
+                )
                 if ambiguous:
                     decision = self._repository.finish_decision(
                         decision_id=decision_id,
