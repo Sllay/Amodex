@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException, Query, Response
 from amodex.model_intelligence.models import (
     BenchmarkRunRequest,
     ChatRespondRequest,
+    ManualChatRecoveryRequest,
     ModelIntelligenceError,
     ReconcileRequest,
 )
@@ -156,6 +157,25 @@ def build_model_intelligence_router(service: ModelIntelligenceService) -> APIRou
                     chat_id=chat_id,
                     owner_message_id=payload.owner_message_id,
                     profile=payload.profile,
+                )
+            )
+        except ModelIntelligenceError as exc:
+            _raise(exc)
+
+    @router.post("/chats/{chat_id}/respond/recover")
+    def recover_response(chat_id: str, payload: ManualChatRecoveryRequest) -> dict:
+        """Owner-initiated free alternative for ONE saved ambiguous attempt.
+
+        Never creates a second owner message and never automatically retries
+        NVIDIA. Duplicate/concurrent clicks are rejected by an atomic DB claim.
+        """
+        try:
+            return asyncio.run(
+                service.respond(
+                    chat_id=chat_id,
+                    owner_message_id=payload.owner_message_id,
+                    profile=None,
+                    manual_recovery=True,
                 )
             )
         except ModelIntelligenceError as exc:
