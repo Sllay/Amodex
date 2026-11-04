@@ -112,22 +112,22 @@ def test_chat_model_footer_reports_provenance_without_false_legacy_fallback() ->
         "function miRememberDecisions(", 1
     )[0]
     javascript = (
-        "const MI_PRIMARY_ROUTE=" + json.dumps(AMODEX_PRIMARY_CHAT_ROUTE_ID) + ";\\n"
-        "const MI_PROVIDER_NAMES=" + helpers + "\\n"
+        "const MI_PRIMARY_ROUTE=" + json.dumps(AMODEX_PRIMARY_CHAT_ROUTE_ID) + ";\n"
+        "const MI_PROVIDER_NAMES=" + helpers + "\n"
         "const base={status:'SUCCEEDED',result_message_id:'msg-1',final_route_id:MI_PRIMARY_ROUTE,"
-        "selection_facts:[],fallback_used:false};\\n"
-        "const groq='groq:openai/gpt-oss-20b:groq-free-primary';\\n"
-        "const primary=miRouteFootnote(base);\\n"
-        "const historical=miRouteFootnote({...base,final_route_id:groq});\\n"
+        "selection_facts:[],fallback_used:false};\n"
+        "const groq='groq:openai/gpt-oss-20b:groq-free-primary';\n"
+        "const primary=miRouteFootnote(base);\n"
+        "const historical=miRouteFootnote({...base,final_route_id:groq});\n"
         "const substitution=miRouteFootnote({...base,final_route_id:groq,"
-        "selection_facts:['chat_primary_policy=PRIMARY_UNAVAILABLE']});\\n"
-        "const retry=miRouteFootnote({...base,final_route_id:groq,fallback_used:true});\\n"
-        "const missing=miRouteFootnote({...base,result_message_id:null});\\n"
-        "if(primary.label!=='modelo/nvidia-mistral-large-4'||primary.isFallback)throw Error('primary');\\n"
-        "if(historical.label!=='modelo/groq-gpt-oss-20b'||historical.isFallback)throw Error('legacy');\\n"
-        "if(substitution.label!=='fallback/groq-gpt-oss-20b'||!substitution.isFallback)throw Error('substitution');\\n"
-        "if(retry.label!=='fallback/groq-gpt-oss-20b'||!retry.isFallback)throw Error('retry');\\n"
-        "if(missing!==null)throw Error('missing');\\n"
+        "selection_facts:['chat_primary_policy=PRIMARY_UNAVAILABLE']});\n"
+        "const retry=miRouteFootnote({...base,final_route_id:groq,fallback_used:true});\n"
+        "const missing=miRouteFootnote({...base,result_message_id:null});\n"
+        "if(primary.label!=='modelo/nvidia-mistral-large-4'||primary.isFallback)throw Error('primary');\n"
+        "if(historical.label!=='modelo/groq-gpt-oss-20b'||historical.isFallback)throw Error('legacy');\n"
+        "if(substitution.label!=='fallback/groq-gpt-oss-20b'||!substitution.isFallback)throw Error('substitution');\n"
+        "if(retry.label!=='fallback/groq-gpt-oss-20b'||!retry.isFallback)throw Error('retry');\n"
+        "if(missing!==null)throw Error('missing');\n"
     )
     result = subprocess.run(
         [node, "-e", javascript], capture_output=True, text=True, check=False, timeout=15
