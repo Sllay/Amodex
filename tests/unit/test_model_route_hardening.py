@@ -328,3 +328,36 @@ def test_routed_chat_endpoint_is_threadpooled_to_keep_health_checks_responsive()
     )
     assert not inspect.iscoroutinefunction(endpoint)
     assert "asyncio.run" in inspect.getsource(endpoint)
+
+
+def test_explicit_recovery_api_is_not_normal_send_retry() -> None:
+    import inspect
+    from amodex.api.model_intelligence_routes import build_model_intelligence_router
+    from amodex.model_intelligence.models import ManualChatRecoveryRequest
+
+    assert ManualChatRecoveryRequest(owner_message_id="example").owner_message_id == "example"
+    router = build_model_intelligence_router(_Service())
+    recover = next(
+        item.endpoint for item in router.routes
+        if item.path.endswith("/respond/recover")
+    )
+    assert not inspect.iscoroutinefunction(recover)
+    source = inspect.getsource(recover)
+    assert "manual_recovery=True" in source
+    assert "asyncio.run(" in source
+    assert "owner_message_id=payload.owner_message_id" in source
+
+
+def test_manual_recovery_uses_existing_decision_and_never_retries_original_route() -> None:
+    import inspect
+    from amodex.model_intelligence.service import ModelIntelligenceService
+    from amodex.storage.model_intelligence import PostgresModelIntelligenceRepository
+
+    source = inspect.getsource(ModelIntelligenceService.respond)
+    claim = inspect.getsource(PostgresModelIntelligenceRepository.claim_manual_recovery)
+    assert "item.route_id != original_route" in source
+    assert "attempts = 1" in source
+    assert "ranked[:1 if manual_recovery else 2]" in source
+    assert "self._repository.claim_manual_recovery(" in source
+    assert "status='UNKNOWN_OUTCOME' AND attempt_count=1" in claim
+    assert "AND result_message_id IS NULL" in claim
