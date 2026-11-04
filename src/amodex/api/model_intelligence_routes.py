@@ -221,16 +221,16 @@ def build_model_intelligence_router(service: ModelIntelligenceService) -> APIRou
                     if stage_index <= seen:
                         continue
                     payload = json.dumps(item, separators=(",", ":"))
-                    yield f"id: {stage_index}\\ndata: {payload}\\n\\n"
+                    yield f"id: {stage_index}\ndata: {payload}\n\n"
                     seen = stage_index
                 if snapshot["status"] in terminal:
                     result = json.dumps(
                         {"status": snapshot["status"], "decision_id": snapshot["decision_id"]},
                         separators=(",", ":"),
                     )
-                    yield f"event: done\\ndata: {result}\\n\\n"
+                    yield f"event: done\ndata: {result}\n\n"
                     return
-                yield ": heartbeat\\n\\n"
+                yield ": heartbeat\n\n"
                 await asyncio.sleep(2.0)
                 try:
                     snapshot = await asyncio.to_thread(
