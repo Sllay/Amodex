@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+from time import monotonic
 import os
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Query, Response
+from fastapi import APIRouter, Header, HTTPException, Query, Request, Response
+from fastapi.responses import StreamingResponse
 
 from amodex.model_intelligence.models import (
     BenchmarkRunRequest,
@@ -180,6 +183,72 @@ def build_model_intelligence_router(service: ModelIntelligenceService) -> APIRou
             )
         except ModelIntelligenceError as exc:
             _raise(exc)
+
+    @router.get("/chats/{chat_id}/respond/events")
+    async def respond_events(
+        chat_id: str,
+        request: Request,
+        owner_message_id: str = Query(min_length=1, max_length=100),
+        last_event_id: str | None = Header(default=None),
+    ) -> StreamingResponse:
+        """Replay stored, redacted stages via SSE; never launches provider calls.
+
+        Last-Event-ID is the stage ordinal, allowing native EventSource reconnects
+        to resume instead of repeating already displayed progress.
+        """
+        try:
+            initial = await asyncio.to_thread(
+                service.progress_snapshot,
+                chat_id=chat_id,
+                owner_message_id=owner_message_id,
+            )
+        except ModelIntelligenceError as exc:
+            _raise(exc)
+        try:
+            from_stage = max(0, min(int(last_event_id or "0"), 30))
+        except ValueError:
+            from_stage = 0
+
+        async def generate():
+            seen = from_stage
+            snapshot = initial
+            expires = monotonic() + 180.0
+            terminal = {"SUCCEEDED", "FAILED", "UNKNOWN_OUTCOME", "BLOCKED"}
+            while monotonic() < expires:
+                if await request.is_disconnected():
+                    break
+                for stage_index, item in enumerate(snapshot["phases"], start=1):
+                    if stage_index <= seen:
+                        continue
+                    payload = json.dumps(item, separators=(",", ":"))
+                    yield f"id: {stage_index}\\ndata: {payload}\\n\\n"
+                    seen = stage_index
+                if snapshot["status"] in terminal:
+                    result = json.dumps(
+                        {"status": snapshot["status"], "decision_id": snapshot["decision_id"]},
+                        separators=(",", ":"),
+                    )
+                    yield f"event: done\\ndata: {result}\\n\\n"
+                    return
+                yield ": heartbeat\\n\\n"
+                await asyncio.sleep(2.0)
+                try:
+                    snapshot = await asyncio.to_thread(
+                        service.progress_snapshot,
+                        chat_id=chat_id,
+                        owner_message_id=owner_message_id,
+                    )
+                except ModelIntelligenceError:
+                    break
+
+        return StreamingResponse(
+            generate(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "private, no-cache, no-store, no-transform",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     @router.get("/chats/{chat_id}/model-decisions")
     def chat_decisions(chat_id: str, limit: int = Query(default=100, ge=1, le=500)) -> tuple[dict, ...]:
