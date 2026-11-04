@@ -460,7 +460,7 @@ class ModelIntelligenceService:
 
         last_code = "ROUTE_FAILED"
         last_message = "all bounded routes failed"
-        for item in ranked[:1 if manual_recovery else 2]:
+        for item in (ranked[:1] if manual_recovery else ranked[:2]):
             attempts += 1
             candidate = self._candidate_for_route(item.route_id)
             request_key = new_uuid7()
