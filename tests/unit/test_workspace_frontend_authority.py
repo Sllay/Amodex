@@ -133,3 +133,47 @@ def test_chat_model_footer_reports_provenance_without_false_legacy_fallback() ->
         [node, "-e", javascript], capture_output=True, text=True, check=False, timeout=15
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_send_guard_covers_inference_and_rejects_recent_identical_unanswered_turn() -> None:
+    from amodex.api.ui_stability_web import _STABILITY_SCRIPT
+
+    assert "await runHooks('afterSend',ctx);" in _STABILITY_SCRIPT
+    assert "void runHooks('afterSend',ctx)" not in _STABILITY_SCRIPT
+    assert "if(runtimeState.sending||!state.chat)return null;" in _STABILITY_SCRIPT
+    assert "previous?.role==='OWNER'" in _STABILITY_SCRIPT
+    assert "previousAgeMs<600000" in _STABILITY_SCRIPT
+    assert _STABILITY_SCRIPT.count("/messages`,{method:'POST'") == 1
+
+
+def test_routed_failure_messages_are_visible_without_fake_assistant_reply() -> None:
+    from amodex.api.model_intelligence_web import _STEP4_SCRIPT, _STEP4_CSS
+
+    assert "const byOwner=new Map(" in _STEP4_SCRIPT
+    assert "['FAILED','UNKNOWN_OUTCOME','STARTED']" in _STEP4_SCRIPT
+    assert "decision.error_code||'resultado incerto'" in _STEP4_SCRIPT
+    assert "Não reenviar automaticamente." in _STEP4_SCRIPT
+    assert "mi-reply-state" in _STEP4_CSS
+    assert "e?.code==='PROVIDER_OUTCOME_UNKNOWN'" in _STEP4_SCRIPT
+    assert "await miLoadDecisions(chatId,app);" in _STEP4_SCRIPT
+    assert "/messages`,{method:'POST'" not in _STEP4_SCRIPT
+
+
+def test_routed_error_ui_javascript_parses() -> None:
+    import shutil
+    import subprocess
+
+    import pytest
+
+    from amodex.api.model_intelligence_web import _STEP4_SCRIPT
+    from amodex.api.ui_stability_web import _STABILITY_SCRIPT
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js unavailable in CI")
+    for script in (_STEP4_SCRIPT, _STABILITY_SCRIPT):
+        body = script.split(">", 1)[1].split("</script>", 1)[0]
+        result = subprocess.run(
+            [node, "--check"], input=body, text=True, capture_output=True, timeout=15
+        )
+        assert result.returncode == 0, result.stderr
