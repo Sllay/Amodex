@@ -88,7 +88,7 @@ MODEL_INTELLIGENCE_HTML = r'''<!doctype html>
 <html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Amodex · Model Intelligence</title>
 <style>
-:root{color-scheme:dark;--bg:#0b0f14;--panel:#111821;--panel2:#171f2a;--line:#2b3644;--text:#edf3fa;--muted:#9aa9b8;--good:#55d18b;--warn:#f2c14e;--bad:#ff6b6b}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px system-ui,sans-serif}header{position:sticky;top:0;background:rgba(11,15,20,.94);backdrop-filter:blur(12px);border-bottom:1px solid var(--line);padding:12px 16px;display:flex;gap:10px;align-items:center;z-index:2}header strong{font-size:1.05rem}header .grow{flex:1}.wrap{max-width:1100px;margin:auto;padding:16px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px}.route{margin:9px 0;padding:10px;border:1px solid var(--line);border-radius:11px;background:var(--panel2)}button,select{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:9px;padding:8px 10px}button{cursor:pointer}.primary{border-color:#5e8cff}.badge{display:inline-block;padding:3px 7px;border:1px solid var(--line);border-radius:999px;font-size:.72rem}.good{color:var(--good);border-color:var(--good)}.warn{color:var(--warn);border-color:var(--warn)}.bad{color:var(--bad);border-color:var(--bad)}.muted{color:var(--muted)}.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.busy{opacity:.58;pointer-events:none}code{overflow-wrap:anywhere}.benchline{margin:7px 0;padding:7px 9px;border:1px solid var(--line);border-radius:9px}.proof{margin-top:12px}.case{margin:8px 0;padding:9px;border:1px solid var(--line);border-radius:9px;background:#0d131a}.case pre{margin:7px 0 0;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--muted);font-size:.78rem}.hidden{display:none}@media(max-width:600px){header{padding:10px}.wrap{padding:10px}.grid{grid-template-columns:1fr}}
+:root{color-scheme:dark;--bg:#0b0f14;--panel:#111821;--panel2:#171f2a;--line:#2b3644;--text:#edf3fa;--muted:#9aa9b8;--good:#55d18b;--warn:#f2c14e;--bad:#ff6b6b}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px system-ui,sans-serif}header{position:sticky;top:0;background:rgba(11,15,20,.94);backdrop-filter:blur(12px);border-bottom:1px solid var(--line);padding:12px 16px;display:flex;gap:10px;align-items:center;z-index:2}header strong{font-size:1.05rem}header .grow{flex:1}.wrap{max-width:1100px;margin:auto;padding:16px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px}.route{margin:9px 0;padding:10px;border:1px solid var(--line);border-radius:11px;background:var(--panel2)}button,select{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:9px;padding:8px 10px}button{cursor:pointer}.primary{border-color:#5e8cff}.badge{display:inline-block;padding:3px 7px;border:1px solid var(--line);border-radius:999px;font-size:.72rem}.good{color:var(--good);border-color:var(--good)}.warn{color:var(--warn);border-color:var(--warn)}.bad{color:var(--bad);border-color:var(--bad)}.muted{color:var(--muted)}.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.busy{opacity:.58;pointer-events:none}code{overflow-wrap:anywhere}.benchline{margin:7px 0;padding:7px 9px;border:1px solid var(--line);border-radius:9px}.proof{margin-top:12px}.case{margin:8px 0;padding:9px;border:1px solid var(--line);border-radius:9px;background:#0d131a}.case pre{margin:7px 0 0;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--muted);font-size:.78rem}.hidden{display:none}.validation-routes{margin-top:14px;border-top:1px solid var(--line);padding-top:10px}.validation-routes summary{cursor:pointer;padding:9px 4px;color:var(--muted);font-weight:600}.validation-routes[open] summary{color:var(--text)}@media(max-width:600px){header{padding:10px}.wrap{padding:10px}.grid{grid-template-columns:1fr}}
 </style></head><body>
 <header><button onclick="location.href='/'">← Workspace</button><strong>Model Intelligence</strong><span id="status" class="badge warn">loading</span><span class="grow"></span><button onclick="reconcile()">Reconciliar UNKNOWN</button></header>
 <div class="wrap"><div class="grid"><section class="card"><h2>Rotas</h2><p class="muted">Texto e visão são medições independentes. Falha de provider/rate limit nunca conta como erro visual: suites incompletas ficam BLOCKED e não criam score certificado.</p><div id="routes"></div></section><section class="card"><h2>Leaderboard</h2><div class="row"><select id="profile" onchange="loadLeaderboard()"><option value="repository-analyst">Repository analyst</option><option value="research">Research</option><option value="implementation">Implementation</option><option value="correction">Correction</option><option value="reviewer">Reviewer</option><option value="integration-migration">Integration</option><option value="godot-specialist">Godot</option><option value="visual-runtime-validation">Visual/runtime</option></select></div><div id="leaderboard"></div></section></div><section class="card proof" id="nvidiaDiagnostic"><h2>Diagnóstico NVIDIA · Mistral Large 4</h2><p class="muted">Conexão real com a NVIDIA, separada do benchmark. Primeiro confira a configuração; depois execute um teste de texto e um de imagem. Cada botão faz apenas uma chamada externa. Não altera notas, rotas nem mensagens.</p><div id="nvidiaDiagConfig" class="case">Carregando configuração, sem chamar a NVIDIA…</div><div class="row"><button onclick="loadNvidiaDiagnosticConfig()">Rever configuração</button><button class="primary" onclick="runNvidiaDiagnostic('text')">1 · Testar texto (HTTP)</button><button class="primary" onclick="runNvidiaDiagnostic('vision')">2 · Testar PNG (visão)</button></div><p class="muted">Ambos usam a rota fixa NVIDIA e exigem pool classificado como gratuito. Existe limite de 40 segundos por modalidade para evitar chamadas repetidas. A chave nunca aparece no relatório.</p><div id="nvidiaDiagResults"></div></section><section id="visionEvidence" class="card proof hidden"><h2>Prova visual</h2><div id="visionEvidenceBody"></div></section></div>
@@ -99,9 +99,70 @@ async function req(path,opt={}){const r=await fetch(path,{headers:{'content-type
 async function boot(){await Promise.all([loadStatus(),loadRoutes(),loadLeaderboard(),loadNvidiaDiagnosticConfig()])}
 async function loadStatus(){try{const s=await req('/v1/model-intelligence/status');const el=document.getElementById('status');const ready=s.automatic_chat_inference==='READY';el.textContent=ready?'AI routed':'benchmark needed';el.className='badge '+(ready?'good':'warn')}catch(e){console.warn(e)}}
 function latestFor(runs,routeId,suite){return runs.find(b=>b.route_id===routeId&&b.suite_version===suite)||null}
-function benchLine(label,b){if(!b)return `<div class="benchline muted"><strong>${label}:</strong> ainda não medido</div>`;const blocked=label==='Visão'&&b.status==='BLOCKED';return `<div class="benchline"><strong>${label}:</strong> ${esc(b.status)} · ${blocked?'score parcial':'score'} ${Number(b.aggregate_score||0).toFixed(3)} · ${Number(b.passed_count||0)}/${Number(b.sample_count||0)} casos pontuados${blocked?'<br><span class="warn">suite incompleta · não certifica visão</span>':''}<br><span class="muted">${esc(b.suite_version)}</span></div>`}
+function benchLine(label,b){
+ if(!b)return '<div class="benchline muted"><strong>'+esc(label)+':</strong> ainda não medido</div>';
+ const blocked=label==='Visão'&&b.status==='BLOCKED';
+ const scored=Number(b.sample_count||0);
+ const score=Number(b.aggregate_score||0);
+ const failed=b.status==='SUCCEEDED'&&scored>0&&score===0;
+ const state=failed?'REPROVADO NO BENCHMARK':b.status;
+ return '<div class="benchline"><strong>'+esc(label)+':</strong> '+esc(state)+' · '+(blocked?'score parcial ':'score ')+score.toFixed(3)+' · '+Number(b.passed_count||0)+'/'+scored+' casos pontuados'+(failed?'<br><span class="warn">O transporte respondeu, mas não acertou os casos. Não está validado.</span>':'')+(blocked?'<br><span class="warn">suite incompleta · não certifica visão</span>':'')+'<br><span class="muted">'+esc(b.suite_version)+'</span></div>';
+}
 function hasMeasuredVisionTransport(r){return (r.provider==='groq'&&r.model==='qwen/qwen3.8-27b')||(r.provider==='nvidia'&&r.model==='mistralai/mistral-large-4-1t-a52b')}
-async function loadRoutes(){const [rows,runs]=await Promise.all([req('/v1/model-intelligence/routes'),req('/v1/model-intelligence/benchmarks?limit=100')]);const root=document.getElementById('routes');root.innerHTML='';for(const r of rows){if(r.enabled===false)continue;const card=document.createElement('div');card.className='route';const caps=Array.isArray(r.capabilities)?r.capabilities:[];const vision=caps.includes('vision');const visualTransport=hasMeasuredVisionTransport(r);const textRun=latestFor(runs,r.route_id,TEXT_SUITE);const visionRun=latestFor(runs,r.route_id,VISION_SUITE);const top=document.createElement('div');top.innerHTML=`<strong>${esc(r.provider)} · ${esc(r.model)}</strong><br><code>${esc(r.route_id)}</code><br><span class="badge">${esc(r.lifecycle)}</span> <span class="muted">${esc(r.cost_class)}</span> ${vision?'<span class="badge warn">vision declarada</span>':''}${vision&&!visualTransport?' <span class="badge">transporte visual não medido</span>':''}${benchLine('Texto',textRun)}${vision?benchLine('Visão',visionRun):''}`;card.appendChild(top);const actions=document.createElement('div');actions.className='row';const btn=document.createElement('button');btn.textContent='Benchmark texto';btn.addEventListener('click',()=>runBenchmark(r.route_id));actions.appendChild(btn);if(visualTransport){const vb=document.createElement('button');vb.className='primary';vb.textContent='👁 Benchmark visual';vb.addEventListener('click',()=>runVisionBenchmark(r.route_id));actions.appendChild(vb)}if(visionRun){const proof=document.createElement('button');proof.textContent='Ver prova visual';proof.addEventListener('click',()=>loadSavedVisionEvidence(r.route_id,visionRun.benchmark_id));actions.appendChild(proof)}card.appendChild(actions);root.appendChild(card)}}
+const AMODEX_PRIMARY_ROUTE='nvidia:mistralai/mistral-large-4-1t-a52b:nvidia-free-primary';
+function textValidated(r,runs){
+ const b=latestFor(runs,r.route_id,TEXT_SUITE);
+ return ['ELIGIBLE','ELIGIBLE_LIMITED'].includes(r.lifecycle)&&!!b&&b.status==='SUCCEEDED'&&Number(b.sample_count||0)>=3&&Number(b.aggregate_score||0)>=0.8;
+}
+function visionValidated(r,runs){
+ const b=latestFor(runs,r.route_id,VISION_SUITE);
+ return !!b&&b.status==='SUCCEEDED'&&Number(b.sample_count||0)===5&&Number(b.aggregate_score||0)>=0.8;
+}
+function routeCard(r,runs){
+ const card=document.createElement('div');
+ card.className='route';
+ const caps=Array.isArray(r.capabilities)?r.capabilities:[];
+ const vision=caps.includes('vision'),visualTransport=hasMeasuredVisionTransport(r);
+ const textRun=latestFor(runs,r.route_id,TEXT_SUITE),visionRun=latestFor(runs,r.route_id,VISION_SUITE);
+ const top=document.createElement('div');
+ top.innerHTML='<strong>'+esc(r.provider)+' · '+esc(r.model)+'</strong><br><code>'+esc(r.route_id)+'</code><br><span class="badge">'+esc(r.lifecycle)+'</span> <span class="muted">'+esc(r.cost_class)+'</span> '+(vision?'<span class="badge warn">vision declarada</span>':'')+(vision&&!visualTransport?' <span class="badge">transporte visual não medido</span>':'')+benchLine('Texto',textRun)+(vision?benchLine('Visão',visionRun):'');
+ card.appendChild(top);
+ const actions=document.createElement('div');actions.className='row';
+ const btn=document.createElement('button');btn.textContent='Benchmark texto';btn.addEventListener('click',()=>runBenchmark(r.route_id));actions.appendChild(btn);
+ if(visualTransport){const vb=document.createElement('button');vb.className='primary';vb.textContent='👁 Benchmark visual';vb.addEventListener('click',()=>runVisionBenchmark(r.route_id));actions.appendChild(vb)}
+ if(visionRun){const proof=document.createElement('button');proof.textContent='Ver prova visual';proof.addEventListener('click',()=>loadSavedVisionEvidence(r.route_id,visionRun.benchmark_id));actions.appendChild(proof)}
+ card.appendChild(actions);
+ return card;
+}
+async function loadRoutes(){
+ const [rows,runs]=await Promise.all([req('/v1/model-intelligence/routes'),req('/v1/model-intelligence/benchmarks?limit=100')]);
+ const root=document.getElementById('routes');root.replaceChildren();
+ const active=rows.filter(r=>r.enabled!==false);
+ const principal=active.find(r=>r.route_id===AMODEX_PRIMARY_ROUTE&&textValidated(r,runs)&&visionValidated(r,runs));
+ if(principal){
+  const heading=document.createElement('h3');heading.className='good';heading.textContent='Amodex · modelo principal candidato';
+  const note=document.createElement('p');note.className='muted';note.textContent='Mistral Large 4: texto e visão medidos. A escolha efetiva no chat continua obedecendo à política de rotas, disponibilidade e custo zero.';
+  root.append(heading,note,routeCard(principal,runs));
+ }
+ const validated=active.filter(r=>r!==principal&&textValidated(r,runs));
+ if(validated.length){
+  const heading=document.createElement('h3');heading.textContent=principal?'Outros modelos validados':'Modelos validados';
+  root.appendChild(heading);
+  validated.forEach(r=>root.appendChild(routeCard(r,runs)));
+ }
+ const pending=active.filter(r=>r!==principal&&!validated.includes(r));
+ if(pending.length){
+  const details=document.createElement('details');details.className='validation-routes';
+  const summary=document.createElement('summary');summary.textContent='Outros modelos · validar ou revisar ('+pending.length+')';
+  details.appendChild(summary);
+  const note=document.createElement('p');note.className='muted';note.textContent='Rotas não certificadas permanecem acessíveis para testes; falhas anteriores são preservadas como evidência, não apagadas.';
+  details.appendChild(note);
+  pending.sort((a,b)=>Number(!!latestFor(runs,a.route_id,TEXT_SUITE))-Number(!!latestFor(runs,b.route_id,TEXT_SUITE)));
+  pending.forEach(r=>details.appendChild(routeCard(r,runs)));
+  root.appendChild(details);
+ }
+ if(!active.length)root.textContent='Nenhuma rota ativa disponível.';
+}
 async function loadLeaderboard(){const root=document.getElementById('leaderboard');root.innerHTML='<p class="muted">Carregando…</p>';try{const profile=document.getElementById('profile').value;const rows=await req('/v1/model-intelligence/leaderboard?profile='+encodeURIComponent(profile));root.innerHTML=rows.length?'':'<p class="muted">Nenhuma rota medida elegível.</p>';rows.forEach((r,i)=>{const d=document.createElement('div');d.className='route';d.innerHTML=`<strong>#${i+1} ${esc(r.provider)} · ${esc(r.model)}</strong><br><span class="badge good">${Number(r.score).toFixed(4)}</span> <span class="muted">${esc(r.lifecycle)}</span><br><code>${esc(r.route_id)}</code>`;root.appendChild(d)})}catch(e){root.innerHTML=`<p class="muted">${esc(e.message)}</p>`}}
 async function runBenchmark(routeId){if(!confirm('Executar benchmark textual real nesta rota? A medição textual é independente da visual.'))return;document.body.classList.add('busy');try{await req('/v1/model-intelligence/benchmarks/run',{method:'POST',body:JSON.stringify({route_id:routeId,force:false})});await Promise.all([loadStatus(),loadRoutes(),loadLeaderboard()])}catch(e){alert(e.message)}finally{document.body.classList.remove('busy')}}
 function caseLabel(id){return ({'vision-position-color-v1':'Cor + posição','vision-ocr-v1':'OCR','vision-count-v1':'Contagem','vision-direction-v1':'Direção','vision-spatial-relation-v1':'Relação espacial'})[id]||id}
