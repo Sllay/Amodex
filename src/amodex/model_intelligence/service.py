@@ -344,6 +344,19 @@ class ModelIntelligenceService:
             )
         return ranked
 
+    def _progress(self, *, decision_id: str, stage: str, started: float) -> None:
+        """Best-effort audit marker; telemetry must never prevent a saved answer."""
+        elapsed_ms = (perf_counter() - started) * 1000.0
+        recorder = getattr(self._repository, "append_progress_fact", None)
+        if recorder is not None:
+            try:
+                recorder(decision_id=decision_id, stage=stage, elapsed_ms=elapsed_ms)
+            except Exception:
+                _logger.warning(
+                    "chat_progress_record_failed decision_id=%s stage=%s",
+                    decision_id, stage,
+                )
+
     async def respond(
         self,
         *,
@@ -352,10 +365,13 @@ class ModelIntelligenceService:
         profile: WorkerProfileKind | None,
         manual_recovery: bool = False,
     ) -> dict[str, Any]:
+        started_total = perf_counter()
         chat = self._workspace.get_chat(chat_id)
         if chat is None:
             raise ModelIntelligenceError("CHAT_NOT_FOUND", chat_id, status_code=404)
+        chat_loaded = perf_counter()
         messages = self._workspace.list_messages(chat_id=chat_id)
+        history_loaded = perf_counter()
         owner = None
         if owner_message_id is not None:
             owner = next((item for item in messages if item.message_id == owner_message_id), None)
@@ -393,11 +409,13 @@ class ModelIntelligenceService:
             if manual_recovery and existing else profile or self._infer_profile(owner.content)
         )
         prompt = self._chat_prompt(chat.workspace_id, messages, owner.message_id)
+        prompt_ready = perf_counter()
         required_context_tokens = max(1, len(prompt) // 4)
         ranked = self._ranked_routes(
             profile=chosen_profile,
             required_context_tokens=required_context_tokens,
         )
+        routes_ready = perf_counter()
         if not ranked:
             raise ModelIntelligenceError(
                 "NO_MEASURED_ROUTE",
@@ -458,6 +476,18 @@ class ModelIntelligenceService:
             )
             attempts = 0
 
+        # These durations distinguish Neon/history work from context assembly
+        # and selection; avoid logging message content, memory or private keys.
+        _logger.info(
+            "chat_stage_timings decision_id=%s workspace_ms=%.0f history_ms=%.0f context_ms=%.0f routing_ms=%.0f",
+            decision_id,
+            (chat_loaded - started_total) * 1000.0,
+            (history_loaded - chat_loaded) * 1000.0,
+            (prompt_ready - history_loaded) * 1000.0,
+            (routes_ready - prompt_ready) * 1000.0,
+        )
+        self._progress(decision_id=decision_id, stage="context_ready", started=started_total)
+        self._progress(decision_id=decision_id, stage="route_selected", started=started_total)
         last_code = "ROUTE_FAILED"
         last_message = "all bounded routes failed"
         for item in (ranked[:1] if manual_recovery else ranked[:2]):
@@ -470,6 +500,7 @@ class ModelIntelligenceService:
                 attempt_number=attempts,
                 request_key=request_key,
             )
+            self._progress(decision_id=decision_id, stage="provider_wait", started=started_total)
             started = perf_counter()
             try:
                 client = self._execution_registry.client_for(candidate)
@@ -491,6 +522,11 @@ class ModelIntelligenceService:
                     error_message=exc.message,
                 )
                 last_code, last_message = exc.code, exc.message
+                self._progress(
+                    decision_id=decision_id,
+                    stage="unknown" if ambiguous else "failed",
+                    started=started_total,
+                )
                 _logger.warning(
                     "chat_provider_failure route_id=%s decision_id=%s code=%s ambiguous=%s latency_ms=%.0f",
                     item.route_id, decision_id, exc.code, ambiguous, latency_ms,
@@ -526,10 +562,12 @@ class ModelIntelligenceService:
                     error_message=str(exc),
                 )
                 last_code, last_message = "EXECUTION_DENIED", str(exc)
+                self._progress(decision_id=decision_id, stage="failed", started=started_total)
                 self._maybe_demote_after_failures(item.route_id)
                 continue
 
             latency_ms = (perf_counter() - started) * 1000.0
+            self._progress(decision_id=decision_id, stage="provider_done", started=started_total)
             self._repository.finish_attempt(
                 attempt_id=attempt_id,
                 status=AttemptStatus.SUCCEEDED,
@@ -543,6 +581,7 @@ class ModelIntelligenceService:
                 role=ChatRole.AMODEX,
                 content=response.text,
             )
+            self._progress(decision_id=decision_id, stage="reply_saved", started=started_total)
             decision = self._repository.finish_decision(
                 decision_id=decision_id,
                 status=DecisionStatus.SUCCEEDED,
@@ -555,6 +594,7 @@ class ModelIntelligenceService:
             )
             return {**decision, "idempotent_replay": False}
 
+        self._progress(decision_id=decision_id, stage="failed", started=started_total)
         decision = self._repository.finish_decision(
             decision_id=decision_id,
             status=DecisionStatus.FAILED,
