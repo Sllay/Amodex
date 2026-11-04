@@ -7,6 +7,7 @@ on:
   pull_request:
     branches:
       - main
+      - deploy/render-neon-cloudinary-v1
     paths:
       - 'src/amodex/model_intelligence/**'
       - 'src/amodex/storage/model_intelligence.py'
@@ -15,6 +16,8 @@ on:
       - 'src/amodex/api/workspace_app.py'
       - 'migrations/postbaseline/0006_model_intelligence.sql'
       - 'tests/integration/test_postbaseline_model_intelligence.py'
+      - 'tests/unit/test_model_route_hardening.py'
+      - 'tests/unit/test_workspace_frontend_authority.py'
       - 'tests/integration/test_postbaseline_model_intelligence_resilience.py'
       - '.github/workflows/postbaseline-model-intelligence.yml'
       - 'docs/POST_BASELINE_MODEL_INTELLIGENCE_V1.md'
