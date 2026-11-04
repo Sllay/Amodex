@@ -31,7 +31,7 @@ from amodex.providers.capabilities import (
     WorkerProfileKind,
     stage5_worker_profiles,
 )
-from amodex.providers.catalog import stage5_declared_candidates
+from amodex.providers.catalog import RETIRED_DIRECT_MISTRAL_ROUTE_ID, stage5_declared_candidates
 from amodex.providers.registry import ProviderExecutionDenied, ProviderExecutionRegistry
 from amodex.providers.routing import CapabilityRouter
 from amodex.storage.model_intelligence import PostgresModelIntelligenceRepository
@@ -122,6 +122,8 @@ class ModelIntelligenceService:
         stored = self._repository.get_route(route_id)
         if stored is None:
             raise ModelIntelligenceError("ROUTE_NOT_FOUND", route_id, status_code=404)
+        if route_id == RETIRED_DIRECT_MISTRAL_ROUTE_ID or not bool(stored.get("enabled", True)):
+            raise ModelIntelligenceError("ROUTE_DISABLED", "retired or disabled model route", status_code=409)
         candidate = self._candidate_from_row(stored)
         if candidate.cost_class != BillingClass.FREE:
             raise ModelIntelligenceError(
@@ -607,7 +609,7 @@ class ModelIntelligenceService:
             context_capacity_tokens=int(row["context_capacity_tokens"]),
             lifecycle=ModelLifecycle(str(row["lifecycle"])),
             provenance=str(row["provenance"]),
-            enabled=bool(row["enabled"]),
+            enabled=bool(row["enabled"]) and str(row["route_id"]) != RETIRED_DIRECT_MISTRAL_ROUTE_ID,
         )
 
     def _candidate_for_route(self, route_id: str) -> ModelCandidate:
