@@ -198,7 +198,45 @@ async function miAutomaticReply(app,ctx){
       }catch(e){statusText.textContent='Aguardando confirmação do servidor';}
       finally{refreshing=false}
     };
-    const interval=setInterval(()=>{void refresh()},4000);
+    let interval=null;
+    let feed=null;
+    if(typeof EventSource==='function'){
+      const url='/v1/chats/'+encodeURIComponent(chatId)+'/respond/events?owner_message_id='+encodeURIComponent(owner.message_id);
+      feed=new EventSource(url);
+      const stageLabel={
+        context_ready:'Contexto carregado',
+        route_selected:'Rota escolhida',
+        provider_wait:'Aguardando resposta do provedor',
+        provider_done:'Resposta recebida · salvando',
+        reply_saved:'Resposta salva · finalizando',
+        failed:'Tentativa do provedor falhou',
+        unknown:'Resultado incerto · sem repetição automática'
+      };
+      feed.onmessage=event=>{
+        try{
+          const details=JSON.parse(event.data);
+          const label=stageLabel[details.stage];
+          if(label&&state.chat?.chat_id===chatId)
+            statusText.textContent=label+' · '+Math.floor(details.elapsed_ms/1000)+'s';
+        }catch(e){console.warn('invalid progress event')}
+      };
+      feed.addEventListener('done',event=>{
+        try{
+          const result=JSON.parse(event.data);
+          if(state.chat?.chat_id===chatId)
+            statusText.textContent=result.status==='SUCCEEDED'?'Resposta concluída':'Execução encerrada: '+result.status;
+        }catch(e){console.warn('invalid terminal progress event')}
+        feed?.close();
+      });
+      feed.onerror=()=>{
+        feed?.close();
+        feed=null;
+        // Browsers/proxies without SSE support still receive verified progress.
+        if(interval===null)interval=setInterval(()=>{void refresh()},4000);
+      };
+    }else{
+      interval=setInterval(()=>{void refresh()},4000);
+    }
     try{
       const decision=await app.api(`/v1/chats/${chatId}/respond`,{method:'POST',body:JSON.stringify({owner_message_id:owner.message_id,profile:null})});
       miRememberDecisions(chatId,decision);
@@ -211,7 +249,8 @@ async function miAutomaticReply(app,ctx){
       app.notice('Resposta concluída.','good');
       await miBoot();
     }finally{
-      clearInterval(interval);
+      if(interval!==null)clearInterval(interval);
+      feed?.close();
       progress.remove();
     }
     return;
