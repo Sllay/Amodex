@@ -730,7 +730,7 @@ class ModelIntelligenceService:
             "to know the user's verified account identity or the product creator without verified context. "
             "Answer the owner's latest message directly and usefully, in their language. "
             "Do not claim that repository/code execution happened merely because you can chat. "
-            "Execution requires an authorized Environment.\\n\\n"
+            "Execution requires an authorized Environment.\n\n"
             f"APPROVED PROJECT MEMORY:\n{memory_text or '(none)'}\n\n"
             f"RECENT CHAT:\n{chat_text}\n\n"
             f"SOURCE_OWNER_MESSAGE_ID:{owner_message_id}"
