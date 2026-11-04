@@ -305,6 +305,38 @@ class PostgresModelIntelligenceRepository:
             )
         return decision_id
 
+    def claim_manual_recovery(
+        self,
+        *,
+        decision_id: str,
+        chat_id: str,
+        owner_message_id: str,
+    ) -> bool:
+        """Atomically authorize ONE explicitly requested alternative provider call.
+
+        The first attempt's error and request key remain in the attempts table.
+        A second browser click or concurrent request cannot claim the same decision.
+        """
+        with psycopg.connect(self._dsn) as conn:
+            row = conn.execute(
+                """
+                UPDATE amodex_model_route_decisions
+                SET status='STARTED', error_code=NULL, error_message=NULL,
+                    selection_facts=selection_facts || %s::jsonb, updated_at=NOW()
+                WHERE decision_id=%s AND chat_id=%s AND owner_message_id=%s
+                  AND status='UNKNOWN_OUTCOME' AND attempt_count=1
+                  AND result_message_id IS NULL
+                RETURNING decision_id
+                """,
+                (
+                    Jsonb(["manual_recovery=explicit_owner_action"]),
+                    decision_id,
+                    chat_id,
+                    owner_message_id,
+                ),
+            ).fetchone()
+        return row is not None
+
     def start_attempt(
         self,
         *,
