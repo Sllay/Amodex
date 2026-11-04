@@ -198,3 +198,107 @@ def test_service_route_candidate_never_accepts_retired_route_even_if_marked_enab
     }
     candidate = ModelIntelligenceService._candidate_from_row(None, row)
     assert candidate.enabled is False
+
+ 
+def test_chat_prefers_primary_model_even_when_agent_scores_higher() -> None:
+    import asyncio
+    from types import SimpleNamespace
+
+    from amodex.model_intelligence.models import RankedRoute
+    from amodex.providers.catalog import AMODEX_PRIMARY_CHAT_ROUTE_ID
+    from amodex.runtime.models import ProviderResponse, ProviderUsage
+    from amodex.workspace.models import ChatRole
+
+    groq_route = "groq:openai/gpt-oss-20b:groq-free-primary"
+
+    def ranking(route_id: str, score: float) -> RankedRoute:
+        return RankedRoute(
+            route_id=route_id,
+            provider="nvidia" if route_id == AMODEX_PRIMARY_CHAT_ROUTE_ID else "groq",
+            model="mistralai/mistral-large-4-1t-a52b" if route_id == AMODEX_PRIMARY_CHAT_ROUTE_ID else "openai/gpt-oss-20b",
+            lifecycle="ELIGIBLE",
+            score=score,
+            base_score=score,
+            progress_per_1k_tokens=1,
+            selection_facts=(f"score={score}", "billing=free"),
+            rejected_reasons=(),
+        )
+
+    class FakeWorkspace:
+        def get_chat(self, chat_id):
+            return SimpleNamespace(workspace_id="test-workspace")
+
+        def list_messages(self, chat_id):
+            return (SimpleNamespace(message_id="owner", role=ChatRole.OWNER, content="Ola Amodex"),)
+
+        def add_message(self, **kwargs):
+            assert kwargs["role"] == ChatRole.AMODEX
+            assert kwargs["content"] == "Resposta de teste"
+            return SimpleNamespace(message_id="assistant")
+
+    class FakeRepo:
+        selected = None
+        ranked = None
+        facts = None
+        def get_decision_for_owner_message(self, _):
+            return None
+
+        def create_decision(self, **kwargs):
+            self.selected = kwargs["selected_route_id"]
+            self.ranked = kwargs["ranked_route_ids"]
+            self.facts = kwargs["selection_facts"]
+            return "decision-1"
+
+        def start_attempt(self, **kwargs):
+            return "attempt-1"
+
+        def finish_attempt(self, **kwargs):
+            return None
+
+        def finish_decision(self, **kwargs):
+            return {"selected_route_id": self.selected,
+                    "ranked_route_ids": self.ranked,
+                    "selection_facts": self.facts,
+                    **kwargs}
+
+    class FakeClient:
+        def generate(self, **kwargs):
+            return ProviderResponse(
+                provider="nvidia",
+                model=kwargs["model"],
+                text="Resposta de teste",
+                usage=ProviderUsage(prompt_tokens=1, completion_tokens=2, total_tokens=3),
+            )
+
+    repo = FakeRepo()
+    service = object.__new__(ModelIntelligenceService)
+    service._workspace = FakeWorkspace()
+    service._repository = repo
+    service._execution_registry = SimpleNamespace(client_for=lambda candidate: FakeClient())
+    service._chat_prompt = lambda *args: "Converse em portugues"
+    service._candidate_for_route = lambda route_id: SimpleNamespace(
+        route_id=route_id,
+        provider=route_id.split(":")[0],
+        model="mistralai/mistral-large-4-1t-a52b" if route_id == AMODEX_PRIMARY_CHAT_ROUTE_ID else "openai/gpt-oss-20b",
+    )
+
+    agent = ranking(groq_route, 0.99)
+    primary = ranking(AMODEX_PRIMARY_CHAT_ROUTE_ID, 0.90)
+    service._ranked_routes = lambda **kwargs: (agent, primary)
+    result = asyncio.run(service.respond(chat_id="test-chat", owner_message_id="owner", profile=None))
+    assert result["status"].value == "SUCCEEDED"
+    assert result["selected_route_id"] == AMODEX_PRIMARY_CHAT_ROUTE_ID
+    assert result["final_route_id"] == AMODEX_PRIMARY_CHAT_ROUTE_ID
+    assert result["ranked_route_ids"] == [AMODEX_PRIMARY_CHAT_ROUTE_ID, groq_route]
+    assert result["attempt_count"] == 1
+    assert result["fallback_used"] is False
+    assert "chat_primary_policy=PRIMARY_ELIGIBLE" in result["selection_facts"]
+
+    # If the router denied the primary, do not force a paid or unavailable route.
+    service._ranked_routes = lambda **kwargs: (agent,)
+    result = asyncio.run(service.respond(chat_id="test-chat", owner_message_id="owner", profile=None))
+    assert result["selected_route_id"] == groq_route
+    assert result["final_route_id"] == groq_route
+    assert result["attempt_count"] == 1
+    assert result["fallback_used"] is False  # No second network attempt; UI marks primary substitution.
+    assert "chat_primary_policy=PRIMARY_UNAVAILABLE" in result["selection_facts"]
