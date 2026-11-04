@@ -8,6 +8,7 @@ _STEP4_CSS = r'''
 .mi-route-footnote{font-size:.73rem;margin-top:13px;padding-top:8px;border-top:1px solid var(--line);color:var(--muted);overflow-wrap:anywhere}
 .mi-route-footnote.is-fallback{color:var(--warn)}
 .mi-reply-state{font-size:.73rem;margin-top:9px;color:var(--warn);overflow-wrap:anywhere}
+.mi-reconcile-btn{display:block;margin-top:8px;padding:6px 10px;font-size:.78rem}
 '''
 
 _STEP4_SCRIPT = r'''
@@ -67,11 +68,29 @@ function miDecorateMessages(){
       let mark=bubble.querySelector('.mi-reply-state');
       if(!failed){mark?.remove();return}
       if(!mark){mark=document.createElement('div');mark.className='mi-reply-state';bubble.appendChild(mark)}
+      const age=Date.now()-Date.parse(decision.updated_at||decision.created_at||'');
+      const stale=decision.status==='STARTED'&&Number.isFinite(age)&&age>=300000;
       mark.textContent=decision.status==='UNKNOWN_OUTCOME'
         ?'Resposta não confirmada ('+(decision.error_code||'resultado incerto')+'). Não reenviar automaticamente.'
         :decision.status==='FAILED'
           ?'Resposta falhou ('+(decision.error_code||'erro')+'). Mensagem preservada.'
+          :stale?'Execução interrompida ou sem confirmação há mais de 5 minutos. Não reenviar automaticamente.'
           :'Processamento iniciado; estado final ainda não confirmado.';
+      if(stale){
+        const btn=document.createElement('button');
+        btn.type='button';btn.className='mi-reconcile-btn';btn.textContent='Reconciliar estado';
+        btn.addEventListener('click',async()=>{
+          btn.disabled=true;
+          try{
+            await miApi('/v1/model-intelligence/reconcile',{method:'POST',body:JSON.stringify({stale_after_seconds:300})});
+            await miLoadDecisions(chatId,window.AmodexApp);
+          }catch(e){
+            window.AmodexApp?.error?.(e);
+            btn.disabled=false;
+          }
+        });
+        mark.appendChild(btn);
+      }
       return;
     }
     if(m.role!=='AMODEX')return;
