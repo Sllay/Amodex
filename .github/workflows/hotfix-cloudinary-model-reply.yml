@@ -1,0 +1,192 @@
+name: hotfix-cloudinary-model-reply
+
+on:
+  pull_request:
+    branches:
+      - deploy/render-neon-cloudinary-v1
+    paths:
+      - 'migrations/postbaseline/0007_retire_direct_mistral_route.sql'
+      - 'src/amodex/api/streaming_upload_routes.py'
+      - 'src/amodex/api/workspace_app.py'
+      - 'src/amodex/api/workspace_cache_routes.py'
+      - 'src/amodex/api/model_intelligence_routes.py'
+      - 'src/amodex/api/model_intelligence_web.py'
+      - 'src/amodex/model_intelligence/attachment_aware_service.py'
+      - 'src/amodex/model_intelligence/vision_benchmarks.py'
+      - 'src/amodex/model_intelligence/nvidia_diagnostics.py'
+      - 'src/amodex/model_intelligence/vision_benchmark_runner.py'
+      - 'src/amodex/multimodal/cloudinary_rest_store.py'
+      - 'src/amodex/providers/base.py'
+      - 'src/amodex/providers/catalog.py'
+      - 'src/amodex/providers/openai_compatible.py'
+      - 'src/amodex/providers/vision_chat.py'
+      - 'src/amodex/providers/groq.py'
+      - 'src/amodex/providers/nvidia.py'
+      - 'src/amodex/providers/registry.py'
+      - 'src/amodex/storage/model_intelligence.py'
+      - 'src/amodex/storage/routing.py'
+      - 'tests/unit/test_benchmark_suite_isolation.py'
+      - 'tests/unit/test_cloudinary_conflict_recovery.py'
+      - 'tests/unit/test_provider_benchmark_transport.py'
+      - 'tests/unit/test_cloudinary_media_store.py'
+      - 'tests/unit/test_model_attachment_context.py'
+      - 'tests/unit/test_model_route_hardening.py'
+      - 'tests/unit/test_vision_benchmark.py'
+      - 'tests/unit/test_nvidia_upstream_diagnostics.py'
+      - 'tests/unit/test_vision_benchmark_evidence.py'
+      - 'tests/unit/test_performance_structural.py'
+      - 'tests/integration/test_stage5_provider_adapters.py'
+      - '.github/workflows/hotfix-cloudinary-model-reply.yml'
+
+permissions:
+  contents: read
+
+env:
+  PYTHONNOUSERSITE: '1'
+
+jobs:
+  focused-hotfix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+
+      - name: Recreate isolated Python runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          BOOTSTRAP_VENV="$RUNNER_TEMP/amodex-uv-bootstrap"
+          env -u PYTHONPATH -u PYTHONHOME python3 -m venv "$BOOTSTRAP_VENV"
+          env -u PYTHONPATH -u PYTHONHOME "$BOOTSTRAP_VENV/bin/python" -m pip install --disable-pip-version-check uv==0.10.0
+          UV_BIN="$BOOTSTRAP_VENV/bin/uv"
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" python install 3.13.5
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" sync --python 3.13.5 --extra dev --frozen
+          echo "UV_BIN=$UV_BIN" >> "$GITHUB_ENV"
+
+      - name: Compile hotfix surfaces
+        shell: bash
+        run: |
+          set -euo pipefail
+          .venv/bin/python -m compileall -q \
+            src/amodex/api/streaming_upload_routes.py \
+            src/amodex/api/workspace_app.py \
+            src/amodex/api/workspace_cache_routes.py \
+            src/amodex/api/model_intelligence_routes.py \
+            src/amodex/api/model_intelligence_web.py \
+            src/amodex/model_intelligence/attachment_aware_service.py \
+            src/amodex/model_intelligence/vision_benchmarks.py \
+            src/amodex/model_intelligence/nvidia_diagnostics.py \
+            src/amodex/model_intelligence/vision_benchmark_runner.py \
+            src/amodex/multimodal/cloudinary_rest_store.py \
+            src/amodex/providers/base.py \
+            src/amodex/providers/catalog.py \
+            src/amodex/providers/openai_compatible.py \
+            src/amodex/providers/vision_chat.py \
+            src/amodex/providers/groq.py \
+            src/amodex/providers/nvidia.py \
+            src/amodex/providers/registry.py \
+            src/amodex/storage/model_intelligence.py \
+            src/amodex/storage/routing.py \
+            tests/unit/test_benchmark_suite_isolation.py \
+            tests/unit/test_cloudinary_conflict_recovery.py \
+            tests/unit/test_model_attachment_context.py \
+            tests/unit/test_model_route_hardening.py \
+            tests/unit/test_vision_benchmark.py \
+            tests/unit/test_nvidia_upstream_diagnostics.py \
+            tests/unit/test_vision_benchmark_evidence.py \
+            tests/unit/test_provider_benchmark_transport.py \
+            tests/integration/test_stage5_provider_adapters.py
+
+      - name: Prove Cloudinary conflict recovery and bounded upload behavior
+        shell: bash
+        run: |
+          set -euo pipefail
+          .venv/bin/python -m pytest -q \
+            tests/unit/test_cloudinary_conflict_recovery.py \
+            tests/unit/test_cloudinary_media_store.py \
+            tests/unit/test_performance_structural.py
+
+      - name: Prove routed attachment context and response language
+        shell: bash
+        run: |
+          set -euo pipefail
+          .venv/bin/python -m pytest -q tests/unit/test_model_attachment_context.py
+
+      - name: Prove text and vision benchmark isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+          .venv/bin/python -m pytest -q tests/unit/test_benchmark_suite_isolation.py
+
+      - name: Prove retired routes and model dashboard cache are hard blocked
+        shell: bash
+        run: |
+          set -euo pipefail
+          .venv/bin/python -m pytest -q tests/unit/test_model_route_hardening.py
+          grep -q 'ROUTE_DISABLED' src/amodex/api/model_intelligence_routes.py
+          grep -q 'VISION_ROUTE_DISABLED' src/amodex/model_intelligence/vision_benchmark_runner.py
+          grep -q 'no-store' src/amodex/api/workspace_cache_routes.py
+
+      - name: Prove pixel-grounded visual benchmark and saved evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          .venv/bin/python -m pytest -q \
+            tests/unit/test_vision_benchmark.py \
+            tests/unit/test_vision_benchmark_evidence.py
+          grep -q 'promotion_applied.*False' src/amodex/model_intelligence/vision_benchmark_runner.py
+          grep -q 'provider_failures_are_unscored' src/amodex/model_intelligence/vision_benchmark_runner.py
+          grep -q 'status = "BLOCKED"' src/amodex/model_intelligence/vision_benchmark_runner.py
+          ! grep -q 'set_lifecycle' src/amodex/model_intelligence/vision_benchmark_runner.py
+          ! grep -q 'record_availability' src/amodex/model_intelligence/vision_benchmark_runner.py
+
+      - name: Prove NVIDIA diagnostic calls are private, fixed, free, and do not alter benchmarks
+        shell: bash
+        run: |
+          set -euo pipefail
+          .venv/bin/python -m pytest -q tests/unit/test_nvidia_upstream_diagnostics.py
+          grep -q 'LOCAL_ADMISSION_DENIED' src/amodex/model_intelligence/nvidia_diagnostics.py
+          grep -q 'diagnostics/nvidia' src/amodex/api/model_intelligence_routes.py
+
+      - name: Prove Groq and NVIDIA Mistral benchmark transport compatibility
+        shell: bash
+        run: |
+          set -euo pipefail
+          .venv/bin/python -m pytest -q \
+            tests/unit/test_provider_benchmark_transport.py \
+            tests/integration/test_stage5_provider_adapters.py
+          grep -q 'https://integrate.api.nvidia.com/v1' src/amodex/providers/nvidia.py
+          grep -q 'reasoning_effort.*high' src/amodex/providers/nvidia.py
+          grep -q 'max_tokens.*4096' src/amodex/providers/nvidia.py
+          grep -q 'use_response_format=False' src/amodex/providers/nvidia.py
+          grep -q 'context_capacity_tokens=262_144' src/amodex/providers/catalog.py
+
+      - name: Prove zero-cost policy was not bypassed
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'BillingClass.FREE' src/amodex/model_intelligence/service.py
+          grep -q 'BillingClass.FREE' src/amodex/model_intelligence/vision_benchmark_runner.py
+          grep -q 'nvidia-free-primary' src/amodex/providers/registry.py
+          grep -q 'AMODEX_NVIDIA_BILLING_CLASS' src/amodex/providers/registry.py
+          ! grep -q 'mistral-free-primary' src/amodex/providers/registry.py
+          grep -q 'paid_fallback.*DENIED' src/amodex/model_intelligence/service.py
+          grep -q 'unknown_billing.*DENIED' src/amodex/model_intelligence/service.py
+          grep -q 'aggregate >= 0.75' src/amodex/model_intelligence/service.py
+          grep -q 'pass_rate >= 0.67' src/amodex/model_intelligence/service.py
+          echo 'HOTFIX_ZERO_COST_AND_BENCHMARK_THRESHOLDS_INTACT'
+
+      - name: Repository hygiene
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          status="$(git status --porcelain)"
+          if [ -n "$status" ]; then
+            printf '%s\n' "$status" >&2
+            exit 1
+          fi

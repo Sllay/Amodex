@@ -11,21 +11,33 @@ import os
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 
+from amodex.api.access_gate import install_access_gate
+from amodex.api.activation_status import build_activation_router
 from amodex.api.app import create_app as create_control_plane_app
 from amodex.api.connector_routes import build_connector_router
 from amodex.api.connector_web import CONNECTOR_HTML
+from amodex.api.global_chat_routes import build_global_chat_router
 from amodex.api.model_intelligence_routes import build_model_intelligence_router
 from amodex.api.model_intelligence_web import MODEL_INTELLIGENCE_HTML, augment_model_intelligence_html
 from amodex.api.multimodal_routes import build_multimodal_router
 from amodex.api.multimodal_web import augment_workspace_html
+from amodex.api.streaming_upload_routes import build_streaming_upload_router
+from amodex.api.theme_web import augment_theme_html
+from amodex.api.ui_stability_web import augment_ui_stability_html
 from amodex.api.web import DASHBOARD_HTML
+from amodex.api.workspace_cache_routes import build_workspace_cache_router, install_private_cache_boundary
+from amodex.api.workspace_cache_web import augment_workspace_cache_html
 from amodex.api.workspace_routes import build_workspace_router
+from amodex.api.workspace_ui_routes import build_workspace_ui_router
+from amodex.api.workspace_v2 import augment_workspace_v2_html
 from amodex.api.workspace_web import WORKSPACE_HTML
 from amodex.connectors.clients import GitHubAppConnector, RobloxOAuthConnector
 from amodex.connectors.oauth import GitHubAppConfig, RobloxOAuthConfig
 from amodex.connectors.vault import CredentialVault, vault_from_environment
+from amodex.model_intelligence.attachment_aware_service import AttachmentAwareModelIntelligenceService
 from amodex.model_intelligence.service import ModelIntelligenceService
 from amodex.multimodal.clients import MultimodalClients, multimodal_clients_from_environment
+from amodex.multimodal.cloudinary_rest_store import CloudinaryAuthenticatedRestMediaStore
 from amodex.multimodal.object_store import (
     MediaObjectStore,
     max_upload_bytes_from_environment,
@@ -36,9 +48,33 @@ from amodex.storage.connectors import PostgresConnectorRepository
 from amodex.storage.model_intelligence import PostgresModelIntelligenceRepository
 from amodex.storage.multimodal import PostgresMultimodalRepository
 from amodex.storage.routing import PostgresRoutingRepository
+from amodex.storage.runtime_pool import install_runtime_connection_pool
 from amodex.storage.workspace import PostgresWorkspaceRepository
 
-_RELEASE = "0.6-model-intelligence"
+_RELEASE = "0.7.6-activation-v1"
+
+
+def _media_store_from_runtime() -> MediaObjectStore:
+    backend = os.environ.get("AMODEX_MEDIA_STORE_BACKEND", "").strip().lower()
+    if backend == "cloudinary":
+        return CloudinaryAuthenticatedRestMediaStore.from_environment()
+    return media_store_from_environment()
+
+
+def _remove_legacy_upload_route(router) -> None:
+    """Replace exactly one byte-buffering upload route with the streaming route."""
+
+    before = len(router.routes)
+    router.routes = [
+        route
+        for route in router.routes
+        if not (
+            getattr(route, "path", None) == "/v1/chats/{chat_id}/uploads"
+            and "POST" in (getattr(route, "methods", None) or set())
+        )
+    ]
+    if before - len(router.routes) != 1:
+        raise RuntimeError("expected exactly one legacy multimodal upload route")
 
 
 def create_workspace_app(
@@ -60,10 +96,22 @@ def create_workspace_app(
     dsn: str | None = None,
 ) -> FastAPI:
     """Compose the web-first surface without creating a second control plane."""
+    database_url = dsn or os.environ.get("AMODEX_DATABASE_URL", "")
+    if not database_url and workspace_repository is not None:
+        database_url = workspace_repository.dsn
+
+    # Runtime repository methods historically call psycopg.connect directly.
+    # Install the bounded compatibility pool before any control-plane repository
+    # can perform I/O. Production migrations run in a separate process and keep
+    # their one-shot direct connection semantics. Pool cleanup is registered at
+    # process exit by the pool module itself, so it does not depend on a specific
+    # FastAPI/Starlette lifecycle API version.
+    if database_url:
+        install_runtime_connection_pool()
+
     if base_app is None:
         base_app = create_control_plane_app()
 
-    database_url = dsn or os.environ.get("AMODEX_DATABASE_URL", "")
     if workspace_repository is None:
         if not database_url:
             raise ValueError("workspace_repository, dsn or AMODEX_DATABASE_URL is required")
@@ -88,12 +136,12 @@ def create_workspace_app(
         repository=connector_repository,
         vault=connector_vault,
     )
-    media_store = media_store or media_store_from_environment()
+    media_store = media_store or _media_store_from_runtime()
     multimodal_clients = multimodal_clients or multimodal_clients_from_environment()
     max_upload_bytes = max_upload_bytes or max_upload_bytes_from_environment()
 
-    # Step 4 is migration-gated. Older Step 1-3 installations continue to boot
-    # without a shadow in-memory authority until 0006 has been applied.
+    # Model Intelligence remains migration-gated. Older installations continue to
+    # boot without a shadow in-memory authority until 0006 has been applied.
     if model_intelligence_service is None:
         if not database_url:
             database_url = workspace_repository.dsn
@@ -103,11 +151,13 @@ def create_workspace_app(
             provider_execution_registry = provider_execution_registry or ProviderExecutionRegistry(
                 stage5_credential_pools_from_env()
             )
-            model_intelligence_service = ModelIntelligenceService(
+            model_intelligence_service = AttachmentAwareModelIntelligenceService(
                 repository=model_intelligence_repository,
                 routing_repository=routing_repository,
                 workspace_repository=workspace_repository,
                 execution_registry=provider_execution_registry,
+                multimodal_repository=multimodal_repository,
+                media_store=media_store,
             )
 
     # The legacy control-plane root is a projection only. Every pre-existing API
@@ -121,6 +171,7 @@ def create_workspace_app(
         )
     ]
     base_app.include_router(build_workspace_router(workspace_repository))
+    base_app.include_router(build_global_chat_router(workspace_repository))
     base_app.include_router(
         build_connector_router(
             repository=connector_repository,
@@ -131,16 +182,46 @@ def create_workspace_app(
         )
     )
     base_app.include_router(
-        build_multimodal_router(
+        build_workspace_ui_router(
             workspace_repository=workspace_repository,
-            repository=multimodal_repository,
+            connector_repository=connector_repository,
+            github=github_connector,
+            roblox=roblox_connector,
+            vault=connector_vault,
+        )
+    )
+    base_app.include_router(build_workspace_cache_router())
+
+    multimodal_router = build_multimodal_router(
+        workspace_repository=workspace_repository,
+        repository=multimodal_repository,
+        media_store=media_store,
+        clients=multimodal_clients,
+        max_upload_bytes=max_upload_bytes,
+    )
+    _remove_legacy_upload_route(multimodal_router)
+    base_app.include_router(
+        build_streaming_upload_router(
+            workspace_repository=workspace_repository,
             media_store=media_store,
-            clients=multimodal_clients,
             max_upload_bytes=max_upload_bytes,
         )
     )
+    base_app.include_router(multimodal_router)
+
     if model_intelligence_service is not None:
         base_app.include_router(build_model_intelligence_router(model_intelligence_service))
+
+    # Activation endpoints are deliberately composed on the same FastAPI object.
+    # /healthz is liveness only; /readyz verifies DB/schema/zero-cost policy;
+    # /v1/system/status is richer and stays behind the private access gate.
+    base_app.include_router(
+        build_activation_router(
+            dsn=database_url,
+            app_version=_RELEASE,
+            model_intelligence_service=model_intelligence_service,
+        )
+    )
 
     @base_app.get("/", response_class=HTMLResponse, include_in_schema=False)
     async def workspace_page() -> str:
@@ -153,20 +234,33 @@ def create_workspace_app(
         html = augment_workspace_html(html)
         if model_intelligence_service is not None:
             html = augment_model_intelligence_html(html)
-        return html
+        html = augment_workspace_v2_html(html)
+        html = augment_workspace_cache_html(html)
+        html = augment_ui_stability_html(html)
+        return augment_theme_html(html)
 
     @base_app.get("/connections", response_class=HTMLResponse, include_in_schema=False)
     async def connector_page() -> str:
-        return CONNECTOR_HTML
+        return augment_theme_html(CONNECTOR_HTML)
 
     if model_intelligence_service is not None:
         @base_app.get("/models", response_class=HTMLResponse, include_in_schema=False)
         async def model_intelligence_page() -> str:
-            return MODEL_INTELLIGENCE_HTML
+            return augment_theme_html(MODEL_INTELLIGENCE_HTML)
 
     @base_app.get("/legacy", response_class=HTMLResponse, include_in_schema=False)
     async def legacy_dashboard() -> str:
-        return DASHBOARD_HTML
+        return augment_theme_html(DASHBOARD_HTML)
+
+    # Cache policy is installed before the access gate so successful private
+    # shell responses are explicitly private and logout purges CacheStorage /
+    # IndexedDB through Clear-Site-Data. API snapshot responses set their own
+    # private ETag headers.
+    install_private_cache_boundary(base_app)
+
+    # Server-side boundary: when AMODEX_ACCESS_PASSCODE is configured, every
+    # route except the explicit health/readiness/login surface requires a signed session.
+    install_access_gate(base_app)
 
     base_app.title = "Amodex Web Workspace"
     base_app.version = _RELEASE

@@ -6,6 +6,10 @@ BENCHMARK_PENDING by default: catalog discovery alone never makes a model eligib
 
 from __future__ import annotations
 
+RETIRED_DIRECT_MISTRAL_ROUTE_ID = "mistral:mistral-large-4:mistral-free-primary"
+AMODEX_PRIMARY_CHAT_ROUTE_ID = "nvidia:mistralai/mistral-large-4-1t-a52b:nvidia-free-primary"
+
+
 from .capabilities import (
     BillingClass,
     ModelCandidate,
@@ -54,6 +58,26 @@ def stage5_declared_candidates() -> tuple[ModelCandidate, ...]:
             provenance="Groq official docs snapshot 2026-11-01; eligibility still requires measured evidence and free credential classification",
         ),
         ModelCandidate(
+            provider="groq",
+            model="qwen/qwen3.8-27b",
+            credential_pool_id="groq-free-primary",
+            cost_class=BillingClass.FREE,
+            capabilities=frozenset(
+                {
+                    ModelCapability.TEXT,
+                    ModelCapability.STRUCTURED_OUTPUT,
+                    ModelCapability.TOOL_CALLING,
+                    ModelCapability.VISION,
+                }
+            ),
+            context_capacity_tokens=131_072,
+            lifecycle=ModelLifecycle.BENCHMARK_PENDING,
+            provenance=(
+                "Groq official vision docs snapshot 2026-11-02: Qwen 3.8 27B accepts image inputs, "
+                "JSON mode and tool use; route remains BENCHMARK_PENDING until real pixel-grounded evidence"
+            ),
+        ),
+        ModelCandidate(
             provider="openrouter",
             model="openrouter/free",
             credential_pool_id="openrouter-free-primary",
@@ -88,8 +112,15 @@ def stage5_declared_candidates() -> tuple[ModelCandidate, ...]:
                     ModelCapability.LONG_CONTEXT,
                 }
             ),
-            context_capacity_tokens=1_000_000,
+            # The hosted Build.NVIDIA free endpoint currently advertises 262K.
+            # Self-hosted NIM profiles may support 1M, but that is a different
+            # execution surface and must not inflate cloud-route admission.
+            context_capacity_tokens=262_144,
             lifecycle=ModelLifecycle.BENCHMARK_PENDING,
-            provenance="NVIDIA NIM Mistral Large 4 official docs snapshot 2026-11-01; Build.NVIDIA labels a free endpoint, but Governor still requires free credential/quota evidence",
+            provenance=(
+                "NVIDIA API Catalog Mistral Large 4 snapshot 2026-11-03: Free Endpoint available; "
+                "text+image input, reasoning, function calling and structured outputs; hosted context "
+                "length 262K. Eligibility still requires measured evidence and an explicitly free NVIDIA pool."
+            ),
         ),
     )

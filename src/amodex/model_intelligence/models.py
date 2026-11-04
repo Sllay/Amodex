@@ -44,6 +44,10 @@ class ChatRespondRequest(BaseModel):
     profile: WorkerProfileKind | None = None
 
 
+class ManualChatRecoveryRequest(BaseModel):
+    owner_message_id: str = Field(min_length=1, max_length=100)
+
+
 class ReconcileRequest(BaseModel):
     stale_after_seconds: int = Field(default=300, ge=60, le=86400)
 

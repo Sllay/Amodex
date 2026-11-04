@@ -10,8 +10,12 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from amodex.contracts.ids import new_uuid7
+from amodex.providers.catalog import RETIRED_DIRECT_MISTRAL_ROUTE_ID
 from amodex.model_intelligence.models import AttemptStatus, DecisionStatus
 from amodex.providers.capabilities import ModelCandidate, ModelLifecycle
+
+
+_TEXT_BENCHMARK_SUITE = "step4-live-v1"
 
 
 class PostgresModelIntelligenceRepository:
@@ -66,6 +70,18 @@ class PostgresModelIntelligenceRepository:
                             item.enabled,
                         ),
                     )
+                # A previously seeded direct Mistral route can survive a one-time
+                # SQL migration or be re-enabled by older catalog synchronizations.
+                # Enforce retirement at every startup without deleting historical
+                # benchmark/decision rows that refer to the old route ID.
+                conn.execute(
+                    """
+                    UPDATE amodex_model_routes
+                    SET enabled=FALSE, updated_at=NOW()
+                    WHERE route_id=%s AND enabled=TRUE
+                    """,
+                    (RETIRED_DIRECT_MISTRAL_ROUTE_ID,),
+                )
 
     def list_routes(self) -> tuple[dict[str, Any], ...]:
         with psycopg.connect(self._dsn, row_factory=dict_row) as conn:
@@ -201,14 +217,26 @@ class PostgresModelIntelligenceRepository:
             raise KeyError(benchmark_id)
         return dict(row)
 
-    def latest_benchmark(self, route_id: str) -> dict[str, Any] | None:
+    def latest_benchmark(
+        self,
+        route_id: str,
+        *,
+        suite_version: str = _TEXT_BENCHMARK_SUITE,
+    ) -> dict[str, Any] | None:
+        """Return the latest run for one benchmark suite.
+
+        Text routing historically called this method without a suite selector, so
+        the default remains the text benchmark suite. Vision diagnostics must never
+        become the text cooldown/efficiency authority merely because they ran later.
+        """
         with psycopg.connect(self._dsn, row_factory=dict_row) as conn:
             row = conn.execute(
                 """
                 SELECT * FROM amodex_model_benchmark_runs
-                WHERE route_id=%s ORDER BY started_at DESC,benchmark_id DESC LIMIT 1
+                WHERE route_id=%s AND suite_version=%s
+                ORDER BY started_at DESC,benchmark_id DESC LIMIT 1
                 """,
-                (route_id,),
+                (route_id, suite_version),
             ).fetchone()
         return dict(row) if row else None
 
@@ -276,6 +304,62 @@ class PostgresModelIntelligenceRepository:
                 ),
             )
         return decision_id
+
+    def claim_manual_recovery(
+        self,
+        *,
+        decision_id: str,
+        chat_id: str,
+        owner_message_id: str,
+    ) -> bool:
+        """Atomically authorize ONE explicitly requested alternative provider call.
+
+        The first attempt's error and request key remain in the attempts table.
+        A second browser click or concurrent request cannot claim the same decision.
+        """
+        with psycopg.connect(self._dsn) as conn:
+            row = conn.execute(
+                """
+                UPDATE amodex_model_route_decisions
+                SET status='STARTED', error_code=NULL, error_message=NULL,
+                    selection_facts=selection_facts || %s::jsonb, updated_at=NOW()
+                WHERE decision_id=%s AND chat_id=%s AND owner_message_id=%s
+                  AND status='UNKNOWN_OUTCOME' AND attempt_count=1
+                  AND result_message_id IS NULL
+                RETURNING decision_id
+                """,
+                (
+                    Jsonb(["manual_recovery=explicit_owner_action"]),
+                    decision_id,
+                    chat_id,
+                    owner_message_id,
+                ),
+            ).fetchone()
+        return row is not None
+
+    def append_progress_fact(self, *, decision_id: str, stage: str, elapsed_ms: float) -> None:
+        """Append a bounded, redacted progress marker to the existing audit record.
+
+        Do not store prompt text, credentials, model reasoning or response deltas.
+        This uses the existing JSONB field and requires no schema migration.
+        """
+        permitted = {
+            "context_ready", "route_selected", "provider_wait",
+            "provider_done", "reply_saved", "failed", "unknown",
+        }
+        if stage not in permitted or not 0 <= elapsed_ms < 86_400_000:
+            raise ValueError("invalid execution progress marker")
+        fact = f"progress:{stage}:{round(elapsed_ms)}"
+        with psycopg.connect(self._dsn) as conn:
+            conn.execute(
+                """
+                UPDATE amodex_model_route_decisions
+                SET selection_facts=selection_facts || %s::jsonb,
+                    updated_at=NOW()
+                WHERE decision_id=%s
+                """,
+                (Jsonb([fact]), decision_id),
+            )
 
     def start_attempt(
         self,

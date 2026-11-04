@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from statistics import median
@@ -31,7 +32,11 @@ from amodex.providers.capabilities import (
     WorkerProfileKind,
     stage5_worker_profiles,
 )
-from amodex.providers.catalog import stage5_declared_candidates
+from amodex.providers.catalog import (
+    AMODEX_PRIMARY_CHAT_ROUTE_ID,
+    RETIRED_DIRECT_MISTRAL_ROUTE_ID,
+    stage5_declared_candidates,
+)
 from amodex.providers.registry import ProviderExecutionDenied, ProviderExecutionRegistry
 from amodex.providers.routing import CapabilityRouter
 from amodex.storage.model_intelligence import PostgresModelIntelligenceRepository
@@ -39,6 +44,8 @@ from amodex.storage.routing import PostgresRoutingRepository
 from amodex.storage.workspace import PostgresWorkspaceRepository
 from amodex.workspace.models import ChatRole
 
+
+_logger = logging.getLogger(__name__)
 
 _SENSITIVE_PROFILES = frozenset(
     {
@@ -102,6 +109,8 @@ class ModelIntelligenceService:
             "promotion": "MEASURED_POLICY_ONLY",
             "visual_routing": "REQUIRES_REAL_VISION_MEASUREMENT",
             "execution_authority": "ENVIRONMENT_ONLY",
+            "primary_chat_route_id": AMODEX_PRIMARY_CHAT_ROUTE_ID,
+            "primary_chat_policy": "PREFERRED_WHEN_MEASURED_AND_AVAILABLE",
         }
 
     def routes(self) -> tuple[dict[str, Any], ...]:
@@ -122,6 +131,8 @@ class ModelIntelligenceService:
         stored = self._repository.get_route(route_id)
         if stored is None:
             raise ModelIntelligenceError("ROUTE_NOT_FOUND", route_id, status_code=404)
+        if route_id == RETIRED_DIRECT_MISTRAL_ROUTE_ID or not bool(stored.get("enabled", True)):
+            raise ModelIntelligenceError("ROUTE_DISABLED", "retired or disabled model route", status_code=409)
         candidate = self._candidate_from_row(stored)
         if candidate.cost_class != BillingClass.FREE:
             raise ModelIntelligenceError(
@@ -333,17 +344,34 @@ class ModelIntelligenceService:
             )
         return ranked
 
+    def _progress(self, *, decision_id: str, stage: str, started: float) -> None:
+        """Best-effort audit marker; telemetry must never prevent a saved answer."""
+        elapsed_ms = (perf_counter() - started) * 1000.0
+        recorder = getattr(self._repository, "append_progress_fact", None)
+        if recorder is not None:
+            try:
+                recorder(decision_id=decision_id, stage=stage, elapsed_ms=elapsed_ms)
+            except Exception:
+                _logger.warning(
+                    "chat_progress_record_failed decision_id=%s stage=%s",
+                    decision_id, stage,
+                )
+
     async def respond(
         self,
         *,
         chat_id: str,
         owner_message_id: str | None,
         profile: WorkerProfileKind | None,
+        manual_recovery: bool = False,
     ) -> dict[str, Any]:
+        started_total = perf_counter()
         chat = self._workspace.get_chat(chat_id)
         if chat is None:
             raise ModelIntelligenceError("CHAT_NOT_FOUND", chat_id, status_code=404)
+        chat_loaded = perf_counter()
         messages = self._workspace.list_messages(chat_id=chat_id)
+        history_loaded = perf_counter()
         owner = None
         if owner_message_id is not None:
             owner = next((item for item in messages if item.message_id == owner_message_id), None)
@@ -355,7 +383,19 @@ class ModelIntelligenceService:
             raise ModelIntelligenceError("OWNER_MESSAGE_REQUIRED", "source message must have OWNER role")
 
         existing = self._repository.get_decision_for_owner_message(owner.message_id)
-        if existing:
+        if manual_recovery:
+            if (
+                not existing
+                or existing["status"] != DecisionStatus.UNKNOWN_OUTCOME.value
+                or int(existing["attempt_count"]) != 1
+                or existing.get("result_message_id") is not None
+            ):
+                raise ModelIntelligenceError(
+                    "MANUAL_RECOVERY_UNAVAILABLE",
+                    "recovery requires an uncertain single attempt with no saved reply",
+                    status_code=409,
+                )
+        elif existing:
             if existing["status"] == DecisionStatus.SUCCEEDED.value:
                 return {**existing, "idempotent_replay": True}
             raise ModelIntelligenceError(
@@ -364,13 +404,18 @@ class ModelIntelligenceService:
                 facts=(str(existing["decision_id"]),),
             )
 
-        chosen_profile = profile or self._infer_profile(owner.content)
+        chosen_profile = (
+            WorkerProfileKind(str(existing["profile_id"]))
+            if manual_recovery and existing else profile or self._infer_profile(owner.content)
+        )
         prompt = self._chat_prompt(chat.workspace_id, messages, owner.message_id)
+        prompt_ready = perf_counter()
         required_context_tokens = max(1, len(prompt) // 4)
         ranked = self._ranked_routes(
             profile=chosen_profile,
             required_context_tokens=required_context_tokens,
         )
+        routes_ready = perf_counter()
         if not ranked:
             raise ModelIntelligenceError(
                 "NO_MEASURED_ROUTE",
@@ -378,20 +423,74 @@ class ModelIntelligenceService:
                 status_code=503,
             )
 
-        decision_id = self._repository.create_decision(
-            chat_id=chat_id,
-            owner_message_id=owner.message_id,
-            profile_id=chosen_profile.value,
-            selected_route_id=ranked[0].route_id,
-            ranked_route_ids=[item.route_id for item in ranked],
-            rejected_reasons=list(ranked[0].rejected_reasons),
-            selection_facts=list(ranked[0].selection_facts),
-        )
+        if manual_recovery:
+            # The owner explicitly accepted a NEW free-model call after an
+            # uncertain upstream result. Never rerun the original route, and
+            # never make more than one additional provider attempt.
+            original_route = str(existing["selected_route_id"])
+            alternate = next(
+                (item for item in ranked if item.route_id != original_route),
+                None,
+            )
+            if alternate is None:
+                raise ModelIntelligenceError(
+                    "NO_FREE_RECOVERY_ROUTE",
+                    "no other measured free route is currently eligible",
+                    status_code=503,
+                )
+            if not self._repository.claim_manual_recovery(
+                decision_id=str(existing["decision_id"]),
+                chat_id=chat_id,
+                owner_message_id=owner.message_id,
+            ):
+                raise ModelIntelligenceError(
+                    "MANUAL_RECOVERY_CONFLICT",
+                    "this unanswered message was already claimed or completed",
+                    status_code=409,
+                )
+            decision_id = str(existing["decision_id"])
+            ranked = (alternate,)
+            attempts = 1  # the first, uncertain request is already persisted
+        else:
+            # The NVIDIA Mistral route is preferred only when already admitted
+            # by the measured capability and zero-cost hard gates.
+            preferred = next(
+                (item for item in ranked if item.route_id == AMODEX_PRIMARY_CHAT_ROUTE_ID),
+                None,
+            )
+            if preferred is not None:
+                ranked = (preferred, *(item for item in ranked if item.route_id != preferred.route_id))
+            primary_policy = "PRIMARY_ELIGIBLE" if preferred is not None else "PRIMARY_UNAVAILABLE"
+            decision_id = self._repository.create_decision(
+                chat_id=chat_id,
+                owner_message_id=owner.message_id,
+                profile_id=chosen_profile.value,
+                selected_route_id=ranked[0].route_id,
+                ranked_route_ids=[item.route_id for item in ranked],
+                rejected_reasons=list(ranked[0].rejected_reasons),
+                selection_facts=[
+                    *ranked[0].selection_facts,
+                    f"chat_primary_route={AMODEX_PRIMARY_CHAT_ROUTE_ID}",
+                    f"chat_primary_policy={primary_policy}",
+                ],
+            )
+            attempts = 0
 
-        attempts = 0
+        # These durations distinguish Neon/history work from context assembly
+        # and selection; avoid logging message content, memory or private keys.
+        _logger.info(
+            "chat_stage_timings decision_id=%s workspace_ms=%.0f history_ms=%.0f context_ms=%.0f routing_ms=%.0f",
+            decision_id,
+            (chat_loaded - started_total) * 1000.0,
+            (history_loaded - chat_loaded) * 1000.0,
+            (prompt_ready - history_loaded) * 1000.0,
+            (routes_ready - prompt_ready) * 1000.0,
+        )
+        self._progress(decision_id=decision_id, stage="context_ready", started=started_total)
+        self._progress(decision_id=decision_id, stage="route_selected", started=started_total)
         last_code = "ROUTE_FAILED"
         last_message = "all bounded routes failed"
-        for item in ranked[:2]:
+        for item in (ranked[:1] if manual_recovery else ranked[:2]):
             attempts += 1
             candidate = self._candidate_for_route(item.route_id)
             request_key = new_uuid7()
@@ -401,6 +500,7 @@ class ModelIntelligenceService:
                 attempt_number=attempts,
                 request_key=request_key,
             )
+            self._progress(decision_id=decision_id, stage="provider_wait", started=started_total)
             started = perf_counter()
             try:
                 client = self._execution_registry.client_for(candidate)
@@ -422,6 +522,15 @@ class ModelIntelligenceService:
                     error_message=exc.message,
                 )
                 last_code, last_message = exc.code, exc.message
+                self._progress(
+                    decision_id=decision_id,
+                    stage="unknown" if ambiguous else "failed",
+                    started=started_total,
+                )
+                _logger.warning(
+                    "chat_provider_failure route_id=%s decision_id=%s code=%s ambiguous=%s latency_ms=%.0f",
+                    item.route_id, decision_id, exc.code, ambiguous, latency_ms,
+                )
                 if ambiguous:
                     decision = self._repository.finish_decision(
                         decision_id=decision_id,
@@ -453,10 +562,12 @@ class ModelIntelligenceService:
                     error_message=str(exc),
                 )
                 last_code, last_message = "EXECUTION_DENIED", str(exc)
+                self._progress(decision_id=decision_id, stage="failed", started=started_total)
                 self._maybe_demote_after_failures(item.route_id)
                 continue
 
             latency_ms = (perf_counter() - started) * 1000.0
+            self._progress(decision_id=decision_id, stage="provider_done", started=started_total)
             self._repository.finish_attempt(
                 attempt_id=attempt_id,
                 status=AttemptStatus.SUCCEEDED,
@@ -470,6 +581,7 @@ class ModelIntelligenceService:
                 role=ChatRole.AMODEX,
                 content=response.text,
             )
+            self._progress(decision_id=decision_id, stage="reply_saved", started=started_total)
             decision = self._repository.finish_decision(
                 decision_id=decision_id,
                 status=DecisionStatus.SUCCEEDED,
@@ -482,6 +594,7 @@ class ModelIntelligenceService:
             )
             return {**decision, "idempotent_replay": False}
 
+        self._progress(decision_id=decision_id, stage="failed", started=started_total)
         decision = self._repository.finish_decision(
             decision_id=decision_id,
             status=DecisionStatus.FAILED,
@@ -498,6 +611,41 @@ class ModelIntelligenceService:
             status_code=503,
             facts=(str(decision["decision_id"]),),
         )
+
+    def progress_snapshot(self, *, chat_id: str, owner_message_id: str) -> dict[str, Any]:
+        """Read only stored, sanitized phase markers for SSE reconnection.
+
+        No model invocation, prompt, memory, reasoning or credential is returned.
+        """
+        decision = self._repository.get_decision_for_owner_message(owner_message_id)
+        if decision is None:
+            return {"status": "PENDING", "phases": [], "decision_id": None}
+        if str(decision["chat_id"]) != str(chat_id):
+            raise ModelIntelligenceError(
+                "DECISION_NOT_IN_CHAT", "decision does not belong to chat", status_code=404
+            )
+        phases = []
+        for fact in decision.get("selection_facts") or ():
+            if not isinstance(fact, str) or not fact.startswith("progress:"):
+                continue
+            parts = fact.split(":")
+            if len(parts) != 3:
+                continue
+            try:
+                elapsed = int(parts[2])
+            except ValueError:
+                continue
+            if parts[1] not in {
+                "context_ready", "route_selected", "provider_wait",
+                "provider_done", "reply_saved", "failed", "unknown",
+            } or not 0 <= elapsed < 86_400_000:
+                continue
+            phases.append({"stage": parts[1], "elapsed_ms": elapsed})
+        return {
+            "decision_id": str(decision["decision_id"]),
+            "status": str(decision["status"]),
+            "phases": phases[:30],
+        }
 
     def decisions(self, *, chat_id: str, limit: int = 100) -> tuple[dict[str, Any], ...]:
         return self._repository.list_decisions(chat_id=chat_id, limit=limit)
@@ -607,7 +755,7 @@ class ModelIntelligenceService:
             context_capacity_tokens=int(row["context_capacity_tokens"]),
             lifecycle=ModelLifecycle(str(row["lifecycle"])),
             provenance=str(row["provenance"]),
-            enabled=bool(row["enabled"]),
+            enabled=bool(row["enabled"]) and str(row["route_id"]) != RETIRED_DIRECT_MISTRAL_ROUTE_ID,
         )
 
     def _candidate_for_route(self, route_id: str) -> ModelCandidate:
@@ -697,7 +845,13 @@ class ModelIntelligenceService:
         )
 
     def _chat_prompt(self, workspace_id: str, messages: tuple[Any, ...], owner_message_id: str) -> str:
-        recent = messages[-12:]
+        # Recovery may target an earlier unanswered owner message. Never leak
+        # later messages into the prompt for that historical turn.
+        source_index = next(
+            (index for index, item in enumerate(messages) if item.message_id == owner_message_id),
+            len(messages) - 1,
+        )
+        recent = messages[max(0, source_index - 11):source_index + 1]
         approved = [
             item
             for item in self._workspace.list_memories(workspace_id=workspace_id)
@@ -706,8 +860,12 @@ class ModelIntelligenceService:
         memory_text = "\n".join(f"- {item.content}" for item in approved)
         chat_text = "\n".join(f"{item.role.value}: {item.content}" for item in recent)
         return (
-            "You are Amodex inside a project workspace. Answer the owner's latest message directly and "
-            "usefully. Do not claim that repository/code execution happened merely because you can chat. "
+            "You are Amodex, the product assistant inside a project workspace, not the name of a specific "
+            "foundation model. The underlying provider/model can vary under explicit routing policy. "
+            "Do not claim you were trained by OpenAI, NVIDIA, or another model provider, and do not claim "
+            "to know the user's verified account identity or the product creator without verified context. "
+            "Answer the owner's latest message directly and usefully, in their language. "
+            "Do not claim that repository/code execution happened merely because you can chat. "
             "Execution requires an authorized Environment.\n\n"
             f"APPROVED PROJECT MEMORY:\n{memory_text or '(none)'}\n\n"
             f"RECENT CHAT:\n{chat_text}\n\n"

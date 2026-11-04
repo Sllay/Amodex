@@ -1,0 +1,178 @@
+name: p0-cache-local-state
+
+on:
+  push:
+    branches:
+      - p0/cache-local-state
+  pull_request:
+    branches:
+      - deploy/render-neon-cloudinary-v1
+    paths:
+      - 'src/amodex/api/ui_cache_http.py'
+      - 'src/amodex/api/workspace_cache_routes.py'
+      - 'src/amodex/api/workspace_cache_web.py'
+      - 'src/amodex/api/workspace_ui_routes.py'
+      - 'src/amodex/api/workspace_app.py'
+      - 'tests/unit/test_cache_local_state.py'
+      - 'tests/unit/test_workspace_frontend_authority.py'
+      - 'tests/unit/test_performance_structural.py'
+      - 'tests/e2e/**'
+      - '.github/workflows/p0-cache-local-state.yml'
+
+permissions:
+  contents: read
+
+env:
+  PYTHONNOUSERSITE: '1'
+  AMODEX_TEST_DATABASE_URL: postgresql://amodex@127.0.0.1:5432/amodex_e2e
+  AMODEX_DATABASE_URL: postgresql://amodex@127.0.0.1:5432/amodex_e2e
+  AMODEX_MIGRATION_DATABASE_URL: postgresql://amodex@127.0.0.1:5432/amodex_e2e
+  AMODEX_DATABASE_ENDPOINT_GUARD: '127'
+  AMODEX_MEDIA_STORE_BACKEND: file
+  AMODEX_STT_ENABLED: 'false'
+  AMODEX_DB_POOL_SIZE: '2'
+  AMODEX_E2E_BASE_URL: http://localhost:8765
+
+jobs:
+  browser-e2e:
+    name: cache-${{ matrix.browser }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, webkit]
+
+    services:
+      postgres:
+        image: postgres@sha256:1beaa3084eee2676f20a9cd9928f0bf2c5bf674f8e49f81017912183d377c61c
+        env:
+          POSTGRES_USER: amodex
+          POSTGRES_DB: amodex_e2e
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U amodex -d amodex_e2e"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 20
+
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+
+      - name: Recreate isolated Python runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          BOOTSTRAP_VENV="$RUNNER_TEMP/amodex-uv-bootstrap"
+          env -u PYTHONPATH -u PYTHONHOME python3 -m venv "$BOOTSTRAP_VENV"
+          env -u PYTHONPATH -u PYTHONHOME "$BOOTSTRAP_VENV/bin/python" -m pip install --disable-pip-version-check uv==0.10.0
+          UV_BIN="$BOOTSTRAP_VENV/bin/uv"
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" python install 3.13.5
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" sync --python 3.13.5 --extra dev --frozen
+          echo "UV_BIN=$UV_BIN" >> "$GITHUB_ENV"
+
+      - name: Compile local-first cache layer
+        shell: bash
+        run: |
+          set -euo pipefail
+          .venv/bin/python -m compileall -q \
+            src/amodex/api/ui_cache_http.py \
+            src/amodex/api/workspace_cache_routes.py \
+            src/amodex/api/workspace_cache_web.py \
+            src/amodex/api/workspace_ui_routes.py \
+            src/amodex/api/workspace_app.py \
+            tests/unit/test_cache_local_state.py \
+            tests/e2e/test_workspace_baseline.py
+
+      - name: Prove authority performance and cache boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          .venv/bin/python -m pytest \
+            tests/unit/test_workspace_frontend_authority.py \
+            tests/unit/test_performance_structural.py \
+            tests/unit/test_cache_local_state.py \
+            tests/unit/test_cloudinary_media_store.py \
+            -q
+
+      - name: Install pinned Playwright test layer
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$UV_BIN" pip install --python .venv/bin/python \
+            playwright==1.64.1 \
+            pytest-playwright==0.10.0
+          .venv/bin/python -m playwright install --with-deps "${{ matrix.browser }}"
+
+      - name: Prepare isolated local stores
+        shell: bash
+        run: |
+          set -euo pipefail
+          MEDIA_DIR="$RUNNER_TEMP/amodex-p4-media-${{ matrix.browser }}"
+          VAULT_DIR="$RUNNER_TEMP/amodex-p4-vault-${{ matrix.browser }}"
+          mkdir -p "$MEDIA_DIR" "$VAULT_DIR"
+          echo "AMODEX_MEDIA_STORE_DIR=$MEDIA_DIR" >> "$GITHUB_ENV"
+          echo "AMODEX_CONNECTOR_VAULT_DIR=$VAULT_DIR" >> "$GITHUB_ENV"
+
+      - name: Apply production migrations to isolated PostgreSQL
+        shell: bash
+        run: |
+          set -euo pipefail
+          .venv/bin/python scripts/migrate_production.py
+
+      - name: Run snapshot integration regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          .venv/bin/python -m pytest tests/integration/test_workspace_ui_snapshots.py -q
+
+      - name: Start localhost E2E server
+        shell: bash
+        run: |
+          set -euo pipefail
+          nohup .venv/bin/python -m uvicorn amodex.api.workspace_app:app \
+            --host 127.0.0.1 --port 8765 \
+            >"$RUNNER_TEMP/amodex-p4-e2e.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/amodex-p4-e2e.pid"
+
+          for attempt in $(seq 1 45); do
+            if curl -fsS http://localhost:8765/healthz >/dev/null; then
+              exit 0
+            fi
+            if ! kill -0 "$(cat "$RUNNER_TEMP/amodex-p4-e2e.pid")" 2>/dev/null; then
+              cat "$RUNNER_TEMP/amodex-p4-e2e.log" >&2
+              exit 1
+            fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/amodex-p4-e2e.log" >&2
+          exit 1
+
+      - name: Run browser local-first baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          .venv/bin/python -m pytest tests/e2e -q \
+            --browser "${{ matrix.browser }}" \
+            --tracing retain-on-failure
+
+      - name: Show server log on failure
+        if: failure()
+        shell: bash
+        run: |
+          if [ -f "$RUNNER_TEMP/amodex-p4-e2e.log" ]; then
+            cat "$RUNNER_TEMP/amodex-p4-e2e.log"
+          fi
+
+      - name: Stop E2E server
+        if: always()
+        shell: bash
+        run: |
+          if [ -f "$RUNNER_TEMP/amodex-p4-e2e.pid" ]; then
+            kill "$(cat "$RUNNER_TEMP/amodex-p4-e2e.pid")" 2>/dev/null || true
+          fi

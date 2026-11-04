@@ -60,7 +60,7 @@ def _eligible_candidates():
     return tuple(
         replace(item, lifecycle=ModelLifecycle.ELIGIBLE)
         for item in stage5_declared_candidates()
-        if item.provider in {"groq", "nvidia"}
+        if item.provider == "nvidia" or (item.provider == "groq" and item.model == "openai/gpt-oss-20b")
     )
 
 

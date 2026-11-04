@@ -1,0 +1,49 @@
+services:
+  - type: web
+    name: amodex
+    runtime: python
+    plan: free
+    buildCommand: pip install .
+    startCommand: python scripts/migrate_production.py && uvicorn amodex.api.workspace_app:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /healthz
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.5
+      - key: AMODEX_DATABASE_URL
+        sync: false
+      - key: AMODEX_MIGRATION_DATABASE_URL
+        sync: false
+      - key: AMODEX_DATABASE_ENDPOINT_GUARD
+        sync: false
+      - key: AMODEX_MEDIA_STORE_BACKEND
+        value: cloudinary
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+      - key: AMODEX_CLOUDINARY_PREFIX
+        value: amodex-production
+      - key: AMODEX_MEDIA_MAX_UPLOAD_BYTES
+        value: "26214400"
+      - key: AMODEX_ACCESS_PASSCODE
+        sync: false
+      - key: AMODEX_ACCESS_SESSION_SECRET
+        sync: false
+      - key: AMODEX_ACCESS_SESSION_TTL_SECONDS
+        value: "43200"
+      - key: AMODEX_THEME_COLORS
+        value: "#8b5cf6"
+      - key: AMODEX_THEME_MODE
+        value: single
+      - key: AMODEX_STT_ENABLED
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: AMODEX_STT_BILLING_CLASS
+        value: free
+      - key: AMODEX_STT_MODEL
+        value: whisper-large-v3-turbo
+      - key: AMODEX_GROQ_BILLING_CLASS
+        value: free

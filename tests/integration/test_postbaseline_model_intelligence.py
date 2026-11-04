@@ -16,7 +16,7 @@ from amodex.multimodal.clients import MultimodalClients
 from amodex.multimodal.object_store import MemoryMediaStore
 from amodex.providers.base import ProviderFailure
 from amodex.providers.capabilities import BillingClass, WorkerProfileKind
-from amodex.providers.catalog import stage5_declared_candidates
+from amodex.providers.catalog import AMODEX_PRIMARY_CHAT_ROUTE_ID, stage5_declared_candidates
 from amodex.providers.registry import ProviderExecutionDenied
 from amodex.runtime.models import ProviderResponse, ProviderUsage
 from amodex.storage.environment import PostgresEnvironmentRepository
@@ -145,7 +145,8 @@ def state():
     assert multimodal.schema_ready()
     assert mi.schema_ready()
     candidates = tuple(
-        item for item in stage5_declared_candidates() if item.provider in {"groq", "nvidia"}
+        item for item in stage5_declared_candidates()
+        if item.provider == "nvidia" or (item.provider == "groq" and item.model == "openai/gpt-oss-20b")
     )
     registry = FakeRegistry(candidates)
     service = ModelIntelligenceService(
@@ -216,7 +217,7 @@ def test_step4_schema_status_and_workspace_model_ui(state) -> None:
         models = client.get("/models")
         assert models.status_code == 200
         assert "Model Intelligence" in models.text
-        assert "Rodar benchmark" in models.text
+        assert "Benchmark texto" in models.text
 
 
 def test_real_benchmark_contract_promotes_and_routes_without_fake_vision(state) -> None:
@@ -251,7 +252,7 @@ def test_chat_primary_failure_uses_one_bounded_fallback_and_is_idempotent(state)
 
     asyncio.run(_benchmark_all(service, candidates))
     ranking = service.leaderboard(WorkerProfileKind.REPOSITORY_ANALYST)
-    primary = ranking[0].route_id
+    primary = AMODEX_PRIMARY_CHAT_ROUTE_ID
     registry.clients[primary].fail_chat = "SERVER_TRANSIENT"
 
     client = _client(state)
@@ -267,6 +268,7 @@ def test_chat_primary_failure_uses_one_bounded_fallback_and_is_idempotent(state)
         )
         assert response.status_code == 200, response.text
         decision = response.json()
+        assert decision["selected_route_id"] == primary
         assert decision["attempt_count"] == 2
         assert decision["fallback_used"] is True
         assert decision["final_route_id"] != primary
@@ -280,6 +282,41 @@ def test_chat_primary_failure_uses_one_bounded_fallback_and_is_idempotent(state)
         messages = client.get(f"/v1/chats/{chat['chat_id']}/messages").json()
         assert len([item for item in messages if item["role"] == "AMODEX"]) == 1
         assert sum(fake.chat_calls for fake in registry.clients.values()) == 2
+
+
+def test_chat_prefers_measured_mistral_without_reordering_agent_leaderboard(state) -> None:
+    *_, candidates, registry, service = state
+    import asyncio
+
+    asyncio.run(_benchmark_all(service, candidates))
+    ranking_before = service.leaderboard(WorkerProfileKind.REPOSITORY_ANALYST)
+    assert len(ranking_before) == 2
+    client = _client(state)
+    with client:
+        _, chat = _make_chat(client)
+        owner = client.post(
+            f"/v1/chats/{chat['chat_id']}/messages",
+            json={"role": "OWNER", "content": "Ola, Amodex!"},
+        ).json()
+        result = client.post(
+            f"/v1/chats/{chat['chat_id']}/respond",
+            json={"owner_message_id": owner["message_id"], "profile": "repository-analyst"},
+        )
+        assert result.status_code == 200, result.text
+        decision = result.json()
+        assert decision["selected_route_id"] == AMODEX_PRIMARY_CHAT_ROUTE_ID
+        assert decision["final_route_id"] == AMODEX_PRIMARY_CHAT_ROUTE_ID
+        assert decision["attempt_count"] == 1
+        assert decision["fallback_used"] is False
+        assert "chat_primary_policy=PRIMARY_ELIGIBLE" in decision["selection_facts"]
+        stages = [str(fact).split(":")[1] for fact in decision["selection_facts"]
+                  if str(fact).startswith("progress:")]
+        assert stages == [
+            "context_ready", "route_selected", "provider_wait", "provider_done", "reply_saved"
+        ]
+        assert registry.clients[AMODEX_PRIMARY_CHAT_ROUTE_ID].chat_calls == 1
+        assert sum(fake.chat_calls for fake in registry.clients.values()) == 1
+        assert service.leaderboard(WorkerProfileKind.REPOSITORY_ANALYST) == ranking_before
 
 
 def test_ambiguous_outcome_stops_without_blind_retry_or_fallback(state) -> None:
@@ -308,6 +345,150 @@ def test_ambiguous_outcome_stops_without_blind_retry_or_fallback(state) -> None:
         decisions = client.get(f"/v1/chats/{chat['chat_id']}/model-decisions").json()
         assert decisions[0]["status"] == "UNKNOWN_OUTCOME"
         assert decisions[0]["attempt_count"] == 1
+
+
+
+def test_owner_manually_recovers_uncertain_reply_with_one_free_alternate(state) -> None:
+    import asyncio
+
+    *_, candidates, registry, service = state
+    asyncio.run(_benchmark_all(service, candidates))
+    primary = AMODEX_PRIMARY_CHAT_ROUTE_ID
+    registry.clients[primary].fail_chat = "REQUEST_TIMEOUT"
+    registry.clients[primary].ambiguous_chat = True
+
+    with _client(state) as client:
+        _, chat = _make_chat(client)
+        chat_id = chat["chat_id"]
+        source = client.post(
+            f"/v1/chats/{chat_id}/messages",
+            json={"role": "OWNER", "content": "Qual a memoria dessa conversa?"},
+        ).json()
+        message_id = source["message_id"]
+        first = client.post(
+            f"/v1/chats/{chat_id}/respond",
+            json={"owner_message_id": message_id, "profile": "repository-analyst"},
+        )
+        assert first.status_code == 503
+        assert first.json()["detail"]["code"] == "PROVIDER_OUTCOME_UNKNOWN"
+        before = client.get(f"/v1/chats/{chat_id}/model-decisions").json()[0]
+        assert before["status"] == "UNKNOWN_OUTCOME"
+        assert before["attempt_count"] == 1
+        assert registry.clients[primary].chat_calls == 1
+
+        recovered = client.post(
+            f"/v1/chats/{chat_id}/respond/recover",
+            json={"owner_message_id": message_id},
+        )
+        assert recovered.status_code == 200, recovered.text
+        decision = recovered.json()
+        assert decision["decision_id"] == before["decision_id"]
+        assert decision["status"] == "SUCCEEDED"
+        assert decision["attempt_count"] == 2
+        assert decision["fallback_used"] is True
+        assert decision["selected_route_id"] == primary
+        assert decision["final_route_id"] != primary
+        assert "manual_recovery=explicit_owner_action" in decision["selection_facts"]
+        assert decision["result_message_id"] is not None
+        assert registry.clients[primary].chat_calls == 1
+        assert sum(fake.chat_calls for fake in registry.clients.values()) == 2
+        messages = client.get(f"/v1/chats/{chat_id}/messages").json()
+        assert sum(item["role"] == "OWNER" for item in messages) == 1
+        assert sum(item["role"] == "AMODEX" for item in messages) == 1
+
+        duplicate = client.post(
+            f"/v1/chats/{chat_id}/respond/recover",
+            json={"owner_message_id": message_id},
+        )
+        assert duplicate.status_code == 409
+        assert duplicate.json()["detail"]["code"] == "MANUAL_RECOVERY_UNAVAILABLE"
+        assert sum(fake.chat_calls for fake in registry.clients.values()) == 2
+
+        with psycopg.connect(os.environ["AMODEX_TEST_DATABASE_URL"]) as conn:
+            attempts = conn.execute(
+                "SELECT status,route_id,attempt_number,error_code FROM amodex_model_route_attempts "
+                "WHERE decision_id=%s ORDER BY attempt_number",
+                (decision["decision_id"],),
+            ).fetchall()
+        assert len(attempts) == 2
+        assert attempts[0][0] == "UNKNOWN_OUTCOME"
+        assert attempts[0][1] == primary
+        assert attempts[0][3] == "REQUEST_TIMEOUT"
+        assert attempts[1][0] == "SUCCEEDED"
+        assert attempts[1][1] == decision["final_route_id"]
+
+
+def test_manual_recovery_stays_blocked_without_another_measured_free_route(state) -> None:
+    import asyncio
+
+    *_, candidates, registry, service = state
+    asyncio.run(_benchmark_all(service, candidates))
+    primary = AMODEX_PRIMARY_CHAT_ROUTE_ID
+    registry.clients[primary].fail_chat = "REQUEST_TIMEOUT"
+    registry.clients[primary].ambiguous_chat = True
+
+    with _client(state) as client:
+        _, chat = _make_chat(client)
+        chat_id = chat["chat_id"]
+        owner = client.post(
+            f"/v1/chats/{chat_id}/messages",
+            json={"role": "OWNER", "content": "Ola"},
+        ).json()
+        message_id = owner["message_id"]
+        assert client.post(
+            f"/v1/chats/{chat_id}/respond",
+            json={"owner_message_id": message_id, "profile": "repository-analyst"},
+        ).status_code == 503
+        original_ranking = service._ranked_routes
+        try:
+            service._ranked_routes = lambda **kwargs: tuple(
+                item for item in original_ranking(**kwargs) if item.route_id == primary
+            )
+            blocked = client.post(
+                f"/v1/chats/{chat_id}/respond/recover",
+                json={"owner_message_id": message_id},
+            )
+        finally:
+            service._ranked_routes = original_ranking
+        assert blocked.status_code == 503
+        assert blocked.json()["detail"]["code"] == "NO_FREE_RECOVERY_ROUTE"
+        saved = client.get(f"/v1/chats/{chat_id}/model-decisions").json()[0]
+        assert saved["status"] == "UNKNOWN_OUTCOME"
+        assert saved["attempt_count"] == 1
+        assert sum(fake.chat_calls for fake in registry.clients.values()) == 1
+
+
+def test_manual_recovery_claim_is_atomic_and_cannot_replay_same_decision(state) -> None:
+    import asyncio
+
+    *_, mi, candidates, registry, service = state
+    asyncio.run(_benchmark_all(service, candidates))
+    registry.clients[AMODEX_PRIMARY_CHAT_ROUTE_ID].fail_chat = "REQUEST_TIMEOUT"
+    registry.clients[AMODEX_PRIMARY_CHAT_ROUTE_ID].ambiguous_chat = True
+    with _client(state) as client:
+        _, chat = _make_chat(client)
+        chat_id = chat["chat_id"]
+        owner = client.post(
+            f"/v1/chats/{chat_id}/messages",
+            json={"role": "OWNER", "content": "Unica tentativa"},
+        ).json()
+        message_id = owner["message_id"]
+        assert client.post(
+            f"/v1/chats/{chat_id}/respond",
+            json={"owner_message_id": message_id, "profile": "repository-analyst"},
+        ).status_code == 503
+        decision = mi.get_decision_for_owner_message(message_id)
+        assert decision is not None
+        assert mi.claim_manual_recovery(
+            decision_id=str(decision["decision_id"]),
+            chat_id=chat_id, owner_message_id=message_id,
+        )
+        assert not mi.claim_manual_recovery(
+            decision_id=str(decision["decision_id"]),
+            chat_id=chat_id, owner_message_id=message_id,
+        )
+        assert mi.get_decision_for_owner_message(message_id)["status"] == "STARTED"
+        assert sum(fake.chat_calls for fake in registry.clients.values()) == 1
 
 
 def test_persistent_failures_auto_demote_without_auto_promoting_again(state) -> None:
