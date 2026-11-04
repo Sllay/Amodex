@@ -612,6 +612,41 @@ class ModelIntelligenceService:
             facts=(str(decision["decision_id"]),),
         )
 
+    def progress_snapshot(self, *, chat_id: str, owner_message_id: str) -> dict[str, Any]:
+        """Read only stored, sanitized phase markers for SSE reconnection.
+
+        No model invocation, prompt, memory, reasoning or credential is returned.
+        """
+        decision = self._repository.get_decision_for_owner_message(owner_message_id)
+        if decision is None:
+            return {"status": "PENDING", "phases": [], "decision_id": None}
+        if str(decision["chat_id"]) != str(chat_id):
+            raise ModelIntelligenceError(
+                "DECISION_NOT_IN_CHAT", "decision does not belong to chat", status_code=404
+            )
+        phases = []
+        for fact in decision.get("selection_facts") or ():
+            if not isinstance(fact, str) or not fact.startswith("progress:"):
+                continue
+            parts = fact.split(":")
+            if len(parts) != 3:
+                continue
+            try:
+                elapsed = int(parts[2])
+            except ValueError:
+                continue
+            if parts[1] not in {
+                "context_ready", "route_selected", "provider_wait",
+                "provider_done", "reply_saved", "failed", "unknown",
+            } or not 0 <= elapsed < 86_400_000:
+                continue
+            phases.append({"stage": parts[1], "elapsed_ms": elapsed})
+        return {
+            "decision_id": str(decision["decision_id"]),
+            "status": str(decision["status"]),
+            "phases": phases[:30],
+        }
+
     def decisions(self, *, chat_id: str, limit: int = 100) -> tuple[dict[str, Any], ...]:
         return self._repository.list_decisions(chat_id=chat_id, limit=limit)
 
