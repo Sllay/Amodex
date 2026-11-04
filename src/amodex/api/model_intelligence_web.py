@@ -111,7 +111,7 @@ async function miAutomaticReply(app,ctx){
 }
 miQueueFeature(app=>{
   app.hooks.register('afterSend',ctx=>miAutomaticReply(app,ctx));
-  app.hooks.register('afterChatSelected',()=>miLoadDecisions(state.chat?.chat_id,app));
+  app.hooks.register('afterChatSelected',()=>{void miLoadDecisions(state.chat?.chat_id,app)});
   app.hooks.register('afterRenderMessages',()=>miDecorateMessages());
 });
 miBoot();
