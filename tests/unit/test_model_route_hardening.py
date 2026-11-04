@@ -357,7 +357,7 @@ def test_manual_recovery_uses_existing_decision_and_never_retries_original_route
     claim = inspect.getsource(PostgresModelIntelligenceRepository.claim_manual_recovery)
     assert "item.route_id != original_route" in source
     assert "attempts = 1" in source
-    assert "ranked[:1 if manual_recovery else 2]" in source
+    assert "ranked[:1] if manual_recovery else ranked[:2]" in source
     assert "self._repository.claim_manual_recovery(" in source
     assert "status='UNKNOWN_OUTCOME' AND attempt_count=1" in claim
     assert "AND result_message_id IS NULL" in claim
