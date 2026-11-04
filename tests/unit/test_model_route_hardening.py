@@ -313,3 +313,18 @@ def test_provider_timeout_remains_ambiguous_and_is_logged_without_secrets() -> N
     safe_segment = source.split("chat_provider_failure route_id=", 1)[1].split("if ambiguous:", 1)[0]
     assert "exc.message" not in safe_segment
     assert "provider outcome is ambiguous; no blind retry or fallback was performed" in source
+
+
+def test_routed_chat_endpoint_is_threadpooled_to_keep_health_checks_responsive() -> None:
+    import inspect
+
+    from amodex.api.model_intelligence_routes import build_model_intelligence_router
+
+    service = _Service()
+    router = build_model_intelligence_router(service)
+    endpoint = next(
+        route.endpoint for route in router.routes
+        if route.path.endswith("/chats/{chat_id}/respond")
+    )
+    assert not inspect.iscoroutinefunction(endpoint)
+    assert "asyncio.run" in inspect.getsource(endpoint)
