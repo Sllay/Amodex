@@ -361,3 +361,33 @@ def test_manual_recovery_uses_existing_decision_and_never_retries_original_route
     assert "self._repository.claim_manual_recovery(" in source
     assert "status='UNKNOWN_OUTCOME' AND attempt_count=1" in claim
     assert "AND result_message_id IS NULL" in claim
+
+
+def test_progress_markers_require_known_nonnegative_stages(monkeypatch) -> None:
+    import pytest
+    from amodex.storage.model_intelligence import PostgresModelIntelligenceRepository
+
+    class Connection:
+        def __init__(self):
+            self.sql = None
+            self.args = None
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return False
+        def execute(self, sql, args):
+            self.sql = sql
+            self.args = args
+
+    connection = Connection()
+    monkeypatch.setattr("amodex.storage.model_intelligence.psycopg.connect", lambda dsn: connection)
+    repo = PostgresModelIntelligenceRepository("postgresql://fixture.local/test")
+    repo.append_progress_fact(decision_id="decision", stage="provider_wait", elapsed_ms=1573.5)
+    assert "selection_facts" in connection.sql
+    assert connection.args[1] == "decision"
+    assert connection.args[0].obj == ["progress:provider_wait:1574"]
+    for stage in ("other", "REASONING_CONTENT", ""):
+        with pytest.raises(ValueError):
+            repo.append_progress_fact(decision_id="decision", stage=stage, elapsed_ms=1)
+    with pytest.raises(ValueError):
+        repo.append_progress_fact(decision_id="decision", stage="provider_wait", elapsed_ms=-1)
