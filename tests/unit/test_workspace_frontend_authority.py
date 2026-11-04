@@ -189,3 +189,18 @@ def test_stale_chat_decision_has_explicit_safe_recovery_without_provider_retry()
     assert "mi-reconcile-btn" in _STEP4_CSS
     assert "model-intelligence/reconcile" in _STEP4_SCRIPT
     assert "Não reenviar automaticamente." in _STEP4_SCRIPT
+
+
+def test_explicit_manual_recovery_reuses_saved_owner_message_and_never_auto_retries() -> None:
+    from amodex.api.model_intelligence_web import _STEP4_SCRIPT, _STEP4_CSS
+
+    assert "Responder com outro modelo gratuito" in _STEP4_SCRIPT
+    assert "window.confirm(" in _STEP4_SCRIPT
+    assert "/respond/recover" in _STEP4_SCRIPT
+    assert "{owner_message_id:m.message_id}" in _STEP4_SCRIPT
+    assert "Number(decision.attempt_count)===1" in _STEP4_SCRIPT
+    assert "decision.status==='UNKNOWN_OUTCOME'" in _STEP4_SCRIPT
+    assert "newerDuplicate" in _STEP4_SCRIPT
+    assert "mi-recover-btn" in _STEP4_CSS
+    assert "miRememberDecisions(chatId,outcome)" in _STEP4_SCRIPT
+    assert "/messages`,{method:'POST'" not in _STEP4_SCRIPT

@@ -9,6 +9,7 @@ _STEP4_CSS = r'''
 .mi-route-footnote.is-fallback{color:var(--warn)}
 .mi-reply-state{font-size:.73rem;margin-top:9px;color:var(--warn);overflow-wrap:anywhere}
 .mi-reconcile-btn{display:block;margin-top:8px;padding:6px 10px;font-size:.78rem}
+.mi-recover-btn{display:block;margin-top:8px;padding:7px 10px;font-size:.78rem;border:1px solid var(--line);color:var(--text)}
 '''
 
 _STEP4_SCRIPT = r'''
@@ -76,6 +77,48 @@ function miDecorateMessages(){
           ?'Resposta falhou ('+(decision.error_code||'erro')+'). Mensagem preservada.'
           :stale?'Execução interrompida ou sem confirmação há mais de 5 minutos. Não reenviar automaticamente.'
           :'Processamento iniciado; estado final ainda não confirmado.';
+      if(decision.status==='UNKNOWN_OUTCOME'&&Number(decision.attempt_count)===1&&!decision.result_message_id){
+        // Two identical owner bubbles may exist from the earlier UI bug.
+        // Offer recovery only on the latest copy, never on both.
+        const newerDuplicate=state.messages.slice(index+1).some(later=>
+          later.role==='OWNER'&&String(later.content||'').trim()===String(m.content||'').trim()
+        );
+        if(!newerDuplicate){
+          const btn=document.createElement('button');
+          btn.type='button';btn.className='mi-recover-btn';
+          btn.textContent='Responder com outro modelo gratuito';
+          btn.addEventListener('click',async()=>{
+            if(!window.confirm('A tentativa anterior não teve resposta confirmada. Fazer UMA nova chamada gratuita usando OUTRO modelo, sem reenviar sua mensagem?'))return;
+            btn.disabled=true;
+            btn.textContent='Consultando modelo alternativo...';
+            try{
+              const outcome=await miApi('/v1/chats/'+encodeURIComponent(chatId)+'/respond/recover',{
+                method:'POST',body:JSON.stringify({owner_message_id:m.message_id})
+              });
+              miRememberDecisions(chatId,outcome);
+              const messages=await miApi('/v1/chats/'+encodeURIComponent(chatId)+'/messages');
+              if(state.chat?.chat_id===chatId){
+                state.messages=messages;
+                renderMessages();
+              }
+              window.AmodexApp?.notice?.('Resposta recuperada com alternativa gratuita.','good');
+            }catch(e){
+              window.AmodexApp?.notice?.(
+                e?.code==='NO_FREE_RECOVERY_ROUTE'
+                  ?'Nenhum outro modelo gratuito medido está disponível.'
+                  :e?.code==='MANUAL_RECOVERY_CONFLICT'||e?.code==='MANUAL_RECOVERY_UNAVAILABLE'
+                    ?'Essa recuperação já foi iniciada ou não está mais disponível.'
+                    :'A tentativa alternativa falhou. Consulte o status salvo antes de tentar novamente.',
+                'warn'
+              );
+              await miLoadDecisions(chatId,window.AmodexApp);
+            }finally{
+              btn.disabled=false;
+            }
+          });
+          mark.appendChild(btn);
+        }
+      }
       if(stale){
         const btn=document.createElement('button');
         btn.type='button';btn.className='mi-reconcile-btn';btn.textContent='Reconciliar estado';
