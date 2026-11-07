@@ -1,0 +1,159 @@
+{
+  "base_commit": "1ca72365a63c2134921de58224bc68f73add203e",
+  "files": [
+    {
+      "path": "src/amodex/storage/postgres.py",
+      "blob": "56011467babc8859003bbb9ca93f6b0d6578cf6e",
+      "last_commit": "0829d104123b715c2ac198a54e5e406eda31eed8",
+      "sha256": "ac76af6bde09894850718a38a270b4ef261a69c36dda7b04d2017cb5164093ca",
+      "lines": 528
+    },
+    {
+      "path": "src/amodex/storage/environment_product.py",
+      "blob": "62b46316e6502f467f68079ab6ede660674b3031",
+      "last_commit": "acf4a737d8751baef55ca38d70c7b81a034edc3a",
+      "sha256": "2026c776e388160a1a74baf2d1b5d721acd683f4074aa61b31396721202c72e7",
+      "lines": 466
+    },
+    {
+      "path": "src/amodex/storage/product.py",
+      "blob": "46fb4363a46358c7ae20a3eae33d71bc53e14165",
+      "last_commit": "48b0e2333cbed8f3a4e5d59c0932a9466204b090",
+      "sha256": "6d7a8b2db9576ca4ebfa7ab4d6b389c384ecbb7279f756a3d94d0c62c95cb782",
+      "lines": 696
+    },
+    {
+      "path": "src/amodex/storage/workspace.py",
+      "blob": "c875d4c5ec059297bec2ea0873cb90f1dd8e7ef3",
+      "last_commit": "e3b549cb74c38e55ca29c7fb741474b23f146287",
+      "sha256": "6123549d5d63c48d31c585fef4d5197788065ec7c82bdb225b3b14045b93eea4",
+      "lines": 466
+    },
+    {
+      "path": "src/amodex/runtime/worker.py",
+      "blob": "2e6659a6c0ca039b997b272a0882ebc3f90297e0",
+      "last_commit": "ced110f2b613d511c1b60e3fb8025901542efb20",
+      "sha256": "66f3b7cd202102ba43a9b4490a16f1936ccb5c547d388ed4d2471e20611251d5",
+      "lines": 240
+    },
+    {
+      "path": "src/amodex/runtime/hermes_worker.py",
+      "blob": "3cd51423382b6e7d62c77df8c5b2385ba73c8f85",
+      "last_commit": "c1e0697ac4add1e57a26192cb42056969346e726",
+      "sha256": "086e73a2901295e3527b6fc3441c74df5db550927e2f3cb1aecee04965734479",
+      "lines": 498
+    },
+    {
+      "path": "src/amodex/director/orchestrator.py",
+      "blob": "e222974d4097d4b47d932d3b786e9f370bb382a8",
+      "last_commit": "796fd247034cc238ab3d28b80af8d7fbc82073f0",
+      "sha256": "ab4007cc47ca248a2755fbfcc17e944b0d63ebc57145fb887f1f898ba576c24b",
+      "lines": 274
+    },
+    {
+      "path": "src/amodex/git/task_workspace.py",
+      "blob": "c29f7256de9c5d304c05fed021c8a4af280c95eb",
+      "last_commit": "c1e0697ac4add1e57a26192cb42056969346e726",
+      "sha256": "d79a9689dae0ddad2b49db06997abc8da44da3dbdf30c1827151a597e506c9b7",
+      "lines": 248
+    },
+    {
+      "path": "src/amodex/api/app.py",
+      "blob": "bcaa7d1044d54eaca106de352a940d46abb81ef0",
+      "last_commit": "6eefd66fe00fae54183b71874f9a2bde63737bde",
+      "sha256": "7a60c23c1df3c92c9c3c0115359a33809a360be6a83ade796af455d0300106ca",
+      "lines": 945
+    },
+    {
+      "path": "src/amodex/api/workspace_routes.py",
+      "blob": "5e626fdf772d2c597ba2e30a32e0fa163016aa44",
+      "last_commit": "cb2a2ef679c2a60d9c9a33813a47c092a4a31f12",
+      "sha256": "c7649b40fa8355465743004d7eb46e1d331d48186156d76775d1ef921213a9cb",
+      "lines": 288
+    },
+    {
+      "path": "src/amodex/runners/client.py",
+      "blob": "20fd050290a4f6e3a65fa3be083e247d37160438",
+      "last_commit": "9a7bad8c02ce1478154468862016f8313dbc6019",
+      "sha256": "df7b95fd5516dcd82f45fa0cb7d0937d3e012a31917bad64f79e201366d78895",
+      "lines": 172
+    },
+    {
+      "path": ".github/workflows/environment-runner.yml",
+      "blob": "a942012af7965f3f0b99dba2165c72148b74eec9",
+      "last_commit": "7027faf765565c2b28a824556319e8f77bf60f07",
+      "sha256": "6d27cf7ae46e9daa79e906510bab07a56693a8c99066edfb6411b1c226645267",
+      "lines": 271
+    },
+    {
+      "path": "migrations/0001_stage1_runtime.sql",
+      "blob": "2c1843d56cab59764b997eb64499e302e7507adb",
+      "last_commit": "d37848765eb88db2adc17d1f0b85ae83958d9414",
+      "sha256": "3747d514b4992deda6b59c6c85b4ee547f719d1a97cc734919ab363d053f67de",
+      "lines": 32
+    },
+    {
+      "path": "migrations/postbaseline/0002_environment_product_runners.sql",
+      "blob": "3c5e1af08d20f7459bc348004389b682f96c470e",
+      "last_commit": "27c59e7fa3e76ff54eb7ed95f8f64980a9b4547f",
+      "sha256": "bcd13ff61ed174675d189e4c65466235e53d356533ca75445dd26505cc5621c8",
+      "lines": 34
+    },
+    {
+      "path": "migrations/postbaseline/0004_environment_runner_leases.sql",
+      "blob": "4803c8418717c3ecf0b6ffe99eeb0f1032f8c127",
+      "last_commit": "e38935632ba9aa577f65c1cb23763fc50b9a1b58",
+      "sha256": "458188596b2849b98eb3a3ed296f3c62cd277dd81739d2739b8cd96cb7f529bc",
+      "lines": 10
+    },
+    {
+      "path": "migrations/0002_provider_request_intent.sql",
+      "blob": "14b09a8b351614e9772c5b75e40e7c336d574b05",
+      "last_commit": "506354e700e1b9e763538eaa390bb07c96e78afb",
+      "sha256": "700e2daf7377f63b0d397ae9afb5411445a1e2971e9b01b37a6c565865a2a9d4",
+      "lines": 4
+    },
+    {
+      "path": "src/amodex/contracts/models.py",
+      "blob": "79ba8ceafe00457f89ae52a89dcf26d0a7c98ead",
+      "last_commit": "80c43637c4bb98d82cb087d8aaf49403485d8994",
+      "sha256": "dd84dd29faa9fd3227153d3b445cf434c2c7484e37031bcfd2dc1082dd81b7f1",
+      "lines": 352
+    },
+    {
+      "path": "src/amodex/tools/scoped_workspace.py",
+      "blob": "df98484bd254cc0b2056b73a9c39ecf551dc88aa",
+      "last_commit": "89571f46d5bc844373076e1d02ac31b210920c8a",
+      "sha256": "f18848c6e490f88a7be2379080a6a88984df2cf69a734b8c0fd69f63215b8512",
+      "lines": 405
+    },
+    {
+      "path": "src/amodex/runners/dispatch.py",
+      "blob": "4dcb533d25527fee9e5d407a41bc050e06e26915",
+      "last_commit": "30c7a9f9fd206458751c7d64a86f37a447d4711d",
+      "sha256": "55320cb1feb14e88c572dbbe0de1740911224fd55bc0495dab1760b64b4f91b3",
+      "lines": 58
+    },
+    {
+      "path": "src/amodex/storage/promotion.py",
+      "blob": "be09f0550d935b108b8cc700b544230b5fa6a570",
+      "last_commit": "bd5dce307676c30bccf6dea13602fc9c7e7b0d17",
+      "sha256": "b2b28bb917c99b9c433e44908327a9d20e3aec2c069658f01d5b0bda426e81f6",
+      "lines": 333
+    },
+    {
+      "path": "src/amodex/git/promotion.py",
+      "blob": "bb401f595a576014adabc0ea76177b7795a212c3",
+      "last_commit": "70b44b09963a8b9b9333e62eac4a803e970a5cc8",
+      "sha256": "f1ec2e8e246958850d35bbf90e7915ce55a7934cb298fe28db98cceec28c0052",
+      "lines": 822
+    },
+    {
+      "path": "src/amodex/api/access_gate.py",
+      "blob": "7ed843e9f746f53a3b36438b6cc0b7ad58fa27f5",
+      "last_commit": "13a5d7039a23eef4d5d5ea20c71efb587bf51561",
+      "sha256": "967acbb3aa2a48266255c4b497f5a3645d6c6dc35ee7cd9f33fdd66de877d69c",
+      "lines": 265
+    }
+  ]
+}

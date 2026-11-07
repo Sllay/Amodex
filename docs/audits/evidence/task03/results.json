@@ -1,0 +1,1067 @@
+{
+  "base_commit": "1ca72365a63c2134921de58224bc68f73add203e",
+  "environment": "loopback PostgreSQL 17; disposable Git fixtures; local provider/workflow fakes",
+  "runs": {
+    "existing": {
+      "tests": 226,
+      "errors": 0,
+      "failures": 1,
+      "skipped": 0,
+      "cases": [
+        {
+          "name": "test_gate_blocks_web_and_api_but_keeps_health_public",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_correct_passcode_issues_secure_http_only_session",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_tampered_cookie_cannot_bypass_gate",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_changing_passcode_revokes_old_sessions_even_with_same_secret",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_repeated_failures_are_rate_limited",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_environment_contract_is_fail_closed_when_passcode_is_configured",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_no_passcode_keeps_local_and_test_apps_unchanged",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_release_identity_prefers_render_commit",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_release_identity_uses_explicit_fallback",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_zero_cost_blocks_configured_unknown_provider",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_zero_cost_accepts_explicit_free_provider",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_enabled_stt_requires_free_billing",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_readiness_route_is_public_shape_and_activation_status_is_richer",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_access_gate_keeps_readiness_public_and_activation_status_private",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_activation_route_does_not_shadow_legacy_system_status",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_workspace_release_is_activation_v1",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_render_liveness_probe_remains_separate_from_database_readiness",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_latest_benchmark_defaults_to_text_suite_contract",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_text_measurement_preserves_existing_visual_score",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_shared_availability_ignores_legacy_visual_diagnostics",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_private_conditional_json_emits_stable_private_etag_and_304",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_local_cache_uses_memory_indexeddb_and_explicit_etag_revalidation",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_service_worker_caches_shell_but_never_api_or_auth_payloads",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_cache_augment_runs_before_boot_and_stability_runtime_remains_last",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_logout_and_shell_have_explicit_private_cache_policy",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_authenticated_raw_upload_preserves_real_extension_in_public_id_and_ref",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_extension_aware_ref_downloads_with_exact_raw_public_id_and_format",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_legacy_extensionless_ref_keeps_legacy_bin_download_identity",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_authenticated_raw_upload_400_surfaces_provider_message_and_redacts_credentials",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_authenticated_rest_upload_409_is_idempotent_after_admin_collection_lookup",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_authenticated_rest_upload_409_rejects_mismatched_existing_object",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_authenticated_rest_upload_409_rejects_empty_admin_result",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_authenticated_rest_upload_409_maps_admin_auth_failure_to_unavailable",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_authenticated_rest_upload_409_maps_admin_quota_failure_to_unavailable",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_streaming_upload_route_maps_storage_failures_to_server_side_statuses",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_workspace_attachment_metadata_retry_is_serialized_and_idempotent",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_cloudinary_authenticated_rest_upload_uses_signed_raw_upload_endpoint",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_cloudinary_store_round_trip_preserves_opaque_sha_reference",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_cloudinary_store_rejects_tampered_download",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_cloudinary_store_rejects_invalid_reference_before_network",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_cloudinary_store_maps_missing_object_to_domain_error",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_media_store_environment_keeps_file_default_backward_compatible",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_media_store_environment_requires_explicit_cloudinary_backend",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_cloudinary_signature_matches_v2_scalar_contract",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_builder_includes_json_but_does_not_invent_image_vision",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_builder_does_not_read_text_file_above_safe_limit",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_attachment_aware_prompt_forces_latest_owner_language_and_marks_data_untrusted",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_routes_endpoint_never_exposes_retired_routes",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_stale_client_cannot_run_text_benchmark_on_retired_route",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_models_dashboard_is_no_store_even_if_browser_has_service_worker",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_model_dashboard_keeps_failed_routes_for_validation_but_prioritizes_measured_nvidia",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_model_dashboard_javascript_parses",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_retired_direct_mistral_is_hidden_even_if_legacy_database_row_is_enabled",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_catalog_only_declares_nvidia_mistral_large_four",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_sync_candidates_retires_legacy_mistral_after_old_catalog_reenables_it",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_service_route_candidate_never_accepts_retired_route_even_if_marked_enabled",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_chat_prefers_primary_model_even_when_agent_scores_higher",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_provider_timeout_remains_ambiguous_and_is_logged_without_secrets",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_routed_chat_endpoint_is_threadpooled_to_keep_health_checks_responsive",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_explicit_recovery_api_is_not_normal_send_retry",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_manual_recovery_uses_existing_decision_and_never_retries_original_route",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_progress_markers_require_known_nonnegative_stages",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_chat_sse_replays_redacted_progress_and_respects_last_event_id",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_progress_snapshot_rejects_other_chat_and_filters_unknown_facts",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_configuration_reads_key_presence_without_provider_network_or_secret",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_live_text_probe_is_minimal_documented_nvidia_request",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_vision_probe_really_sends_png_in_documented_image_url_shape",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_auth_401_is_explicit_not_confused_with_amodex_http_200",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_http_200_null_reasoning_length_is_truncated_not_auth_failure",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_http_200_wrong_answer_is_not_transmission_failure",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_unknown_billing_and_retired_route_never_call_provider",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_private_gate_required_even_for_status",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_private_diagnostics_response_is_no_store",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_runtime_pool_reuses_connections_and_enforces_two_connection_cap",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_runtime_pool_context_preserves_commit_and_rollback_semantics",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_file_media_ingestion_is_chunked_and_does_not_call_read_bytes",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_cloudinary_authenticated_store_accepts_file_stream_without_read_bytes",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_streaming_upload_route_never_builds_whole_request_bytearray",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_workspace_runtime_wires_pool_and_replaces_legacy_upload_route",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_runtime_pool_owns_process_cleanup",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_micro_task_preserves_scarce_high_quality_route_and_uses_abundant_route",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_critical_task_can_use_scarce_route_when_it_is_best_measured_option",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_simple_work_is_hard_capped_instead_of_burning_hundreds_of_thousands_of_tokens",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_failed_routes_are_not_repeated_and_fallbacks_have_a_ceiling",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_environment_budget_stress_keeps_progress_high_without_cross_context_or_paid_fallback",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_environment_grant_blocks_sibling_projects_repositories_and_secrets",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_memory_compilation_shares_owner_preferences_but_not_sibling_project_context",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_expired_grant_fails_closed",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_runner_kind_is_engine_specific_and_roblox_never_maps_to_actions",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_dispatch_request_rejects_path_escape_and_duplicates",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_roblox_studio_mcp_desktop_paths_are_explicit",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_cli_rejects_environment_run_without_project_before_creating_any_run",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_neon_runtime_and_migration_urls_must_match_guard",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_database_guard_blocks_accidental_other_neon_project",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_neon_runtime_requires_pooler_and_migrations_require_direct_endpoint",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_neon_urls_must_require_tls",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_discovery_is_deterministic_and_checksums_sql",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_groq_normal_chat_uses_user_only_instruction_without_benchmark_overrides",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_groq_closed_benchmark_probe_is_deterministic",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_groq_benchmark_prefix_also_enables_deterministic_mode",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_nvidia_text_transport_uses_documented_hosted_shape",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_nvidia_text_benchmark_uses_supported_reasoning_and_keeps_repeatability",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_default_route_is_free_and_admitted",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_free_quota_exhaustion_waits_instead_of_falling_back_paid",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_paid_only_configuration_fails_closed",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_nvidia_mistral_chat_gets_long_read_budget",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_operation_specific_override_wins",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_model_specific_override_wins_over_provider_default",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_timeout_override_is_bounded_and_invalid_values_are_ignored",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_complete_and_unnamespaced_identifiers[mistralai/mistral-large-4-1t-a52b-MISTRALAI_MISTRAL_LARGE_4_1T_A52B]",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_complete_and_unnamespaced_identifiers[mistral-large-4-1t-a52b-MISTRAL_LARGE_4_1T_A52B]",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_full_identifier_wins_over_legacy_alias_at_same_specificity[]",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_full_identifier_wins_over_legacy_alias_at_same_specificity[_CHAT]",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_specific_alias_operation_wins_over_generic_complete_identifier",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_legacy_alias_does_not_leak_to_similar_models_or_other_providers[other-publisher/mistral-large-4-1t-a52b-nvidia]",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_legacy_alias_does_not_leak_to_similar_models_or_other_providers[mistralai/mistral-large-4-1t-a52b-v2-nvidia]",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_legacy_alias_does_not_leak_to_similar_models_or_other_providers[mistralai/mistral-large-4-1t-a52b:free-nvidia]",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_legacy_alias_does_not_leak_to_similar_models_or_other_providers[mistralai/mistral-large-4-1t-a52b-other-provider]",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_same_basename_in_distinct_namespaces_has_distinct_overrides",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_all_override_levels_preserve_precedence[CONNECT]",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_all_override_levels_preserve_precedence[READ]",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_all_override_levels_preserve_precedence[WRITE]",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_all_override_levels_preserve_precedence[POOL]",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_invalid_complete_override_falls_back_to_valid_alias[]",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_invalid_complete_override_falls_back_to_valid_alias[invalid]",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_invalid_complete_override_falls_back_to_valid_alias[nan]",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_invalid_complete_override_falls_back_to_valid_alias[inf]",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_invalid_complete_override_falls_back_to_valid_alias[-inf]",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_invalid_complete_override_falls_back_to_valid_alias[0]",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_invalid_complete_override_falls_back_to_valid_alias[-20]",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_all_components_are_bounded[0.01-1]",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_all_components_are_bounded[1-1]",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_all_components_are_bounded[1800-1800]",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_all_components_are_bounded[99999-1800]",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_default_budgets_unchanged[nvidia-chat-900]",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_default_budgets_unchanged[nvidia-benchmark-240]",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_default_budgets_unchanged[gemini-chat-600]",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_default_budgets_unchanged[gemini-benchmark-180]",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_default_budgets_unchanged[groq-chat-300]",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_default_budgets_unchanged[groq-benchmark-120]",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_default_budgets_unchanged[openrouter-chat-600]",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_default_budgets_unchanged[openrouter-benchmark-180]",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_default_budgets_unchanged[unknown-chat-300]",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_runner_job_heartbeat_requires_github_run_id",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_runner_client_posts_heartbeat_with_workflow_identity",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_stability_layer_owns_final_send_and_preserves_structured_error_codes",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_stability_layer_delegates_stt_preflight_to_multimodal_hook",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_stability_layer_deduplicates_repeated_error_toasts",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_multimodal_upload_state_machine_prevents_duplicate_selected_file_posts",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_multimodal_client_enforces_server_advertised_upload_limit_before_post",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_vision_fixtures_are_deterministic_unique_pngs",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_vision_scorer_supports_exact_and_partial_field_credit",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_catalog_declares_only_real_hosted_mistral_vision_route",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_groq_vision_transport_still_sends_real_image",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_nvidia_mistral_vision_transport_matches_hosted_api_reference",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_nvidia_reasoning_length_without_final_content_is_transport_failure",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_nvidia_accepts_fenced_json_without_provider_json_mode",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_complete_suite_records_vision_measurement_without_auto_promotion",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_rate_limit_blocks_suite_without_poisoning_vision_score",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_malformed_provider_response_is_unscored_not_visual_zero",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_disabled_visual_route_cannot_execute_even_with_stale_client",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_saved_complete_visual_evidence_is_replayed_without_provider_call",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_complete_evidence_from_retired_route_remains_historical_only",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_legacy_partial_success_is_replayed_as_blocked_unmeasured_evidence",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_text_benchmark_cannot_be_replayed_as_visual_evidence",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_feature_layers_do_not_replace_shared_browser_actions",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_runtime_is_shared_action_authority",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_feature_layers_register_hooks_instead_of_wrapping_actions",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_runtime_send_has_one_write_boundary_and_lock",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_v2_shell_does_not_rebind_microphone_after_load",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_chat_model_provenance_hooks_and_no_model_text_mutation",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_chat_provenance_javascript_parses",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_chat_model_footer_reports_provenance_without_false_legacy_fallback",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_send_guard_covers_inference_and_rejects_recent_identical_unanswered_turn",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_routed_failure_messages_are_visible_without_fake_assistant_reply",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_routed_error_ui_javascript_parses",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_stale_chat_decision_has_explicit_safe_recovery_without_provider_retry",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_explicit_manual_recovery_reuses_saved_owner_message_and_never_auto_retries",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_chat_progress_uses_measured_server_phases_not_invented_reasoning",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_chat_sse_is_read_only_and_falls_back_to_measured_polling",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_tone_moves_base_toward_white_and_black",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_theme_supports_up_to_four_colors_and_split_mix_modes",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_theme_augmentation_is_global_and_defaults_to_purple",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_workspace_v2_has_compact_composer_project_hub_and_tool_drawer",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_global_chat_router_uses_one_hidden_container",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_cli_validates_and_canonicalizes_tool_call",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_cli_returns_nonzero_for_invalid_payload",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_uuid7_generator_and_validator",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_task_package_round_trip_is_deterministic",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_unknown_authority_field_is_rejected",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_future_schema_version_is_rejected",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_snapshot_is_frozen_and_identity_cannot_evolve",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_invalid_enum_is_rejected",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_write_tool_call_requires_idempotency_key",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_conditional_write_requires_expected_revision",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_validated_checkpoint_requires_real_evidence_reference",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_evidence_binds_exact_sha_and_normalizes_utc",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_worker_lease_requires_positive_fencing_and_future_expiry",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_scope_rejects_exact_protected_write_overlap",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_crash_before_provider_intent_is_safely_retried_once",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_crash_after_provider_intent_never_blindly_duplicates_call",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_crash_after_durable_provider_completion_finishes_without_recall",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_create_disconnect_worker_reconnect",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_quota_exhaustion_enters_waiting_provider",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_stale_fencing_token_is_rejected",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_migrations_apply_from_clean_database_and_are_idempotent",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_malformed_provider_output_fails_without_corrupting_authority",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_rate_limit_waits_and_never_uses_paid_fallback",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_safe_validated_checkpoint_survives_runner_destruction",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_failed_attempt_does_not_dirty_remote_or_shared_workspace",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_scoped_coding_tools_solve_fixture_and_fail_closed",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_internal_symlink_cannot_alias_protected_write",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_patch_requires_fresh_content_and_correct_writer_lease",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_s3_v3_dag_concurrency_capacity_recovery_and_antiloop",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_s3_v3_resource_cap_serializes_otherwise_ready_tasks",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_s3_v3_central_ownership_blocks_overlap_even_if_model_requests_it",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_director_rejects_parallel_write_conflict_and_missing_capability",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_director_cannot_bypass_cost_promotion_or_hide_architecture_change",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_planned_task_requires_explicit_non_goals",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_stale_non_overlapping_candidate_reintegrates_but_contract_change_blocks",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_promotion_crash_reconciles_exactly_once[AFTER_INTENT_BEFORE_REMOTE]",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_promotion_crash_reconciles_exactly_once[DURING_POST_INTEGRATION_VALIDATION]",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_promotion_crash_reconciles_exactly_once[AFTER_REMOTE_BEFORE_DB_ACK]",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_godot_environment_dispatch_claim_report_usage_and_dashboard",
+          "outcome": "FAILED"
+        },
+        {
+          "name": "test_environment_scope_cannot_be_crossed_and_roblox_requires_desktop_runner",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_ambiguous_actions_dispatch_is_never_blindly_retried_but_can_be_claimed",
+          "outcome": "PASSED"
+        }
+      ]
+    },
+    "additional-existing": {
+      "tests": 4,
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0,
+      "cases": [
+        {
+          "name": "test_candidate_exact_sha_promotion_idempotency_and_revert",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_candidate_hygiene_rejects_secret_like_repository_change",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_projects_runs_sessions_memories_and_usage_cannot_cross_environment",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_environment_budget_policy_is_durable_and_independent",
+          "outcome": "PASSED"
+        }
+      ]
+    },
+    "characterization": {
+      "tests": 25,
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0,
+      "cases": [
+        {
+          "name": "test_running_currently_has_no_owner_parameter",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_private_access_gate_currently_blocks_machine_claim_even_with_valid_runner_token",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_omitted_terminal_identity_currently_bypasses_owner_check_and_does_not_complete_run",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_unclaimed_dispatched_job_currently_accepts_identityless_terminal_report[COMPLETED]",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_unclaimed_dispatched_job_currently_accepts_identityless_terminal_report[FAILED]",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_unclaimed_dispatched_job_currently_accepts_identityless_terminal_report[CANCELLED]",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_expired_runner_lease_rejects_renewal_running_and_report_without_reclaim",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_two_database_claimants_have_exactly_one_winner",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_claim_before_dispatch_ack_currently_returns_500_but_preserves_claim[False]",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_claim_before_dispatch_ack_currently_returns_500_but_preserves_claim[True]",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_repeated_dispatch_post_currently_creates_another_job_and_external_attempt",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_report_retry_is_conflict_after_completion_not_idempotent_success",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_terminal_commit_and_audit_are_currently_separate_transactions",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_run_currently_accepts_expired_owner_until_another_claim_fences_it",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_external_response_lost_before_persistence_is_not_recalled_on_recovery",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_run_event_failure_rolls_back_state_and_revision",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_stage1_currently_commits_response_after_lease_expired_during_call",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_checkpoint_view_is_mutable_projection_not_immutable_git_evidence",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_partial_safe_publication_leaves_remote_commit_but_no_checkpoint_ref",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_patch_repetition_is_precondition_failure_not_operation_receipt",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_dag_json_can_restore_in_fresh_process_but_running_authority_is_not_reconciled",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_failed_background_renewal_currently_does_not_fail_launch_step_or_stop_following_work[RUNNER_LEASE_LOST]",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_failed_background_renewal_currently_does_not_fail_launch_step_or_stop_following_work[synthetic transport timeout]",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_request_key_is_not_an_external_deduplication_contract[gemini]",
+          "outcome": "PASSED"
+        },
+        {
+          "name": "test_request_key_is_not_an_external_deduplication_contract[openai-compatible]",
+          "outcome": "PASSED"
+        }
+      ]
+    }
+  },
+  "warning": "Passing characterization tests describe observed behavior, including known unsafe gaps; they are not product acceptance.",
+  "totals": {
+    "tests": 255,
+    "errors": 0,
+    "failures": 1,
+    "skipped": 0,
+    "passed": 254
+  },
+  "test_commit": "582255130529c805a4402aa8dae89b3c35372583",
+  "final_combined": {
+    "tests": 255,
+    "errors": 0,
+    "failures": 1,
+    "skipped": 0,
+    "passed": 254
+  },
+  "note": "The combined run repeats the same 255 distinct tests; do not add it to the historical run totals."
+}
