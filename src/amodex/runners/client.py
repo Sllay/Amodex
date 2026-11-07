@@ -63,7 +63,7 @@ class RunnerControlClient:
             raise RunnerClientError("Control Plane returned a non-object response")
         return body
 
-    def claim(self, *, job_id: str, github_run_id: str | None = None) -> dict[str, Any]:
+    def claim(self, *, job_id: str, github_run_id: str) -> dict[str, Any]:
         params = {"github_run_id": github_run_id} if github_run_id else None
         return self._request("POST", f"/v1/runner-jobs/{job_id}/claim", params=params)
 
@@ -113,7 +113,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     claim = sub.add_parser("claim")
     claim.add_argument("job_id")
-    claim.add_argument("--github-run-id")
+    claim.add_argument("--github-run-id", required=True)
     claim.add_argument("--output")
 
     running = sub.add_parser("running")
