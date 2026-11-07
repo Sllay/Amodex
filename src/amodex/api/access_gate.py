@@ -18,8 +18,10 @@ import threading
 import time
 from urllib.parse import parse_qs
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+
+from .runner_auth import is_runner_machine_route, rejection, runner_authorization
 
 _COOKIE_NAME = "__Host-amodex_access"
 _PUBLIC_PATHS = frozenset({"/healthz", "/readyz", "/auth/passcode", "/auth/logout"})
@@ -201,6 +203,13 @@ def install_access_gate(app: FastAPI, config: AccessGateConfig | None = None) ->
     async def private_access_boundary(request: Request, call_next):
         path = request.url.path
         if path in _PUBLIC_PATHS:
+            return await call_next(request)
+
+        if is_runner_machine_route(request):
+            try:
+                runner_authorization(request.app).require(request)
+            except HTTPException as exc:
+                return rejection(exc)
             return await call_next(request)
 
         if session_is_valid(request.cookies.get(_COOKIE_NAME)):

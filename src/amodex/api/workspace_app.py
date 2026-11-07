@@ -259,7 +259,9 @@ def create_workspace_app(
     install_private_cache_boundary(base_app)
 
     # Server-side boundary: when AMODEX_ACCESS_PASSCODE is configured, every
-    # route except the explicit health/readiness/login surface requires a signed session.
+    # human route except health/readiness/login requires a signed session.
+    # Only exact runner POST routes may use the control plane's shared runner
+    # authority instead; a human session never replaces its bearer check.
     install_access_gate(base_app)
 
     base_app.title = "Amodex Web Workspace"
