@@ -18,12 +18,12 @@ from .vision_chat import generate_json_vision_response
 class NvidiaProvider(OpenAICompatibleProvider):
     provider_name = "nvidia"
 
-    def __init__(self, *, api_key: str, timeout_seconds: float = 60.0) -> None:
+    def __init__(\n        self, *, api_key: str, timeout_seconds: float = 60.0, timeout: httpx.Timeout | None = None\n    ) -> None:
         super().__init__(
             provider_name=self.provider_name,
             base_url="https://integrate.api.nvidia.com/v1",
             api_key=api_key,
-            timeout_seconds=timeout_seconds,
+            timeout_seconds=timeout_seconds,\n            timeout=timeout,
             require_json_object=False,
             extra_headers={"accept": "application/json"},
         )
