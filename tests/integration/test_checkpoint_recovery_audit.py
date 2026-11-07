@@ -1,4 +1,4 @@
-"""CR-01/02/04 regressions and characterization of still-open CR-03/05 through CR-09.
+"""CR-01/02/04 regressions and R3 dispatch regressions; characterization of still-open CR-05/06/08/09.
 
 Only loopback PostgreSQL, local Git fixtures and deterministic fakes are used.
 Passing characterization cases for other issues are not product approval.
@@ -67,7 +67,7 @@ def audit(environment_product_state):
         body = {"run_id": run["run_id"], "session_id": session["session_id"],
                 "worker_profile": "implementation", "task_class": "ROUTINE", "write_paths": ["src/**"]}
         url = f"/v1/environments/{env['environment_id']}/runner-jobs"
-        response = client.post(url, json=body)
+        response = client.post(url, json=body, headers={"Idempotency-Key": "audit-intent"})
         assert response.status_code == 201
         job_id = response.json()["job"]["job_id"]
         yield client, runs, product, jobs, dispatcher, job_id, run["run_id"], url, body
@@ -190,7 +190,7 @@ def test_two_database_claimants_have_exactly_one_winner(audit):
 
 
 @pytest.mark.parametrize("ambiguous", [False, True])
-def test_claim_before_dispatch_ack_currently_returns_500_but_preserves_claim(audit, ambiguous):
+def test_claim_before_dispatch_ack_preserves_claim_without_500(audit, ambiguous):
     client, _, _, jobs, dispatcher, _, _, url, body = audit
     def early_claim(*, job_id):
         dispatcher.job_ids.append(job_id)
@@ -198,19 +198,19 @@ def test_claim_before_dispatch_ack_currently_returns_500_but_preserves_claim(aud
         if ambiguous:
             raise RunnerDispatchError("synthetic ambiguous acknowledgement")
     dispatcher.dispatch = early_claim
-    response = client.post(url, json=body)
-    assert response.status_code == 500
+    response = client.post(url, json=body, headers={"Idempotency-Key": "race-intent"})
+    assert response.status_code == (202 if ambiguous else 201)
     raced_id = dispatcher.job_ids[-1]
     assert jobs.get_runner_job(raced_id).state == RunnerJobState.CLAIMED
     assert jobs.get_runner_job(raced_id).github_run_id == "fast-workflow"
 
 
-def test_repeated_dispatch_post_currently_creates_another_job_and_external_attempt(audit):
+def test_repeated_dispatch_post_reuses_job_and_external_attempt(audit):
     client, _, _, _, dispatcher, job_id, _, url, body = audit
-    repeated = client.post(url, json=body)
-    assert repeated.status_code == 201
-    assert repeated.json()["job"]["job_id"] != job_id
-    assert len(dispatcher.job_ids) == 2
+    repeated = client.post(url, json=body, headers={"Idempotency-Key": "audit-intent"})
+    assert repeated.status_code == 200
+    assert repeated.json()["job"]["job_id"] == job_id
+    assert len(dispatcher.job_ids) == 1
 
 
 def test_report_retry_is_conflict_after_completion_not_idempotent_success(audit):

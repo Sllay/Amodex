@@ -30,10 +30,12 @@ class AmodexClient:
     base_url: str
     timeout_seconds: float = 30.0
 
-    def request(self, method: str, path: str, *, payload: dict[str, Any] | None = None) -> Any:
+    def request(self, method: str, path: str, *, payload: dict[str, Any] | None = None,
+                idempotency_key: str | None = None) -> Any:
         url = self.base_url.rstrip("/") + path
         try:
-            response = httpx.request(method, url, json=payload, timeout=self.timeout_seconds)
+            response = httpx.request(method, url, json=payload, timeout=self.timeout_seconds,
+                                    headers={"Idempotency-Key": idempotency_key} if idempotency_key else None)
         except httpx.HTTPError as exc:
             raise CliError(f"cannot reach Amodex Control Plane: {exc}") from exc
         try:
@@ -106,6 +108,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="STANDARD",
     )
     env_dispatch.add_argument("--write", action="append", default=[], metavar="PATH")
+    env_dispatch.add_argument("--idempotency-key", required=True, help="stable key for this intent; reuse on retries")
 
     run = sub.add_parser("run", help="start a durable remote run")
     run.add_argument("objective")
@@ -197,6 +200,7 @@ def execute(args: argparse.Namespace, client: AmodexClient) -> Any:
             return client.request(
                 "POST",
                 f"/v1/environments/{args.environment_id}/runner-jobs",
+                idempotency_key=args.idempotency_key,
                 payload={
                     "run_id": args.run_id,
                     "session_id": args.session_id,

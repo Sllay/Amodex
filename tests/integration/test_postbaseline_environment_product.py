@@ -49,6 +49,8 @@ def environment_product_state() -> tuple[
     environment_product = PostgresEnvironmentProductRepository(dsn)
     with psycopg.connect(dsn) as conn:
         conn.execute(Path("migrations/postbaseline/0002_environment_product_runners.sql").read_text(encoding="utf-8"))
+        conn.execute(Path("migrations/postbaseline/0004_environment_runner_leases.sql").read_text())
+        conn.execute(Path("migrations/postbaseline/0008_runner_dispatch_idempotency.sql").read_text())
         conn.execute(
             """
             TRUNCATE
@@ -136,6 +138,7 @@ def test_godot_environment_dispatch_claim_report_usage_and_dashboard(environment
         )
         dispatched = client.post(
             f"/v1/environments/{environment['environment_id']}/runner-jobs",
+            headers={"Idempotency-Key": "fixture-intent"},
             json={
                 "run_id": run["run_id"],
                 "session_id": session["session_id"],
@@ -250,6 +253,7 @@ def test_environment_scope_cannot_be_crossed_and_roblox_requires_desktop_runner(
 
         crossed = client.post(
             f"/v1/environments/{roblox_env['environment_id']}/runner-jobs",
+            headers={"Idempotency-Key": "fixture-intent"},
             json={
                 "run_id": godot_run["run_id"],
                 "session_id": roblox_session["session_id"],
@@ -261,6 +265,7 @@ def test_environment_scope_cannot_be_crossed_and_roblox_requires_desktop_runner(
 
         roblox = client.post(
             f"/v1/environments/{roblox_env['environment_id']}/runner-jobs",
+            headers={"Idempotency-Key": "fixture-intent"},
             json={
                 "run_id": roblox_run["run_id"],
                 "session_id": roblox_session["session_id"],
@@ -276,6 +281,7 @@ def test_environment_scope_cannot_be_crossed_and_roblox_requires_desktop_runner(
         # A Godot job still uses Actions and proves the dispatcher is scoped by engine.
         godot = client.post(
             f"/v1/environments/{godot_env['environment_id']}/runner-jobs",
+            headers={"Idempotency-Key": "fixture-intent"},
             json={
                 "run_id": godot_run["run_id"],
                 "session_id": godot_session["session_id"],
@@ -306,16 +312,16 @@ def test_ambiguous_actions_dispatch_is_never_blindly_retried_but_can_be_claimed(
         )
         response = client.post(
             f"/v1/environments/{environment['environment_id']}/runner-jobs",
+            headers={"Idempotency-Key": "fixture-intent"},
             json={
                 "run_id": run["run_id"],
                 "session_id": session["session_id"],
                 "task_class": "MICRO",
             },
         )
-        assert response.status_code == 502
-        detail = response.json()["detail"]
-        assert detail["code"] == "RUNNER_DISPATCH_UNKNOWN"
-        job_id = detail["job_id"]
+        assert response.status_code == 202
+        assert response.json()["dispatch_operation"]["status"] == "UNKNOWN"
+        job_id = response.json()["job"]["job_id"]
         stored = client.get(f"/v1/runner-jobs/{job_id}")
         assert stored.status_code == 200
         assert stored.json()["state"] == "DISPATCH_UNKNOWN"

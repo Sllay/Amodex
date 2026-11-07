@@ -12,7 +12,7 @@ from typing import Annotated
 
 from pydantic import AfterValidator
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import HTMLResponse
 
@@ -26,12 +26,12 @@ from amodex.environments.product import (
     RunnerJobHeartbeatRequest,
     RunnerJobIdentityRequest,
     require_github_run_id,
+    require_idempotency_key,
     RunnerJobRecord,
     RunnerJobState,
     RunnerKind,
     RunnerReportRequest,
     SessionCreateRequest,
-    runner_kind_for_engine,
 )
 from amodex.product.models import (
     ApprovalCreateRequest,
@@ -47,7 +47,7 @@ from amodex.product.models import (
     RunnerRecord,
 )
 from amodex.product.promotion import ConfiguredPromotionExecutor, ProductPromotionExecutor
-from amodex.runners.dispatch import GitHubActionsDispatcher, RunnerDispatchError
+from amodex.runners.dispatch import GitHubActionsDispatcher
 from amodex.runtime.models import CreateRunRequest, RunEvent, RunRecord, RunState
 from amodex.storage.environment import EnvironmentStateError, PostgresEnvironmentRepository
 from amodex.storage.environment_product import PostgresEnvironmentProductRepository
@@ -207,7 +207,7 @@ def create_app(
                     detail={
                         "code": "ENVIRONMENT_PRODUCT_SCHEMA_NOT_READY",
                         "message": "Environment runner schema has not been applied",
-                        "recovery": "apply migrations/postbaseline/0002_environment_product_runners.sql and 0004_environment_runner_leases.sql",
+                        "recovery": "apply migrations/postbaseline/0002_environment_product_runners.sql, 0004_environment_runner_leases.sql and 0008_runner_dispatch_idempotency.sql",
                     },
                 )
         except HTTPException:
@@ -475,23 +475,15 @@ def create_app(
         ).model_dump(mode="json")
 
     @app.post("/v1/environments/{environment_id}/runner-jobs", status_code=201)
-    async def dispatch_environment_runner(
+    def dispatch_environment_runner(
         environment_id: str,
         body: RunnerDispatchRequest,
+        response: Response,
+        idempotency_key: Annotated[str, Header(min_length=1, max_length=128), AfterValidator(require_idempotency_key)],
     ) -> dict[str, object]:
         env = environment().get_environment(environment_id)
         if env is None:
             raise HTTPException(status_code=404, detail="environment not found")
-        kind = runner_kind_for_engine(env.engine)
-        if kind == RunnerKind.ACTIONS_HEADLESS and runner_dispatcher is None:
-            raise HTTPException(
-                status_code=503,
-                detail={
-                    "code": "ACTIONS_DISPATCH_UNAVAILABLE",
-                    "message": "GitHub Actions dispatcher is not configured",
-                    "recovery": "configure AMODEX_GITHUB_DISPATCH_REPOSITORY and AMODEX_GITHUB_DISPATCH_TOKEN",
-                },
-            )
         try:
             job = environment_product().create_runner_job(
                 environment_id=environment_id,
@@ -500,6 +492,7 @@ def create_app(
                 worker_profile=body.worker_profile,
                 task_class=body.task_class,
                 write_paths=body.write_paths,
+                idempotency_key=idempotency_key,
             )
         except (KeyError, EnvironmentStateError) as exc:
             raise environment_error(exc) from exc
@@ -519,41 +512,37 @@ def create_app(
             return {
                 "job": job.model_dump(mode="json"),
                 "dispatch": "DESKTOP_RUNNER_REQUIRED",
+                "job_url": f"/v1/runner-jobs/{job.job_id}",
             }
 
-        assert runner_dispatcher is not None
-        try:
-            runner_dispatcher.dispatch(job_id=job.job_id)
-        except RunnerDispatchError as exc:
-            unknown = environment_product().mark_dispatch_unknown(
-                job_id=job.job_id,
-                summary=str(exc),
-            )
-            product().append_audit(
-                actor="control-plane",
-                action="RUNNER_DISPATCH_UNKNOWN",
-                subject_type="runner_job",
-                subject_id=job.job_id,
-                detail={"message": str(exc)[:1000]},
-            )
-            raise HTTPException(
-                status_code=502,
-                detail={
-                    "code": "RUNNER_DISPATCH_UNKNOWN",
-                    "message": "GitHub dispatch outcome is ambiguous; automatic redispatch is forbidden",
-                    "job_id": job.job_id,
-                    "state": unknown.state.value,
-                },
-            ) from exc
-        dispatched = environment_product().mark_dispatched(job_id=job.job_id)
-        product().append_audit(
-            actor="control-plane",
-            action="RUNNER_DISPATCHED",
-            subject_type="runner_job",
-            subject_id=job.job_id,
-            detail={"runner_kind": dispatched.runner_kind.value, "engine": dispatched.engine},
-        )
-        return {"job": dispatched.model_dump(mode="json"), "dispatch": "GITHUB_ACTIONS"}
+        sending = None
+        if runner_dispatcher is not None:
+            target = runner_dispatcher.correlation() if hasattr(runner_dispatcher, "correlation") else {"adapter": type(runner_dispatcher).__name__}
+            sending = environment_product().begin_dispatch(job_id=job.job_id, target=target)
+        if sending is not None:
+            # begin_dispatch has committed. No transaction/lock spans external HTTP.
+            assert runner_dispatcher is not None and sending.dispatch_attempt_id is not None
+            try:
+                runner_dispatcher.dispatch(job_id=job.job_id)
+            except Exception:
+                # Any exception after STARTED is conservative ambiguity; never expose
+                # raw upstream bodies/credentials or clear a fast workflow's ownership.
+                environment_product().mark_dispatch_unknown(job_id=job.job_id, attempt_id=sending.dispatch_attempt_id)
+            else:
+                environment_product().mark_dispatched(job_id=job.job_id, attempt_id=sending.dispatch_attempt_id)
+        current = environment_product().get_runner_job(job.job_id)
+        assert current is not None
+        confirmed = current.dispatch_status == "CONFIRMED"
+        response.status_code = (201 if sending is not None else 200) if confirmed else 202
+        return {
+            "job": current.model_dump(mode="json"),
+            "dispatch": "GITHUB_ACTIONS" if confirmed else (
+                "DISPATCH_UNAVAILABLE" if current.dispatch_status == "PENDING" and runner_dispatcher is None else "DISPATCH_UNRESOLVED"),
+            "dispatch_operation": {"attempt_id": current.dispatch_attempt_id, "status": current.dispatch_status,
+                "may_have_been_accepted": current.dispatch_status in {"STARTED", "UNKNOWN", "CONFIRMED"},
+                "automatic_redispatch": False},
+            "job_url": f"/v1/runner-jobs/{job.job_id}",
+        }
 
     @app.get("/v1/environments/{environment_id}/runner-jobs")
     async def list_environment_runner_jobs(environment_id: str) -> list[dict[str, object]]:

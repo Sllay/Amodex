@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from amodex.api.app import create_app
 from amodex.api.workspace_app import create_workspace_app
+from amodex.deployment.migrations import apply_production_migrations, database_endpoint_identity
 from amodex.runners import client as runner_cli
 from test_postbaseline_environment_product import (
     RecordingDispatcher, _create_scoped_run, environment_product_state,
@@ -31,6 +32,10 @@ def local_database_only():
 @pytest.fixture
 def workspace(request, environment_product_state, monkeypatch, tmp_path):
     runs, product, environments, jobs = environment_product_state
+    # Web readiness validates the complete checksum manifest, not only Runner SQL.
+    # Keep this regression runnable against a new, isolated local test database.
+    apply_production_migrations(runtime_dsn=runs.dsn, migration_dsn=runs.dsn,
+        endpoint_guard=database_endpoint_identity(runs.dsn), migrations_root="migrations")
     token = getattr(request, "param", TOKEN)
     monkeypatch.setenv("AMODEX_ACCESS_PASSCODE", "246810")
     monkeypatch.setenv("AMODEX_ACCESS_SESSION_SECRET", "synthetic-r1-human-session-signing-key-0001")
@@ -49,7 +54,7 @@ def workspace(request, environment_product_state, monkeypatch, tmp_path):
         assert human.post("/auth/passcode", data={"passcode": "246810"}).status_code == 303
         _, env, session, run = _create_scoped_run(human, name="R1 fixture", engine="generic",
                                                  repo_url="https://github.com/qa-local-fixture/r1")
-        created = human.post(f"/v1/environments/{env['environment_id']}/runner-jobs", json={
+        created = human.post(f"/v1/environments/{env['environment_id']}/runner-jobs", headers={"Idempotency-Key": "fixture-intent"}, json={
             "run_id": run["run_id"], "session_id": session["session_id"],
             "worker_profile": "implementation", "task_class": "ROUTINE", "write_paths": ["src/**"],
         })

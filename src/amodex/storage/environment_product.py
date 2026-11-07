@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from typing import Any
 
 import psycopg
 from psycopg.rows import dict_row
 
-from amodex.contracts.ids import new_uuid7
+from amodex.contracts.ids import new_uuid7, validate_uuid7
 from amodex.environments.product import (
     RunnerJobRecord,
     RunnerJobState,
@@ -17,6 +18,7 @@ from amodex.environments.product import (
     capabilities_for_engine,
     runner_kind_for_engine,
     require_github_run_id,
+    require_idempotency_key,
 )
 from amodex.providers.budget import TaskBudgetClass
 from amodex.storage.environment import EnvironmentStateError
@@ -42,6 +44,11 @@ class PostgresEnvironmentProductRepository:
                         SELECT 1 FROM information_schema.columns
                         WHERE table_schema='public'
                           AND table_name='amodex_environment_runner_jobs'
+                          AND column_name='dispatch_status'
+                    )
+                    AND EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_schema='public' AND table_name='amodex_environment_runner_jobs'
                           AND column_name='lease_expires_at'
                     )
                 """
@@ -57,9 +64,24 @@ class PostgresEnvironmentProductRepository:
         worker_profile: str,
         task_class: TaskBudgetClass,
         write_paths: tuple[str, ...],
+        idempotency_key: str,
     ) -> RunnerJobRecord:
+        require_idempotency_key(idempotency_key)
+        environment_id, session_id, run_id = map(validate_uuid7, (environment_id, session_id, run_id))
+        # Explicit defaults, unordered write scope, and Environment are part of intent.
+        digest = hashlib.sha256(json.dumps({
+            "version": 1, "environment_id": environment_id, "session_id": session_id,
+            "run_id": run_id, "worker_profile": worker_profile, "task_class": task_class.value,
+            "write_paths": sorted(write_paths),
+        }, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
         with psycopg.connect(self._dsn, row_factory=dict_row) as conn:
             with conn.transaction():
+                existing = conn.execute(
+                    "SELECT * FROM amodex_environment_runner_jobs WHERE environment_id=%s AND idempotency_key=%s",
+                    (environment_id, idempotency_key),
+                ).fetchone()
+                if existing is not None:
+                    return _require_matching_intent(existing, digest)
                 row = conn.execute(
                     """
                     SELECT
@@ -109,8 +131,9 @@ class PostgresEnvironmentProductRepository:
                     INSERT INTO amodex_environment_runner_jobs(
                         job_id,environment_id,session_id,run_id,project_id,engine,
                         runner_kind,worker_profile,task_class,write_paths,state,branch_name,
-                        created_at,updated_at
-                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,'QUEUED',%s,NOW(),NOW())
+                        created_at,updated_at,idempotency_key,intent_digest,dispatch_attempt_id,dispatch_status
+                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,'QUEUED',%s,NOW(),NOW(),%s,%s,%s,%s)
+                    ON CONFLICT (environment_id,idempotency_key) DO NOTHING
                     RETURNING *
                     """,
                     (
@@ -125,8 +148,19 @@ class PostgresEnvironmentProductRepository:
                         task_class.value,
                         json.dumps(list(write_paths)),
                         branch_name,
+                        idempotency_key, digest, new_uuid7(),
+                        "PENDING" if runner_kind == RunnerKind.ACTIONS_HEADLESS else "NOT_REQUIRED",
                     ),
                 ).fetchone()
+                if created is None:
+                    # ON CONFLICT waits for the winner; this separate READ COMMITTED
+                    # statement sees its committed row, including a concurrent dispatch.
+                    existing = conn.execute(
+                        "SELECT * FROM amodex_environment_runner_jobs WHERE environment_id=%s AND idempotency_key=%s",
+                        (environment_id, idempotency_key),
+                    ).fetchone()
+                    assert existing is not None
+                    return _require_matching_intent(existing, digest)
         assert created is not None
         return _runner_job_from_row(created)
 
@@ -163,36 +197,59 @@ class PostgresEnvironmentProductRepository:
                 ).fetchall()
         return tuple(_runner_job_from_row(row) for row in rows)
 
-    def mark_dispatched(self, *, job_id: str) -> RunnerJobRecord:
-        return self._transition(
-            job_id=job_id,
-            allowed={RunnerJobState.QUEUED},
-            target=RunnerJobState.DISPATCHED,
-        )
+    def begin_dispatch(self, *, job_id: str, target: dict[str, str]) -> RunnerJobRecord | None:
+        """Commit one irreversible sending authorization, then release SQL locks.
 
-    def mark_dispatch_unknown(self, *, job_id: str, summary: str) -> RunnerJobRecord:
+        STARTED may already have been accepted externally. It is never reclaimable,
+        even after process death. PENDING alone is safe to acquire for a first send.
+        """
+        with psycopg.connect(self._dsn, row_factory=dict_row) as conn:
+            row = conn.execute(
+                """UPDATE amodex_environment_runner_jobs j
+                   SET dispatch_status='STARTED',dispatch_started_at=NOW(),dispatch_target=%s::jsonb
+                   WHERE job_id=%s AND dispatch_status='PENDING' AND state='QUEUED'
+                     AND EXISTS (
+                         SELECT 1 FROM amodex_environments e JOIN amodex_sessions s
+                           ON s.environment_id=e.environment_id
+                         WHERE e.environment_id=j.environment_id AND s.session_id=j.session_id
+                           AND e.status='ACTIVE' AND s.status='ACTIVE'
+                     )
+                   RETURNING j.*""", (json.dumps(target), job_id),
+            ).fetchone()
+        return _runner_job_from_row(row) if row else None
+
+    def mark_dispatched(self, *, job_id: str, attempt_id: str) -> RunnerJobRecord:
+        return self._finish_dispatch(job_id=job_id, attempt_id=attempt_id, confirmed=True)
+
+    def mark_dispatch_unknown(self, *, job_id: str, attempt_id: str) -> RunnerJobRecord:
+        return self._finish_dispatch(job_id=job_id, attempt_id=attempt_id, confirmed=False)
+
+    def _finish_dispatch(self, *, job_id: str, attempt_id: str, confirmed: bool) -> RunnerJobRecord:
         with psycopg.connect(self._dsn, row_factory=dict_row) as conn:
             with conn.transaction():
                 row = conn.execute(
-                    "SELECT state FROM amodex_environment_runner_jobs WHERE job_id=%s FOR UPDATE",
+                    "SELECT * FROM amodex_environment_runner_jobs WHERE job_id=%s FOR UPDATE",
                     (job_id,),
                 ).fetchone()
                 if row is None:
                     raise KeyError(job_id)
-                current = RunnerJobState(row["state"])
-                if current != RunnerJobState.QUEUED:
-                    raise EnvironmentStateError(
-                        "RUNNER_JOB_STATE_CONFLICT",
-                        f"{job_id}:{current.value}->DISPATCH_UNKNOWN",
-                    )
+                if str(row["dispatch_attempt_id"]) != attempt_id:
+                    raise EnvironmentStateError("DISPATCH_ATTEMPT_MISMATCH", job_id)
+                if row["dispatch_status"] != "STARTED":
+                    return _runner_job_from_row(row)
                 updated = conn.execute(
                     """
                     UPDATE amodex_environment_runner_jobs
-                    SET state='DISPATCH_UNKNOWN',summary=%s,updated_at=NOW()
+                    SET dispatch_status=%s,dispatch_finished_at=NOW(),dispatch_error_code=%s,
+                        state=CASE WHEN state='QUEUED' THEN %s ELSE state END,
+                        dispatched_at=CASE WHEN %s THEN COALESCE(dispatched_at,NOW()) ELSE dispatched_at END,
+                        summary=CASE WHEN state='QUEUED' AND NOT %s THEN 'Dispatch outcome unknown; do not resend' ELSE summary END,
+                        updated_at=NOW()
                     WHERE job_id=%s
                     RETURNING *
                     """,
-                    (summary[:4000], job_id),
+                    ("CONFIRMED" if confirmed else "UNKNOWN", None if confirmed else "EXTERNAL_OUTCOME_UNKNOWN",
+                     "DISPATCHED" if confirmed else "DISPATCH_UNKNOWN", confirmed, confirmed, job_id),
                 ).fetchone()
         assert updated is not None
         return _runner_job_from_row(updated)
@@ -406,39 +463,11 @@ class PostgresEnvironmentProductRepository:
             ],
         )
 
-    def _transition(
-        self,
-        *,
-        job_id: str,
-        allowed: set[RunnerJobState],
-        target: RunnerJobState,
-    ) -> RunnerJobRecord:
-        with psycopg.connect(self._dsn, row_factory=dict_row) as conn:
-            with conn.transaction():
-                row = conn.execute(
-                    "SELECT state FROM amodex_environment_runner_jobs WHERE job_id=%s FOR UPDATE",
-                    (job_id,),
-                ).fetchone()
-                if row is None:
-                    raise KeyError(job_id)
-                current = RunnerJobState(row["state"])
-                if current not in allowed:
-                    raise EnvironmentStateError(
-                        "RUNNER_JOB_STATE_CONFLICT",
-                        f"{job_id}:{current.value}->{target.value}",
-                    )
-                updated = conn.execute(
-                    """
-                    UPDATE amodex_environment_runner_jobs
-                    SET state=%s,updated_at=NOW(),
-                        dispatched_at=CASE WHEN %s='DISPATCHED' THEN NOW() ELSE dispatched_at END
-                    WHERE job_id=%s
-                    RETURNING *
-                    """,
-                    (target.value, target.value, job_id),
-                ).fetchone()
-        assert updated is not None
-        return _runner_job_from_row(updated)
+
+def _require_matching_intent(row: dict[str, Any], digest: str) -> RunnerJobRecord:
+    if row["intent_digest"] != digest:
+        raise EnvironmentStateError("IDEMPOTENCY_KEY_CONFLICT", "key already used with a different intent")
+    return _runner_job_from_row(row)
 
 
 def _runner_job_from_row(row: dict[str, Any]) -> RunnerJobRecord:
@@ -468,4 +497,10 @@ def _runner_job_from_row(row: dict[str, Any]) -> RunnerJobRecord:
         last_heartbeat_at=row.get("last_heartbeat_at"),
         lease_expires_at=row.get("lease_expires_at"),
         heartbeat_count=int(row.get("heartbeat_count") or 0),
+        dispatch_attempt_id=str(row["dispatch_attempt_id"]) if row.get("dispatch_attempt_id") else None,
+        dispatch_status=row.get("dispatch_status"),
+        dispatch_target=row.get("dispatch_target"),
+        dispatch_started_at=row.get("dispatch_started_at"),
+        dispatch_finished_at=row.get("dispatch_finished_at"),
+        dispatch_error_code=row.get("dispatch_error_code"),
     )

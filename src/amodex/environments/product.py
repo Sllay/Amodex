@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
-from typing import Any
+import re
+from typing import Any, Literal
 
 from pydantic import Field, field_validator
 
@@ -27,6 +28,13 @@ class RunnerJobState(StrEnum):
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
     CANCELLED = "CANCELLED"
+
+
+def require_idempotency_key(value: str) -> str:
+    """Opaque, case-sensitive key supplied by the intention's caller, never a secret."""
+    if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", value):
+        raise ValueError("Idempotency-Key must contain 1-128 ASCII letters, digits, '.', '_', ':' or '-'")
+    return value
 
 
 class EnvironmentCreateRequest(ContractModel):
@@ -56,7 +64,7 @@ class MemoryCreateRequest(ContractModel):
 
 
 class RunnerDispatchRequest(ContractModel):
-    schema_version: int = 1
+    schema_version: Literal[1] = 1
     run_id: UUIDv7Str
     session_id: UUIDv7Str
     worker_profile: str = Field(default="implementation", min_length=1, max_length=200)
@@ -99,8 +107,15 @@ class RunnerJobRecord(ContractModel):
     last_heartbeat_at: datetime | None = None
     lease_expires_at: datetime | None = None
     heartbeat_count: int = Field(default=0, ge=0)
+    dispatch_attempt_id: UUIDv7Str | None = None
+    dispatch_status: str | None = None
+    dispatch_target: dict[str, str] | None = None
+    dispatch_started_at: datetime | None = None
+    dispatch_finished_at: datetime | None = None
+    dispatch_error_code: str | None = None
 
-    @field_validator("created_at", "updated_at", "claimed_at", "completed_at", "last_heartbeat_at", "lease_expires_at")
+    @field_validator("created_at", "updated_at", "claimed_at", "completed_at", "last_heartbeat_at", "lease_expires_at",
+                     "dispatch_started_at", "dispatch_finished_at")
     @classmethod
     def normalize_datetime(cls, value: datetime | None, info):
         if value is None:

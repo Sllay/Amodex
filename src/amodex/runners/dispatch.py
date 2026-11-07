@@ -48,11 +48,13 @@ class GitHubActionsDispatcher:
                 },
                 json={"ref": self.ref, "inputs": {"job_id": job_id}},
                 timeout=self.timeout_seconds,
+                follow_redirects=False,
             )
-        except httpx.HTTPError as exc:
-            raise RunnerDispatchError(f"GitHub Actions dispatch failed: {exc}") from exc
+        except httpx.HTTPError:
+            raise RunnerDispatchError("GITHUB_DISPATCH_TRANSPORT_UNKNOWN") from None
         if response.status_code != 204:
-            message = response.text[:1000]
-            raise RunnerDispatchError(
-                f"GitHub Actions dispatch returned HTTP {response.status_code}: {message}"
-            )
+            raise RunnerDispatchError(f"GITHUB_DISPATCH_HTTP_{response.status_code}")
+
+    def correlation(self) -> dict[str, str]:
+        """Non-secret dispatch destination persisted before the external effect."""
+        return {"repository": self.repository, "workflow": self.workflow, "ref": self.ref}
