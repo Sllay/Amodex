@@ -1,0 +1,56 @@
+{
+  "application_source_commit": "2ac9fc7b3bb47bad2e80541c69ad5bbc18f67283",
+  "base_commit": "b9ed9a66716e32edbd5938a4e614d8992c6984ea",
+  "branch": "fix/ui-ux-timeout-regressions-v1",
+  "final_runs": {
+    "browser": {
+      "tests": "35",
+      "errors": "0",
+      "failures": "0",
+      "skipped": "0",
+      "time": "29.954"
+    },
+    "regression": {
+      "tests": "209",
+      "errors": "0",
+      "failures": "0",
+      "skipped": "0",
+      "time": "6.564"
+    },
+    "offline": {
+      "tests": "1",
+      "errors": "0",
+      "failures": "0",
+      "skipped": "0",
+      "time": "2.232"
+    },
+    "timeouts": {
+      "tests": "38",
+      "errors": "0",
+      "failures": "0",
+      "skipped": "0",
+      "time": "0.216"
+    }
+  },
+  "unique_final_passed": 245,
+  "failed": 0,
+  "xfail": 0,
+  "skipped": 0,
+  "note": "Timeout tests are included in regression.xml; intermediate targeted runs are not added to the unique total. The one offline test was deselected in HTTPS and passed separately on HTTP localhost.",
+  "targeted_runs_before_xfail_removal": {
+    "layout-runxfail": {
+      "tests": "3",
+      "errors": "0",
+      "failures": "0",
+      "skipped": "0",
+      "time": "3.713"
+    },
+    "modal-runxfail": {
+      "tests": "2",
+      "errors": "0",
+      "failures": "0",
+      "skipped": "0",
+      "time": "2.282"
+    }
+  }
+}

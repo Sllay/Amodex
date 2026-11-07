@@ -1,0 +1,410 @@
+{
+  "captured_at": "2026-11-07T16:04:01.516611+00:00",
+  "browser": "156.0.8078.79",
+  "source_sha256": {
+    "src/amodex/api/workspace_v2.py": "107938d5d6db0ee0891ebc5ef92dfb34e17dc0ab641b1ce662730ff917656ed8",
+    "src/amodex/api/workspace_web.py": "90b7432d988a135b347677fb310ab2268c30de9fd12adba2c72a8a9a21506dae",
+    "src/amodex/api/model_intelligence_web.py": "894c78786147b33d1aa4f8c5ae2990764e395fb482838575e1ddc342f38f2802",
+    "src/amodex/providers/timeouts.py": "a8ede0caf9de5f9f262a7193afe3c931cbf01b3872362beb06203ed2f3703dfb"
+  },
+  "results": [
+    {
+      "viewport": [
+        1440,
+        900
+      ],
+      "measurements": [
+        {
+          "viewport": 1440,
+          "scrollWidth": 1440,
+          "height": 900,
+          "state": "home"
+        },
+        {
+          "viewport": 1440,
+          "scrollWidth": 1440,
+          "height": 900,
+          "state": "home-reload"
+        },
+        {
+          "viewport": 1440,
+          "scrollWidth": 1440,
+          "height": 900,
+          "state": "projects"
+        },
+        {
+          "viewport": 1440,
+          "scrollWidth": 1440,
+          "height": 900,
+          "state": "project-modal"
+        },
+        {
+          "viewport": 1440,
+          "scrollWidth": 1440,
+          "height": 900,
+          "state": "models"
+        }
+      ],
+      "modal": {
+        "role": "dialog",
+        "ariaModal": "true",
+        "title": "Novo projeto",
+        "focusInside": true,
+        "backgroundInert": true
+      },
+      "pageErrors": [],
+      "httpErrors": [
+        {
+          "path": "https://localhost:8765/",
+          "status": 401
+        },
+        {
+          "path": "https://localhost:8765/v1/model-intelligence/leaderboard",
+          "status": 503,
+          "code": "NO_MEASURED_ROUTE"
+        }
+      ],
+      "unexpectedHttpErrors": [],
+      "failedRequests": [
+        {
+          "path": "https://localhost:8765/v1/ui/bootstrap",
+          "failure": "net::ERR_ABORTED"
+        }
+      ],
+      "console": [
+        {
+          "type": "error",
+          "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+        },
+        {
+          "type": "error",
+          "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+        },
+        {
+          "type": "error",
+          "text": "An SSL certificate error occurred when fetching the script."
+        },
+        {
+          "type": "warning",
+          "text": "Amodex service worker unavailable SecurityError: Failed to register a ServiceWorker for scope ('https://localhost:8765/') with script ('https://localhost:8765/sw.js'): An SSL certificate error occurred when fetching the script."
+        },
+        {
+          "type": "error",
+          "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+        },
+        {
+          "type": "error",
+          "text": "An unknown error occurred when fetching the script."
+        },
+        {
+          "type": "warning",
+          "text": "Amodex service worker unavailable SecurityError: Failed to register a ServiceWorker for scope ('https://localhost:8765/') with script ('https://localhost:8765/sw.js'): An unknown error occurred when fetching the script."
+        },
+        {
+          "type": "error",
+          "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+        }
+      ]
+    },
+    {
+      "viewport": [
+        768,
+        1024
+      ],
+      "measurements": [
+        {
+          "viewport": 768,
+          "scrollWidth": 768,
+          "height": 1024,
+          "state": "home"
+        },
+        {
+          "viewport": 768,
+          "scrollWidth": 768,
+          "height": 1024,
+          "state": "home-reload"
+        },
+        {
+          "viewport": 768,
+          "scrollWidth": 768,
+          "height": 1024,
+          "state": "context-open"
+        },
+        {
+          "viewport": 768,
+          "scrollWidth": 768,
+          "height": 1024,
+          "state": "projects"
+        },
+        {
+          "viewport": 768,
+          "scrollWidth": 768,
+          "height": 1024,
+          "state": "project-modal"
+        },
+        {
+          "viewport": 768,
+          "scrollWidth": 768,
+          "height": 1024,
+          "state": "models"
+        }
+      ],
+      "modal": {
+        "role": "dialog",
+        "ariaModal": "true",
+        "title": "Novo projeto",
+        "focusInside": true,
+        "backgroundInert": true
+      },
+      "pageErrors": [],
+      "httpErrors": [
+        {
+          "path": "https://localhost:8765/",
+          "status": 401
+        },
+        {
+          "path": "https://localhost:8765/v1/model-intelligence/leaderboard",
+          "status": 503,
+          "code": "NO_MEASURED_ROUTE"
+        }
+      ],
+      "unexpectedHttpErrors": [],
+      "failedRequests": [
+        {
+          "path": "https://localhost:8765/v1/ui/bootstrap",
+          "failure": "net::ERR_ABORTED"
+        }
+      ],
+      "console": [
+        {
+          "type": "error",
+          "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+        },
+        {
+          "type": "error",
+          "text": "An unknown error occurred when fetching the script."
+        },
+        {
+          "type": "warning",
+          "text": "Amodex service worker unavailable SecurityError: Failed to register a ServiceWorker for scope ('https://localhost:8765/') with script ('https://localhost:8765/sw.js'): An unknown error occurred when fetching the script."
+        },
+        {
+          "type": "error",
+          "text": "An SSL certificate error occurred when fetching the script."
+        },
+        {
+          "type": "warning",
+          "text": "Amodex service worker unavailable SecurityError: Failed to register a ServiceWorker for scope ('https://localhost:8765/') with script ('https://localhost:8765/sw.js'): An SSL certificate error occurred when fetching the script."
+        },
+        {
+          "type": "error",
+          "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+        }
+      ]
+    },
+    {
+      "viewport": [
+        414,
+        896
+      ],
+      "measurements": [
+        {
+          "viewport": 414,
+          "scrollWidth": 414,
+          "height": 896,
+          "state": "home"
+        },
+        {
+          "viewport": 414,
+          "scrollWidth": 414,
+          "height": 896,
+          "state": "home-reload"
+        },
+        {
+          "viewport": 414,
+          "scrollWidth": 414,
+          "height": 896,
+          "state": "context-open"
+        },
+        {
+          "viewport": 414,
+          "scrollWidth": 414,
+          "height": 896,
+          "state": "menu"
+        },
+        {
+          "viewport": 414,
+          "scrollWidth": 414,
+          "height": 896,
+          "state": "projects"
+        },
+        {
+          "viewport": 414,
+          "scrollWidth": 414,
+          "height": 896,
+          "state": "project-modal"
+        },
+        {
+          "viewport": 414,
+          "scrollWidth": 414,
+          "height": 896,
+          "state": "models"
+        }
+      ],
+      "modal": {
+        "role": "dialog",
+        "ariaModal": "true",
+        "title": "Novo projeto",
+        "focusInside": true,
+        "backgroundInert": true
+      },
+      "pageErrors": [],
+      "httpErrors": [
+        {
+          "path": "https://localhost:8765/",
+          "status": 401
+        },
+        {
+          "path": "https://localhost:8765/v1/model-intelligence/leaderboard",
+          "status": 503,
+          "code": "NO_MEASURED_ROUTE"
+        }
+      ],
+      "unexpectedHttpErrors": [],
+      "failedRequests": [
+        {
+          "path": "https://localhost:8765/v1/ui/bootstrap",
+          "failure": "net::ERR_ABORTED"
+        }
+      ],
+      "console": [
+        {
+          "type": "error",
+          "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+        },
+        {
+          "type": "error",
+          "text": "An unknown error occurred when fetching the script."
+        },
+        {
+          "type": "warning",
+          "text": "Amodex service worker unavailable SecurityError: Failed to register a ServiceWorker for scope ('https://localhost:8765/') with script ('https://localhost:8765/sw.js'): An unknown error occurred when fetching the script."
+        },
+        {
+          "type": "error",
+          "text": "An unknown error occurred when fetching the script."
+        },
+        {
+          "type": "warning",
+          "text": "Amodex service worker unavailable SecurityError: Failed to register a ServiceWorker for scope ('https://localhost:8765/') with script ('https://localhost:8765/sw.js'): An unknown error occurred when fetching the script."
+        },
+        {
+          "type": "error",
+          "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+        }
+      ]
+    },
+    {
+      "viewport": [
+        390,
+        844
+      ],
+      "measurements": [
+        {
+          "viewport": 390,
+          "scrollWidth": 390,
+          "height": 844,
+          "state": "home"
+        },
+        {
+          "viewport": 390,
+          "scrollWidth": 390,
+          "height": 844,
+          "state": "home-reload"
+        },
+        {
+          "viewport": 390,
+          "scrollWidth": 390,
+          "height": 844,
+          "state": "context-open"
+        },
+        {
+          "viewport": 390,
+          "scrollWidth": 390,
+          "height": 844,
+          "state": "menu"
+        },
+        {
+          "viewport": 390,
+          "scrollWidth": 390,
+          "height": 844,
+          "state": "projects"
+        },
+        {
+          "viewport": 390,
+          "scrollWidth": 390,
+          "height": 844,
+          "state": "project-modal"
+        },
+        {
+          "viewport": 390,
+          "scrollWidth": 390,
+          "height": 844,
+          "state": "models"
+        }
+      ],
+      "modal": {
+        "role": "dialog",
+        "ariaModal": "true",
+        "title": "Novo projeto",
+        "focusInside": true,
+        "backgroundInert": true
+      },
+      "pageErrors": [],
+      "httpErrors": [
+        {
+          "path": "https://localhost:8765/",
+          "status": 401
+        },
+        {
+          "path": "https://localhost:8765/v1/model-intelligence/leaderboard",
+          "status": 503,
+          "code": "NO_MEASURED_ROUTE"
+        }
+      ],
+      "unexpectedHttpErrors": [],
+      "failedRequests": [
+        {
+          "path": "https://localhost:8765/v1/ui/bootstrap",
+          "failure": "net::ERR_ABORTED"
+        }
+      ],
+      "console": [
+        {
+          "type": "error",
+          "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+        },
+        {
+          "type": "error",
+          "text": "An SSL certificate error occurred when fetching the script."
+        },
+        {
+          "type": "warning",
+          "text": "Amodex service worker unavailable SecurityError: Failed to register a ServiceWorker for scope ('https://localhost:8765/') with script ('https://localhost:8765/sw.js'): An SSL certificate error occurred when fetching the script."
+        },
+        {
+          "type": "error",
+          "text": "An unknown error occurred when fetching the script."
+        },
+        {
+          "type": "warning",
+          "text": "Amodex service worker unavailable SecurityError: Failed to register a ServiceWorker for scope ('https://localhost:8765/') with script ('https://localhost:8765/sw.js'): An unknown error occurred when fetching the script."
+        },
+        {
+          "type": "error",
+          "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+        }
+      ]
+    }
+  ]
+}

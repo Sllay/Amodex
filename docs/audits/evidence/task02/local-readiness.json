@@ -1,0 +1,1 @@
+{"status":"ready","ready":true,"release":{"version":"0.7.6-activation-v1","git_sha":"2ac9fc7b3bb47bad2e80541c69ad5bbc18f67283","host":"generic"},"database":{"reachable":true,"schema_compatible":true},"zero_cost":{"ready":true,"mode":"zero-cost-fail-closed"}}
