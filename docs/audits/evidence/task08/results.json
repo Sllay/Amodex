@@ -1,0 +1,49 @@
+{
+  "schema": "amodex.roblox_agent_evidence.v1",
+  "base_sha": "758854741a5d13f61c6e7f6b4ae8ac31461cadd1",
+  "implementation_sha": "10777b027804eac4152cbfbc256204b94d17c2cb",
+  "python": "3.13.5",
+  "pytest": "9.0.2",
+  "httpx": "0.28.1",
+  "pydantic": "2.13.5",
+  "affected_tests": {
+    "passed": 90,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "agent_tests_after_log_redaction_hardening": {
+    "passed": 35,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "commands": [
+    "AMODEX_TEST_LUAU_ANALYZER=<trusted-luau-analyze> PYTHONPATH=src python -m pytest tests/integration/test_roblox_agent_execution.py tests/unit/test_roblox_cloud.py tests/integration/test_stage2_scoped_tools.py -ra",
+    "PYTHONPATH=src python scripts/roblox_agent_demo.py --universe-id 123 --place-id 456 --analyzer <trusted-luau-analyze>",
+    "PYTHONPATH=src python scripts/roblox_agent_demo.py --live --universe-id 10769712453 --place-id 118200154785968 --analyzer <trusted-luau-analyze>"
+  ],
+  "simulated_demo": "SIMULATED_PASS; synthetic IDs; MockTransport only",
+  "local_validation": {
+    "runtime": "official Luau 0.746 luau-analyze",
+    "valid_source": "PASS",
+    "invalid_source": "FAIL",
+    "analyzer_sha256": "151d8490740c7afc10638ef6e396fd50ab6f4b02a4ddf3b924abdea30f0e9820",
+    "archive_sha256": "30f11c9cde8be2dc0e3066d210705532aac3726a2db89a6c5078080b6faa6cf8"
+  },
+  "cloud": {
+    "new_config_version": "cecfgver_6aef971ae53481a1ab899d23f0503b5b",
+    "secret_state": "ready",
+    "network_policy_state": "enforced"
+  },
+  "live": "LIVE_PASS; one POST; two GETs; HTTP 200 on all operations",
+  "real_model_inference": false,
+  "pinned_hermes_runtime_executed": false,
+  "scope": "production HermesScopedWorker.run with deterministic AIAgent substitute in tests; production registered plugin handlers in live demonstration",
+  "limitations": [
+    "Ephemeral resource binding, no Web database binding created.",
+    "Process-local consumed flag; no durable external exactly-once guarantee.",
+    "No R2A Run dispatch on this path; supervised session only.",
+    "No browser, paid inference, publish, SavePlaceAsync, DataStore, Render or Neon."
+  ]
+}
