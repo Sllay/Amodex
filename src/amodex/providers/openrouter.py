@@ -12,7 +12,7 @@ class OpenRouterProvider(OpenAICompatibleProvider):
         self,
         *,
         api_key: str,
-        timeout_seconds: float = 45.0,
+        timeout_seconds: float = 45.0,\n        timeout: httpx.Timeout | None = None,
         app_title: str = "Amodex",
         app_url: str | None = None,
         require_json_object: bool = False,
@@ -24,7 +24,7 @@ class OpenRouterProvider(OpenAICompatibleProvider):
             provider_name=self.provider_name,
             base_url="https://openrouter.ai/api/v1",
             api_key=api_key,
-            timeout_seconds=timeout_seconds,
+            timeout_seconds=timeout_seconds,\n            timeout=timeout,
             require_json_object=require_json_object,
             extra_headers=headers,
         )
