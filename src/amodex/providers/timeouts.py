@@ -6,6 +6,7 @@ Long-running agent tasks must be checkpointed and resumed by the run orchestrato
 
 from __future__ import annotations
 
+import math
 import os
 import re
 from dataclasses import dataclass
@@ -14,6 +15,12 @@ import httpx
 
 _MIN_TIMEOUT_SECONDS = 1.0
 _MAX_TIMEOUT_SECONDS = 1800.0
+
+# Compatibility is deliberately bounded: stripping arbitrary namespaces would
+# let an override for one publisher's model affect another publisher's model.
+_LEGACY_MODEL_ALIASES = {
+    ("nvidia", "mistralai/mistral-large-4-1t-a52b"): "mistral-large-4-1t-a52b",
+}
 
 _DEFAULT_READ_SECONDS = {
     ("nvidia", "chat"): 900.0,
@@ -65,7 +72,10 @@ def provider_timeout_for(
     """
 
     provider_key = _env_key(provider)
-    model_key = _env_key(model)
+    model_keys = [_env_key(model)]
+    alias = _LEGACY_MODEL_ALIASES.get((provider.strip().lower(), model.strip()))
+    if alias:
+        model_keys.append(_env_key(alias))
     operation_key = _env_key(operation)
     default_read = _DEFAULT_READ_SECONDS.get(
         (provider.strip().lower(), operation.strip().lower()),
@@ -73,9 +83,13 @@ def provider_timeout_for(
     )
 
     def resolve(component: str, default: float) -> float:
-        names = (
-            f"AMODEX_PROVIDER_TIMEOUT_{provider_key}_{model_key}_{operation_key}_{component.upper()}_SECONDS",
-            f"AMODEX_PROVIDER_TIMEOUT_{provider_key}_{model_key}_{component.upper()}_SECONDS",
+        # Specificity wins first; within the same level the complete model ID
+        # wins over its explicitly supported historical alias.
+        names = tuple(
+            f"AMODEX_PROVIDER_TIMEOUT_{provider_key}_{key}{suffix}_{component.upper()}_SECONDS"
+            for suffix in (f"_{operation_key}", "")
+            for key in model_keys
+        ) + (
             f"AMODEX_PROVIDER_TIMEOUT_{provider_key}_{operation_key}_{component.upper()}_SECONDS",
             f"AMODEX_PROVIDER_TIMEOUT_{provider_key}_{component.upper()}_SECONDS",
             f"AMODEX_PROVIDER_TIMEOUT_{component.upper()}_SECONDS",
@@ -88,7 +102,7 @@ def provider_timeout_for(
                 value = float(raw)
             except ValueError:
                 continue
-            if value > 0:
+            if math.isfinite(value) and value > 0:
                 return min(_MAX_TIMEOUT_SECONDS, max(_MIN_TIMEOUT_SECONDS, value))
         return default
 

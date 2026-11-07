@@ -24,9 +24,21 @@ The most specific configured variable wins:
 4. `AMODEX_PROVIDER_TIMEOUT_<PROVIDER>_<COMPONENT>_SECONDS`
 5. `AMODEX_PROVIDER_TIMEOUT_<COMPONENT>_SECONDS`
 
-Components are `CONNECT`, `READ`, `WRITE`, and `POOL`. Provider, model, and operation names are uppercased; non-alphanumeric characters become underscores.
+Components are `CONNECT`, `READ`, `WRITE`, and `POOL`. Provider, model, and operation names are uppercased; non-alphanumeric runs become underscores. The canonical model identifier is the **complete provider model ID, including its namespace**. For example, `mistralai/mistral-large-4-1t-a52b` becomes `MISTRALAI_MISTRAL_LARGE_4_1T_A52B`. A model without a namespace uses its complete unqualified ID.
 
-Example for a longer NVIDIA Mistral Large 4 chat response:
+For compatibility, the historical `MISTRAL_LARGE_4_1T_A52B` alias is accepted **only** for NVIDIA's exact `mistralai/mistral-large-4-1t-a52b` ID. This is an explicit provider/model mapping, not a generic basename fallback. An override for that alias does not apply to another publisher, a version suffix, a `:free` variant or another provider. Other models require their complete ID.
+
+At each model-specific precedence level, a valid canonical override wins over a valid alias. Specificity takes priority: a model+operation alias still wins over a canonical model override without an operation. Invalid candidates fall through to the next candidate. Non-finite numbers, non-positive numbers and non-numeric values are ignored; finite positive values for **all four components** are clamped to 1–1800 seconds. No retry or routing policy changes follow from resolution.
+
+Normalization is a legacy environment-variable convention, not a new model identity: punctuation and case can collapse (for example `author/model-a` and `author/model_a`). Do not register such distinct IDs under the same normalized override key or add aliases by stripping arbitrary namespaces. They cannot be disambiguated by that environment-variable spelling. Use a provider/global budget until a distinct, explicitly reviewed mapping is defined; the resolver does not guess a publisher from a basename. The scoped compatibility mapping above is limited to the one documented identity, and tests cover namespace/basename collisions and alias precedence.
+
+Canonical example for a longer NVIDIA Mistral Large 4 chat response:
+
+```env
+AMODEX_PROVIDER_TIMEOUT_NVIDIA_MISTRALAI_MISTRAL_LARGE_4_1T_A52B_CHAT_READ_SECONDS=1200
+```
+
+Previously documented spelling, retained as the explicit NVIDIA compatibility alias:
 
 ```env
 AMODEX_PROVIDER_TIMEOUT_NVIDIA_MISTRAL_LARGE_4_1T_A52B_CHAT_READ_SECONDS=1200
