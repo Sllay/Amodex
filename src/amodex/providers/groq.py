@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import httpx
+
 from typing import Any
 
 from amodex.runtime.models import ProviderResponse
@@ -12,12 +14,15 @@ from .vision_chat import generate_json_vision_response
 class GroqProvider(OpenAICompatibleProvider):
     provider_name = "groq"
 
-    def __init__(\n        self, *, api_key: str, timeout_seconds: float = 45.0, timeout: httpx.Timeout | None = None\n    ) -> None:
+    def __init__(
+        self, *, api_key: str, timeout_seconds: float = 45.0, timeout: httpx.Timeout | None = None
+    ) -> None:
         super().__init__(
             provider_name=self.provider_name,
             base_url="https://api.groq.com/openai/v1",
             api_key=api_key,
-            timeout_seconds=timeout_seconds,\n            timeout=timeout,
+            timeout_seconds=timeout_seconds,
+            timeout=timeout,
             require_json_object=True,
             # GPT-OSS follows instructions more reliably when the complete
             # instruction set lives in the user message instead of being split
