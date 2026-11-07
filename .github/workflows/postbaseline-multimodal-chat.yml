@@ -169,7 +169,7 @@ jobs:
           grep -q 'GATED_STEP_4' src/amodex/api/multimodal_routes.py
           grep -q 'billing_class == "free"' src/amodex/multimodal/clients.py
           grep -q 'plan: free' render.yaml
-          grep -q 'healthCheckPath: /readyz' render.yaml
+          grep -q 'healthCheckPath: /healthz' render.yaml
           grep -q '@router.get("/healthz"' src/amodex/api/activation_status.py
           grep -q '@router.get("/readyz"' src/amodex/api/activation_status.py
           grep -q 'AMODEX_ACCESS_PASSCODE' render.yaml
