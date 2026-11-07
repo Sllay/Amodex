@@ -70,6 +70,13 @@ class RunnerControlClient:
     def running(self, *, job_id: str) -> dict[str, Any]:
         return self._request("POST", f"/v1/runner-jobs/{job_id}/running")
 
+    def heartbeat(self, *, job_id: str, github_run_id: str) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            f"/v1/runner-jobs/{job_id}/heartbeat",
+            payload={"github_run_id": github_run_id},
+        )
+
     def report(
         self,
         *,
@@ -112,6 +119,10 @@ def build_parser() -> argparse.ArgumentParser:
     running = sub.add_parser("running")
     running.add_argument("job_id")
 
+    heartbeat = sub.add_parser("heartbeat")
+    heartbeat.add_argument("job_id")
+    heartbeat.add_argument("--github-run-id", required=True)
+
     report = sub.add_parser("report")
     report.add_argument("job_id")
     report.add_argument("--state", choices=("COMPLETED", "FAILED", "CANCELLED"), required=True)
@@ -135,6 +146,8 @@ def main(argv: list[str] | None = None) -> None:
                 )
         elif args.command == "running":
             result = client.running(job_id=args.job_id)
+        elif args.command == "heartbeat":
+            result = client.heartbeat(job_id=args.job_id, github_run_id=args.github_run_id)
         else:
             evidence: dict[str, Any] = {}
             if args.evidence_json:
