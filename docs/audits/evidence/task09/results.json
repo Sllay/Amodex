@@ -1,0 +1,78 @@
+{
+  "status": "R3_PASS",
+  "base_sha": "adb72c8861b3b6fd742a451aa452c8e07bcf4725",
+  "implementation_sha": "5c9cc86ae387e597efa156acdf26bfd9d6b5b339",
+  "branch": "fix/runner-dispatch-idempotency-r3",
+  "database": {
+    "engine": "PostgreSQL 17.11",
+    "scope": "isolated loopback amodex_qa_r3",
+    "real_concurrency": true
+  },
+  "runtime": {
+    "python": "3.13.5",
+    "psycopg": "3.3.6",
+    "pytest": "9.0.2"
+  },
+  "final_distinct_tests": {
+    "passed": 242,
+    "failed": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "groups": {
+    "r3_new": 48,
+    "cr03_cr07_characterization": 3,
+    "r1": 65,
+    "r2a": 84,
+    "task08": 35,
+    "environment_product_contracts": 7
+  },
+  "batches": [
+    {
+      "name": "directed",
+      "tests": 238,
+      "passed": 236,
+      "failed": 2,
+      "reason": "R1 Web/readiness fixture assumed full production migration manifest existed"
+    },
+    {
+      "name": "r1_final",
+      "tests": 47,
+      "passed": 47,
+      "failed": 0,
+      "change": "fixture applies guarded complete migration manifest on loopback test DB"
+    },
+    {
+      "name": "characterization",
+      "tests": 3,
+      "passed": 3,
+      "deselected": 21
+    },
+    {
+      "name": "unavailable_dispatcher",
+      "tests": 1,
+      "passed": 1,
+      "deselected": 34
+    }
+  ],
+  "junit_policy": "latest execution per (classname, name); unchanged successful results reused",
+  "commands": [
+    "AMODEX_TEST_DATABASE_URL=<isolated-loopback-dsn> AMODEX_TEST_LUAU_ANALYZER=<trusted-luau-analyze> PYTHONPATH=src python -m pytest tests/integration/test_runner_dispatch_idempotency_r3.py tests/unit/test_runner_dispatch_contract_r3.py tests/integration/test_postbaseline_environment_product.py tests/integration/test_runner_auth_ownership_r1.py tests/unit/test_runner_authorization_r1.py tests/integration/test_run_lease_fencing_r2a.py tests/unit/test_run_lease_policy.py tests/unit/test_postbaseline_environment_product_contracts.py tests/integration/test_roblox_agent_execution.py -ra",
+    "AMODEX_TEST_DATABASE_URL=<isolated-loopback-dsn> PYTHONPATH=src python -m pytest tests/integration/test_runner_auth_ownership_r1.py -ra",
+    "AMODEX_TEST_DATABASE_URL=<isolated-loopback-dsn> PYTHONPATH=src python -m pytest tests/integration/test_checkpoint_recovery_audit.py -k 'claim_before_dispatch or repeated_dispatch_post' -ra",
+    "AMODEX_TEST_DATABASE_URL=<isolated-loopback-dsn> PYTHONPATH=src python -m pytest tests/integration/test_runner_dispatch_idempotency_r3.py -k dispatch_unavailable -ra"
+  ],
+  "external_calls": {
+    "github_actions_dispatch": 0,
+    "roblox_api": 0,
+    "paid_inference": 0
+  },
+  "warnings": [
+    "preexisting Starlette/httpx TestClient deprecation"
+  ],
+  "limitations": [
+    "STARTED is potentially unknown after process loss and is never reacquired.",
+    "No exactly-once claim for GitHub Actions; HTTP ACK is not workflow execution proof.",
+    "R2B terminal reports/acks, R4 global supervision and advanced Recovery remain pending."
+  ]
+}
