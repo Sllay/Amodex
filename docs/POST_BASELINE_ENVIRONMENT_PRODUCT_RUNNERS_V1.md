@@ -92,7 +92,16 @@ QUEUED
 
 DISPATCHED / DISPATCH_UNKNOWN
   --> CLAIMED --> RUNNING --> COMPLETED | FAILED | CANCELLED
+                     |
+                     +-- lease expires --> RUNNER_LEASE_LOST (manual recovery)
 ```
+
+A claimed job receives a two-minute lease. The Actions runner renews it every 30
+seconds from claim onward. Heartbeats are bound to the exact GitHub Actions run ID;
+a different workflow run cannot renew that lease. Terminal reports from an expired
+or mismatched lease are rejected. Lease expiry is deliberately **not** an automatic
+redispatch: the previous runner may have performed external work before it stopped,
+so recovery must inspect the job and its evidence before any retry.
 
 `DISPATCH_UNKNOWN` is deliberate. `workflow_dispatch` is an external side effect: if
 the HTTP call times out after GitHub accepted it, Amodex cannot safely infer that no
@@ -196,6 +205,7 @@ The post-baseline database migrations must be applied after Stage 6:
 ```text
 migrations/postbaseline/0001_environment_isolation_budget.sql
 migrations/postbaseline/0002_environment_product_runners.sql
+migrations/postbaseline/0004_environment_runner_leases.sql
 ```
 
 Stage 6 `/ready` compatibility is intentionally retained. Environment endpoints fail
@@ -267,7 +277,9 @@ accident.
 - runner jobs carry the same Environment/Session/Run/Project tuple durably;
 - cross-Environment dispatch fails closed;
 - ordinary Environment endpoints cannot write OWNER memory;
-- runner claim/report endpoints require a separate bearer credential;
+- runner claim/report/heartbeat endpoints require a separate bearer credential;
+- runner heartbeat renewal is bound to the claiming GitHub Actions run ID;
+- lease expiry does not trigger blind retry or redispatch;
 - an ambiguous GitHub dispatch is not blindly retried;
 - Roblox Studio jobs are never sent to Linux Actions;
 - project runner workflows receive no model provider credentials;
