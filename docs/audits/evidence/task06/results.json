@@ -1,0 +1,126 @@
+{
+  "date_utc": "2026-11-07T19:56:27.546485+00:00",
+  "branch": "feat/roblox-first-vertical-slice",
+  "base_sha": "6d2facd63f72c4237bc63f0671df660f791a9b49",
+  "validated_source_sha": "212fc8e984dc923eb3576c4920c2fee6a4cb38ae",
+  "official_docs": {
+    "repository": "https://github.com/Roblox/creator-docs",
+    "sha": "ccc2b01d9bf8b85dee2905d1aaff3444fcbd01c5",
+    "files": [
+      "content/en-us/reference/cloud/openapi.json",
+      "content/en-us/cloud/guides/usage-place-publishing.md",
+      "content/en-us/studio/mcp-open-cloud.md",
+      "content/en-us/studio/mcp.md"
+    ],
+    "web_play_documentation": "BLOCKED: public Roblox and help sites denied by proxy; no official Web Play availability or Linux compatibility confirmed"
+  },
+  "runs": {
+    "roblox": {
+      "tests": 52,
+      "passed": 52,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "xfail": 0
+    },
+    "regression": {
+      "tests": 328,
+      "passed": 328,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "xfail": 0
+    }
+  },
+  "native_luau": {
+    "version": "0.746",
+    "source": "https://github.com/luau-lang/luau/releases/download/0.746/luau-ubuntu.zip",
+    "archive_sha256": "30f11c9cde8be2dc0e3066d210705532aac3726a2db89a6c5078080b6faa6cf8",
+    "commands": [
+      {
+        "command": "luau-analyze tests/fixtures/roblox/score_test.luau",
+        "exit_code": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      {
+        "command": "luau tests/fixtures/roblox/score_test.luau",
+        "exit_code": 0,
+        "stdout": "AMODEX_LUAU_OK checks=3 score=42",
+        "stderr": ""
+      }
+    ]
+  },
+  "smoke": [
+    {
+      "command": ".venv/bin/python scripts/roblox_luau_smoke.py",
+      "exit_code": 0,
+      "result": {
+        "status": "SIMULATED_PASS",
+        "remote_executed": false,
+        "state": "COMPLETE",
+        "result_verified": true,
+        "logs_verified": true
+      }
+    },
+    {
+      "command": ".venv/bin/python scripts/roblox_luau_smoke.py --live",
+      "exit_code": 2,
+      "result": {
+        "status": "LIVE_BLOCKED",
+        "reason": "authorized_test_target_and_api_key_required"
+      }
+    }
+  ],
+  "live": "LIVE_BLOCKED: no authorized disposable target or API key configured; apis.roblox.com denied by proxy",
+  "web_play": {
+    "engine": "Chromium",
+    "version": "156.0.8078.79",
+    "viewport": "414x896",
+    "session": "fresh unauthenticated public navigation; no cookie access",
+    "result": "WEB_PLAY_BLOCKED",
+    "events": [
+      {
+        "event": "requestfailed",
+        "url": "https://www.roblox.com/",
+        "failure": "net::ERR_TUNNEL_CONNECTION_FAILED"
+      },
+      {
+        "event": "navigation_failed",
+        "error": "Page.goto: net::ERR_TUNNEL_CONNECTION_FAILED at https://www.roblox.com/"
+      }
+    ]
+  },
+  "public_network_probes": [
+    {
+      "host": "create.roblox.com",
+      "result": "HTTPS CONNECT denied by proxy",
+      "http_status": 403
+    },
+    {
+      "host": "www.roblox.com",
+      "result": "HTTPS CONNECT denied by proxy",
+      "http_status": 403
+    },
+    {
+      "host": "apis.roblox.com",
+      "result": "HTTPS CONNECT denied by proxy",
+      "http_status": 403
+    },
+    {
+      "host": "en.help.roblox.com",
+      "result": "HTTPS CONNECT denied by proxy",
+      "http_status": 403
+    }
+  ],
+  "environment": "Python 3.13.5 / pytest 9.0.2 / httpx 0.28.1; local PostgreSQL 17.11 amodex_qa_task06 on loopback; no new Python dependencies",
+  "note": "52 directed tests are included in 328 regression tests, not additive. All HTTP task/result/log responses are synthetic. Native Luau ran only pure local logic. No remote task, publish, login, cookies, inference or production changes.",
+  "source_sha256": {
+    "src/amodex/integrations/roblox_cloud.py": "802695d33026f51e45e8d12830f38babeb9503edc31ec566ed2566333798e05e",
+    "src/amodex/integrations/models.py": "bcc8ec48eaab4a7ba0fdfd00427d454a7f4f41a6d3f51a780a9725c4da8f819f",
+    "scripts/roblox_luau_smoke.py": "cfbbb69415124a72ca6d422c4b9c9d1c7b02eab8b02b0ab0a495d38adbc35b22",
+    "tests/unit/test_roblox_cloud.py": "16ea54d7a31164f992a27a28724db8e9ee883b3bd50e4fe28bf51313e9390a83",
+    "tests/fixtures/roblox/score_test.luau": "37440f650821284b231f665bb99927d8bb1712db36ddf4df7c736c9e2ecc4fd4",
+    "tests/fixtures/roblox/open_cloud.json": "6b6263697af34fb344e7287ebe8da7ebab9a0eedc199af35c5dbfa49dc3c8c99"
+  }
+}
