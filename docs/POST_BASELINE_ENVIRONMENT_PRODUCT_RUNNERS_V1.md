@@ -97,8 +97,11 @@ DISPATCHED / DISPATCH_UNKNOWN
 ```
 
 A claimed job receives a two-minute lease. The Actions runner renews it every 30
-seconds from claim onward. Heartbeats are bound to the exact GitHub Actions run ID;
-a different workflow run cannot renew that lease. Terminal reports from an expired
+seconds from claim onward. Heartbeats compare the supplied GitHub Actions run ID
+with the owner recorded at claim; requests supplying a different ID cannot renew
+that lease. The ID is self-reported: a holder of the shared bearer can impersonate
+a known ID, so this is not cryptographic proof of the workflow's identity.
+Terminal reports from an expired
 or mismatched lease are rejected. Lease expiry is deliberately **not** an automatic
 redispatch: the previous runner may have performed external work before it stopped,
 so recovery must inspect the job and its evidence before any retry.
@@ -108,6 +111,28 @@ the HTTP call times out after GitHub accepted it, Amodex cannot safely infer tha
 runner was created. Therefore the Control Plane **does not blindly redispatch** an
 ambiguous job. If the original GitHub runner actually started, it can still claim that
 same durable `job_id`.
+
+### R1 machine authentication and ownership
+
+In a private workspace deployment, only these exact POST routes can authenticate
+without the human session cookie:
+
+- `/v1/runner-jobs/{UUID}/claim`
+- `/v1/runner-jobs/{UUID}/running`
+- `/v1/runner-jobs/{UUID}/heartbeat`
+- `/v1/runner-jobs/{UUID}/report`
+
+All require the configured runner bearer in the Authorization header and an
+explicit `github_run_id`: query for claim, JSON for running/heartbeat/report.
+Running and report must match the claim owner and a valid lease. Normal reports
+cannot finish a job before claim. A human session alone is insufficient for
+these mutations; the runner bearer grants no access to the other private APIs.
+The four CLI commands require `--github-run-id`.
+
+Credential validation precedes identity/body validation on these machine paths:
+401 for missing/incorrect bearer, 503 for an unconfigured credential, and 422 for
+an invalid/missing identity after authentication. The bearer remains shared and
+is not scoped to a Job/Attempt. See the [R1 validation and residual limits](audits/RUNNER_AUTH_OWNERSHIP_R1_VALIDATION.md).
 
 ## 4. GitHub Actions disposable runner
 
@@ -277,8 +302,8 @@ accident.
 - runner jobs carry the same Environment/Session/Run/Project tuple durably;
 - cross-Environment dispatch fails closed;
 - ordinary Environment endpoints cannot write OWNER memory;
-- runner claim/report/heartbeat endpoints require a separate bearer credential;
-- runner heartbeat renewal is bound to the claiming GitHub Actions run ID;
+- runner claim/running/report/heartbeat endpoints require a separate bearer credential;
+- runner running/report/heartbeat require the same caller-supplied run ID recorded at claim; shared bearer holders are still mutually trusted;
 - lease expiry does not trigger blind retry or redispatch;
 - an ambiguous GitHub dispatch is not blindly retried;
 - Roblox Studio jobs are never sent to Linux Actions;
