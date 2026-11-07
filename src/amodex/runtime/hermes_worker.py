@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping
 
 from amodex.contracts.models import TaskPackage
+from amodex.tools.roblox_luau import RobloxLuauTestTool, TOOL_NAME as ROBLOX_TOOL_NAME
 from amodex.tools.scoped_workspace import (
     PathLease,
     ScopedContextCapsule,
@@ -147,6 +148,13 @@ def register_hermes_plugin(ctx: Any) -> None:
             "additionalProperties": False,
         },
     )
+    if ROBLOX_TOOL_NAME in bridge.expected_tool_names:
+        register_tool(
+            ROBLOX_TOOL_NAME,
+            "Analyze an authorized Luau file. remote=true consumes the supervisor's one-shot approval; never retry a submission.",
+            {"type": "object", "properties": {"path": {"type": "string"}, "remote": {"type": "boolean", "default": False}},
+             "required": ["path"], "additionalProperties": False},
+        )
 
 
 class HermesScopedWorker:
@@ -176,6 +184,7 @@ class HermesScopedWorker:
         model: str = "amodex-local-worker",
         worker_id: str = "hermes-scoped-worker",
         event_sink: Callable[[dict[str, Any]], None] | None = None,
+        roblox_tool: RobloxLuauTestTool | None = None,
     ) -> None:
         if task != tools.task:
             raise HermesWorkerError("Hermes worker TaskPackage differs from tool boundary TaskPackage")
@@ -188,8 +197,18 @@ class HermesScopedWorker:
         self.model = model
         self.worker_id = worker_id
         self.event_sink = event_sink
+        if roblox_tool is not None and roblox_tool.tools is not tools:
+            raise HermesWorkerError("Roblox tool must share the worker's task boundary")
+        self.roblox_tool = roblox_tool
         self._agent: Any | None = None
         self._leases: dict[str, PathLease] = {}
+
+    @property
+    def expected_tool_names(self) -> set[str]:
+        names = set(EXPECTED_TOOL_NAMES)
+        if self.roblox_tool is not None and self.roblox_tool.available:
+            names.add(ROBLOX_TOOL_NAME)
+        return names
 
     def _verify_hermes(self) -> None:
         completed = subprocess.run(
@@ -416,6 +435,14 @@ class HermesScopedWorker:
                     "stdout": completed.stdout,
                     "stderr": completed.stderr,
                 }
+            elif name == ROBLOX_TOOL_NAME:
+                if name not in self.expected_tool_names or self.roblox_tool is None:
+                    raise HermesToolInputError("Roblox tool is not authorized for this task")
+                if set(params) - {"path", "remote"} or type(params.get("remote", False)) is not bool:
+                    raise HermesToolInputError("Roblox arguments must be path and optional remote boolean")
+                result = {"tool": name, **self.roblox_tool.invoke(
+                    _required_string(params, "path"), remote=params.get("remote", False),
+                )}
             else:
                 raise HermesToolInputError(f"unknown Amodex tool: {name}")
             return json.dumps(result, sort_keys=True)
@@ -454,9 +481,9 @@ class HermesScopedWorker:
                 skip_tool_search_assembly=True,
             )
             names = self._tool_names(definitions)
-            if names != EXPECTED_TOOL_NAMES:
+            if names != self.expected_tool_names:
                 raise HermesWorkerError(
-                    f"Hermes scoped tool surface drift: expected {sorted(EXPECTED_TOOL_NAMES)}, observed {sorted(names)}"
+                    f"Hermes scoped tool surface drift: expected {sorted(self.expected_tool_names)}, observed {sorted(names)}"
                 )
 
             agent = AIAgent(
@@ -490,8 +517,12 @@ class HermesScopedWorker:
                 finally:
                     self._agent = None
                     self._release_leases()
+                    if self.roblox_tool is not None:
+                        self.roblox_tool.close()
 
     def interrupt(self, *, reason: str = "amodex_worker_cancelled") -> bool | None:
+        if self.roblox_tool is not None:
+            self.roblox_tool.revoke()
         agent = self._agent
         if agent is None:
             return False

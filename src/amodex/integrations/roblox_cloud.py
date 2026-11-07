@@ -74,6 +74,7 @@ class RobloxLuauClient:
 
     def __init__(self, *, target: RobloxCloudTarget, api_key: str,
                  http: httpx.Client | None = None,
+                 authorize_request: Callable[[], None] | None = None,
                  clock: Callable[[], float] = time.monotonic,
                  sleep: Callable[[float], None] = time.sleep):
         if not isinstance(api_key, str) or not api_key or not api_key.isascii() or any(c.isspace() or ord(c) < 33 for c in api_key):
@@ -82,6 +83,8 @@ class RobloxLuauClient:
         self._key = SecretStr(api_key)
         self._owns_http = http is None
         self._http = http or httpx.Client(timeout=10, follow_redirects=False)
+        self._authorize_request = authorize_request
+        self.last_http_status: int | None = None
         self._clock, self._sleep = clock, sleep
 
     def close(self) -> None:
@@ -103,6 +106,8 @@ class RobloxLuauClient:
 
     def _request(self, method: str, path: str, *, task_path: str | None = None,
                  timeout: float = 10, **kwargs: Any) -> dict[str, Any]:
+        if self._authorize_request is not None:
+            self._authorize_request()
         try:
             response = self._http.request(
                 method, self.BASE + path, headers={"x-api-key": self._key.get_secret_value()},
@@ -111,6 +116,7 @@ class RobloxLuauClient:
         except httpx.RequestError as exc:
             code = "HTTP_TIMEOUT" if isinstance(exc, httpx.TimeoutException) else "HTTP_TRANSPORT_ERROR"
             raise RobloxCloudError(code, ambiguous_outcome=True, task_path=task_path) from None
+        self.last_http_status = response.status_code
         if not response.is_success:
             code = {401: "UNAUTHENTICATED", 403: "PERMISSION_DENIED", 429: "RATE_LIMITED"}.get(response.status_code, "HTTP_ERROR")
             ambiguous = method == "GET" or response.status_code not in {400, 401, 403, 404, 409, 422, 429}
