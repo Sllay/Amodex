@@ -206,7 +206,10 @@ class PostgresEnvironmentProductRepository:
                 row = conn.execute(
                     """
                     UPDATE amodex_environment_runner_jobs
-                    SET state='CLAIMED', claimed_at=NOW(), updated_at=NOW(), github_run_id=COALESCE(%s,github_run_id)
+                    SET state='CLAIMED', claimed_at=NOW(), updated_at=NOW(),
+                        last_heartbeat_at=NOW(), lease_expires_at=NOW() + INTERVAL '2 minutes',
+                        heartbeat_count=heartbeat_count + 1,
+                        github_run_id=COALESCE(%s,github_run_id)
                     WHERE job_id=%s
                     RETURNING *
                     """,
@@ -235,11 +238,64 @@ class PostgresEnvironmentProductRepository:
         }
 
     def mark_running(self, *, job_id: str) -> RunnerJobRecord:
-        return self._transition(
-            job_id=job_id,
-            allowed={RunnerJobState.CLAIMED},
-            target=RunnerJobState.RUNNING,
-        )
+        with psycopg.connect(self._dsn, row_factory=dict_row) as conn:
+            with conn.transaction():
+                row = conn.execute(
+                    """
+                    UPDATE amodex_environment_runner_jobs
+                    SET state='RUNNING', updated_at=NOW(),
+                        last_heartbeat_at=NOW(), lease_expires_at=NOW() + INTERVAL '2 minutes',
+                        heartbeat_count=heartbeat_count + 1
+                    WHERE job_id=%s AND state='CLAIMED'
+                    RETURNING *
+                    """,
+                    (job_id,),
+                ).fetchone()
+                if row is None:
+                    exists = conn.execute(
+                        "SELECT state FROM amodex_environment_runner_jobs WHERE job_id=%s",
+                        (job_id,),
+                    ).fetchone()
+                    if exists is None:
+                        raise KeyError(job_id)
+                    raise EnvironmentStateError(
+                        "RUNNER_JOB_STATE_CONFLICT",
+                        f"{job_id}:{exists['state']}->RUNNING",
+                    )
+        return _runner_job_from_row(row)
+
+    def heartbeat_runner_job(
+        self, *, job_id: str, github_run_id: str
+    ) -> RunnerJobRecord:
+        with psycopg.connect(self._dsn, row_factory=dict_row) as conn:
+            with conn.transaction():
+                row = conn.execute(
+                    """
+                    UPDATE amodex_environment_runner_jobs
+                    SET last_heartbeat_at=NOW(),
+                        lease_expires_at=NOW() + INTERVAL '2 minutes',
+                        heartbeat_count=heartbeat_count + 1,
+                        updated_at=NOW()
+                    WHERE job_id=%s
+                      AND github_run_id=%s
+                      AND state IN ('CLAIMED','RUNNING')
+                      AND lease_expires_at > NOW()
+                    RETURNING *
+                    """,
+                    (job_id, github_run_id),
+                ).fetchone()
+                if row is None:
+                    current = conn.execute(
+                        "SELECT state,github_run_id,lease_expires_at FROM amodex_environment_runner_jobs WHERE job_id=%s",
+                        (job_id,),
+                    ).fetchone()
+                    if current is None:
+                        raise KeyError(job_id)
+                    raise EnvironmentStateError(
+                        "RUNNER_LEASE_LOST",
+                        f"{job_id}: state={current['state']} owner_matches={current['github_run_id'] == github_run_id}",
+                    )
+        return _runner_job_from_row(row)
 
     def report_runner_job(
         self,
@@ -275,7 +331,8 @@ class PostgresEnvironmentProductRepository:
                     """
                     UPDATE amodex_environment_runner_jobs
                     SET state=%s,summary=%s,result_commit=%s,
-                        github_run_id=COALESCE(%s,github_run_id),completed_at=NOW(),updated_at=NOW()
+                        github_run_id=COALESCE(%s,github_run_id),completed_at=NOW(),updated_at=NOW(),
+                        lease_expires_at=NULL
                     WHERE job_id=%s
                     RETURNING *
                     """,
@@ -387,4 +444,7 @@ def _runner_job_from_row(row: dict[str, Any]) -> RunnerJobRecord:
         updated_at=row["updated_at"],
         claimed_at=row["claimed_at"],
         completed_at=row["completed_at"],
+        last_heartbeat_at=row.get("last_heartbeat_at"),
+        lease_expires_at=row.get("lease_expires_at"),
+        heartbeat_count=int(row.get("heartbeat_count") or 0),
     )
