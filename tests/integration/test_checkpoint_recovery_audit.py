@@ -1,4 +1,4 @@
-"""CR-01/02 regressions and characterization of still-open CR-03 through CR-09.
+"""CR-01/02/04 regressions and characterization of still-open CR-03/05 through CR-09.
 
 Only loopback PostgreSQL, local Git fixtures and deterministic fakes are used.
 Passing characterization cases for other issues are not product approval.
@@ -242,15 +242,17 @@ def test_terminal_commit_and_audit_are_currently_separate_transactions(audit, mo
     assert client.post(path, json=body, headers=AUTH).status_code == 409
 
 
-def test_run_currently_accepts_expired_owner_until_another_claim_fences_it(audit):
+def test_run_rejects_expired_owner_before_and_after_takeover(audit):
     _, runs, _, _, _, _, run_id, *_ = audit
     old = runs.claim_next(worker_id="old-worker")
     assert old.run_id == run_id
     with psycopg.connect(runs.dsn) as conn:
         conn.execute("UPDATE amodex_runs SET lease_expires_at=NOW()-INTERVAL '1 second' WHERE run_id=%s", (run_id,))
-    accepted = runs.transition(run_id=run_id, worker_id="old-worker", fencing_token=old.fencing_token,
-                               state=RunState.RUNNING, kind=EventKind.PROVIDER_ADMITTED)
-    assert accepted.state == RunState.RUNNING
+    with pytest.raises(StaleLeaseError) as expired:
+        runs.transition(run_id=run_id, worker_id="old-worker", fencing_token=old.fencing_token,
+                        state=RunState.RUNNING, kind=EventKind.PROVIDER_ADMITTED)
+    assert expired.value.reason == "LEASE_EXPIRED"
+    assert runs.get_run(run_id).revision == old.revision
     replacement = runs.claim_next(worker_id="new-worker")
     assert replacement.fencing_token > old.fencing_token
     with pytest.raises(StaleLeaseError):
@@ -299,7 +301,7 @@ def test_run_event_failure_rolls_back_state_and_revision(audit, monkeypatch):
     assert runs.list_events(run_id) == before
 
 
-def test_stage1_currently_commits_response_after_lease_expired_during_call(audit):
+def test_stage1_rejects_response_after_lease_expired_during_call(audit):
     _, runs, _, _, _, _, run_id, *_ = audit
     class ExpiringProvider(DeterministicProvider):
         def generate(self, **kwargs):
@@ -307,9 +309,15 @@ def test_stage1_currently_commits_response_after_lease_expired_during_call(audit
             with psycopg.connect(runs.dsn) as conn:
                 conn.execute("UPDATE amodex_runs SET lease_expires_at=NOW()-INTERVAL '1 second' WHERE run_id=%s", (run_id,))
             return super().generate(**kwargs)
-    result = Stage1Worker(runs, ExpiringProvider(), ProviderGovernor.stage1_default(), "expired-worker").process_once()
-    assert result.state == RunState.COMPLETED
-    assert result.provider_request_state == ProviderRequestState.COMPLETED
+    with pytest.raises(StaleLeaseError) as expired:
+        Stage1Worker(runs, ExpiringProvider(), ProviderGovernor.stage1_default(), "expired-worker").process_once()
+    assert expired.value.reason == "LEASE_EXPIRED"
+    result = runs.get_run(run_id)
+    assert result.state == RunState.RUNNING
+    assert result.provider_request_state == ProviderRequestState.STARTED
+    assert result.result_text is None
+    fresh = Stage1Worker(runs, DeterministicProvider(), ProviderGovernor.stage1_default(), "replacement").process_once()
+    assert fresh.state == RunState.UNKNOWN_OUTCOME
 
 
 def test_checkpoint_view_is_mutable_projection_not_immutable_git_evidence(audit):
