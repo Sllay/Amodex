@@ -2,6 +2,27 @@
 
 Status: production deployment contract for the zero-cost V1.
 
+## Health and readiness
+
+The current repository configuration uses `healthCheckPath: /healthz` in
+`render.yaml`. This is a process **liveness** probe: it intentionally does not
+require PostgreSQL, providers or other external services. A liveness success
+does not prove the application can serve durable operations.
+
+Use `GET /readyz` separately for **readiness**: it checks database reachability,
+migration/schema checksums and the zero-cost policy, returning 503 when unready.
+The read-only `scripts/smoke_remote.py` checks both endpoints and can compare
+the published SHA using `--expect-sha`. Release identity must be read from the
+running application; a branch HEAD alone does not establish deployment.
+
+`docs/checkpoints/P0_ACTIVATION_V1.md` records an earlier candidate configured
+with `/readyz` as its Render health check. Its historical evidence is retained;
+that setting is superseded in the current repository by the liveness setting
+above. Deployment operators must still verify readiness before approving a
+release. This documentation update does not modify Render, credentials,
+environment variables, migrations or deploy settings, and does not confirm the
+current setting applied to a running remote service.
+
 ## Absolute database boundary
 
 The existing older Neon project is **out of scope**. Do not use, migrate, inspect, reset, branch, or write to it for Amodex.

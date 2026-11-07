@@ -2,6 +2,15 @@
 
 Status: **ACTIVATION_CANDIDATE_VALIDATED**
 
+> Historical checkpoint: the `/readyz` Render health-check setting described below
+> records the activation candidate at that time. The current `render.yaml` uses
+> `/healthz` for process liveness, as enforced by
+> `test_render_liveness_probe_remains_separate_from_database_readiness`.
+> `/readyz` remains the independent database/schema/zero-cost readiness gate;
+> a successful liveness response does not establish functional readiness.
+> See [the current deployment contract](../DEPLOY_RENDER_NEON_CLOUDINARY_V1.md#health-and-readiness).
+> This note preserves the earlier evidence and does not change any Render setting.
+
 ## Scope
 
 This checkpoint validates the P0 deployment/activation candidate without deploying it to production.
