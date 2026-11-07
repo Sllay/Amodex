@@ -17,7 +17,7 @@ def test_stability_layer_owns_final_send_and_preserves_structured_error_codes() 
     assert "x.body=body" in page
     assert "ctx.owner=owner;" in page
     assert "await runHooks('afterOwnerSaved',ctx);" in page
-    assert "void runHooks('afterSend',ctx).catch(runtimeError);" in page
+    assert "await runHooks('afterSend',ctx);" in page
     assert _STABILITY_SCRIPT.count("/messages`,{method:'POST'") == 1
 
 
