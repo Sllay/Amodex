@@ -581,7 +581,7 @@ def create_app(
     async def claim_runner_job(
         job_id: str,
         request: Request,
-        github_run_id: str | None = Query(default=None, max_length=100),
+        github_run_id: str = Query(..., min_length=1, max_length=100),
     ) -> RunnerClaimResponse:
         authorize_runner(request)
         try:
