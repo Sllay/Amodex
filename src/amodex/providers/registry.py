@@ -16,6 +16,7 @@ from .gemini import GeminiProvider
 from .groq import GroqProvider
 from .nvidia import NvidiaProvider
 from .openrouter import OpenRouterProvider
+from .timeouts import provider_timeout_for
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,7 +36,9 @@ class ProviderExecutionRegistry:
     def __init__(self, pools: tuple[CredentialPoolConfig, ...]) -> None:
         self._pools = {pool.pool_id: pool for pool in pools}
 
-    def client_for(self, candidate: ModelCandidate) -> ProviderClient:
+    def client_for(
+        self, candidate: ModelCandidate, *, operation: str = "chat"
+    ) -> ProviderClient:
         pool = self._pools.get(candidate.credential_pool_id)
         if pool is None or not pool.enabled:
             raise ProviderExecutionDenied("credential pool unavailable")
@@ -46,17 +49,21 @@ class ProviderExecutionRegistry:
         api_key = os.environ.get(pool.secret_env, "")
         if not api_key:
             raise ProviderExecutionDenied(f"secret reference {pool.secret_env} is unresolved")
+        timeout = provider_timeout_for(
+            provider=pool.provider, model=candidate.model, operation=operation
+        ).as_httpx_timeout()
         if pool.provider == "gemini":
-            return GeminiProvider(api_key=api_key)
+            return GeminiProvider(api_key=api_key, timeout=timeout)
         if pool.provider == "groq":
-            return GroqProvider(api_key=api_key)
+            return GroqProvider(api_key=api_key, timeout=timeout)
         if pool.provider == "openrouter":
             return OpenRouterProvider(
                 api_key=api_key,
+                timeout=timeout,
                 require_json_object=candidate.model != "openrouter/free",
             )
         if pool.provider == "nvidia":
-            return NvidiaProvider(api_key=api_key)
+            return NvidiaProvider(api_key=api_key, timeout=timeout)
         raise ProviderExecutionDenied(f"unsupported provider adapter: {pool.provider}")
 
 
