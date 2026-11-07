@@ -96,8 +96,11 @@ class RunnerJobRecord(ContractModel):
     updated_at: datetime
     claimed_at: datetime | None = None
     completed_at: datetime | None = None
+    last_heartbeat_at: datetime | None = None
+    lease_expires_at: datetime | None = None
+    heartbeat_count: int = Field(default=0, ge=0)
 
-    @field_validator("created_at", "updated_at", "claimed_at", "completed_at")
+    @field_validator("created_at", "updated_at", "claimed_at", "completed_at", "last_heartbeat_at", "lease_expires_at")
     @classmethod
     def normalize_datetime(cls, value: datetime | None, info):
         if value is None:
@@ -112,6 +115,11 @@ class RunnerClaimResponse(ContractModel):
     repo_url: str
     objective: str
     capabilities: tuple[str, ...]
+
+
+class RunnerHeartbeatRequest(ContractModel):
+    schema_version: int = 1
+    github_run_id: str = Field(min_length=1, max_length=100)
 
 
 class RunnerReportRequest(ContractModel):
