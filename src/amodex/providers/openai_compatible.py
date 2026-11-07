@@ -34,7 +34,7 @@ class OpenAICompatibleProvider:
         provider_name: str,
         base_url: str,
         api_key: str,
-        timeout_seconds: float = 45.0,
+        timeout_seconds: float = 45.0,\n        timeout: httpx.Timeout | None = None,
         require_json_object: bool = True,
         extra_headers: Mapping[str, str] | None = None,
         user_only_instructions: bool = False,
@@ -48,7 +48,7 @@ class OpenAICompatibleProvider:
         self.provider_name = provider_name
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
-        self._timeout_seconds = timeout_seconds
+        self._timeout_seconds = timeout if timeout is not None else timeout_seconds
         self._require_json_object = require_json_object
         self._extra_headers = dict(extra_headers or {})
         self._user_only_instructions = user_only_instructions
