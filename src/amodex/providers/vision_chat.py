@@ -66,7 +66,7 @@ def generate_json_vision_response(
     provider_name: str,
     base_url: str,
     api_key: str,
-    timeout_seconds: float,
+    timeout_seconds: float | httpx.Timeout,
     model: str,
     prompt: str,
     image_data: bytes,
