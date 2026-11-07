@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -22,7 +21,9 @@ from amodex.runtime.models import (
 
 
 class StaleLeaseError(RuntimeError):
-    pass
+    def __init__(self, message: str = "run lease authority rejected", *, reason: str = "STALE_LEASE"):
+        super().__init__(message)
+        self.reason = reason
 
 
 class ProviderIntentError(RuntimeError):
@@ -156,7 +157,7 @@ class PostgresRunRepository:
         return str(row[0]) if row else "ACTIVE"
 
     def claim_next(self, *, worker_id: str, lease_seconds: int = 30) -> RunRecord | None:
-        expires_at = datetime.now(timezone.utc) + timedelta(seconds=lease_seconds)
+        self._validate_lease_seconds(lease_seconds)
         with psycopg.connect(self._dsn, row_factory=dict_row) as conn:
             with conn.transaction():
                 with conn.cursor() as cur:
@@ -176,7 +177,7 @@ class PostgresRunRepository:
                             OR (
                                 state IN (%s, %s)
                                 AND lease_expires_at IS NOT NULL
-                                AND lease_expires_at < NOW()
+                                AND lease_expires_at <= clock_timestamp()
                             )
                         )
                         {control_filter}
@@ -205,7 +206,7 @@ class PostgresRunRepository:
                             event_seq=%s,
                             fencing_token=%s,
                             lease_owner=%s,
-                            lease_expires_at=%s,
+                            lease_expires_at=clock_timestamp()+make_interval(secs => %s),
                             updated_at=NOW()
                         WHERE run_id=%s
                         RETURNING *
@@ -216,7 +217,7 @@ class PostgresRunRepository:
                             seq,
                             fence,
                             worker_id,
-                            expires_at,
+                            lease_seconds,
                             row["run_id"],
                         ),
                     )
@@ -251,6 +252,8 @@ class PostgresRunRepository:
         release_lease: bool = False,
     ) -> RunRecord:
         payload = payload or {}
+        if state in {RunState.QUEUED, RunState.CLAIMED}:
+            raise ValueError("worker transitions cannot enqueue or claim runs")
         with psycopg.connect(self._dsn, row_factory=dict_row) as conn:
             with conn.transaction():
                 with conn.cursor() as cur:
@@ -275,7 +278,7 @@ class PostgresRunRepository:
                             lease_owner=%s,
                             lease_expires_at=%s,
                             updated_at=NOW()
-                        WHERE run_id=%s
+                        WHERE run_id=%s AND lease_expires_at > clock_timestamp()
                         RETURNING *
                         """,
                         (
@@ -292,7 +295,8 @@ class PostgresRunRepository:
                         ),
                     )
                     updated = cur.fetchone()
-                    assert updated is not None
+                    if updated is None:
+                        raise StaleLeaseError(reason="LEASE_EXPIRED")
                     self._insert_event(
                         cur,
                         run_id=run_id,
@@ -341,7 +345,7 @@ class PostgresRunRepository:
                             revision=%s,
                             event_seq=%s,
                             updated_at=NOW()
-                        WHERE run_id=%s
+                        WHERE run_id=%s AND lease_expires_at > clock_timestamp()
                         RETURNING *
                         """,
                         (
@@ -356,7 +360,8 @@ class PostgresRunRepository:
                         ),
                     )
                     updated = cur.fetchone()
-                    assert updated is not None
+                    if updated is None:
+                        raise StaleLeaseError(reason="LEASE_EXPIRED")
                     self._insert_event(
                         cur,
                         run_id=run_id,
@@ -408,7 +413,7 @@ class PostgresRunRepository:
                             revision=%s,
                             event_seq=%s,
                             updated_at=NOW()
-                        WHERE run_id=%s
+                        WHERE run_id=%s AND lease_expires_at > clock_timestamp()
                         RETURNING *
                         """,
                         (
@@ -422,7 +427,8 @@ class PostgresRunRepository:
                         ),
                     )
                     updated = cur.fetchone()
-                    assert updated is not None
+                    if updated is None:
+                        raise StaleLeaseError(reason="LEASE_EXPIRED")
                     self._insert_event(
                         cur,
                         run_id=run_id,
@@ -431,6 +437,11 @@ class PostgresRunRepository:
                         payload={"usage": response.usage.model_dump(mode="json")},
                     )
                     return _run_from_row(updated)
+
+    @staticmethod
+    def _validate_lease_seconds(lease_seconds: int) -> None:
+        if type(lease_seconds) is not int or not 1 <= lease_seconds <= 300:
+            raise ValueError("lease_seconds must be an integer between 1 and 300")
 
     @staticmethod
     def _column_exists(cur: psycopg.Cursor[Any], *, table: str, column: str) -> bool:
@@ -462,8 +473,18 @@ class PostgresRunRepository:
         row = cur.fetchone()
         if row is None:
             raise KeyError(run_id)
-        if row["lease_owner"] != worker_id or int(row["fencing_token"]) != fencing_token:
-            raise StaleLeaseError(f"stale worker lease for run {run_id}")
+        if row["lease_owner"] is None or row["lease_expires_at"] is None:
+            raise StaleLeaseError(reason="LEASE_MISSING")
+        if row["lease_owner"] != worker_id:
+            raise StaleLeaseError(reason="OWNER_MISMATCH")
+        if int(row["fencing_token"]) != fencing_token:
+            raise StaleLeaseError(reason="FENCING_MISMATCH")
+        # NOW() is transaction-start time; read the live DB clock *after* acquiring the row lock.
+        cur.execute("SELECT clock_timestamp() AS db_now")
+        if row["lease_expires_at"] <= cur.fetchone()["db_now"]:
+            raise StaleLeaseError(reason="LEASE_EXPIRED")
+        if row["state"] not in {RunState.CLAIMED.value, RunState.RUNNING.value}:
+            raise StaleLeaseError(reason="STATE_CONFLICT")
         return row
 
     @staticmethod
