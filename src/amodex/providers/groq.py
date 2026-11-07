@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import httpx
-
 from typing import Any
+
+import httpx
 
 from amodex.runtime.models import ProviderResponse
 from .openai_compatible import OpenAICompatibleProvider
