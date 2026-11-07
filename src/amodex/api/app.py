@@ -201,7 +201,7 @@ def create_app(
                     detail={
                         "code": "ENVIRONMENT_PRODUCT_SCHEMA_NOT_READY",
                         "message": "Environment runner schema has not been applied",
-                        "recovery": "apply migrations/postbaseline/0002_environment_product_runners.sql",
+                        "recovery": "apply migrations/postbaseline/0002_environment_product_runners.sql and 0004_environment_runner_leases.sql",
                     },
                 )
         except HTTPException:
