@@ -246,7 +246,7 @@ class PostgresEnvironmentProductRepository:
                     SET state='RUNNING', updated_at=NOW(),
                         last_heartbeat_at=NOW(), lease_expires_at=NOW() + INTERVAL '2 minutes',
                         heartbeat_count=heartbeat_count + 1
-                    WHERE job_id=%s AND state='CLAIMED'
+                    WHERE job_id=%s AND state='CLAIMED' AND lease_expires_at > NOW()
                     RETURNING *
                     """,
                     (job_id,),
