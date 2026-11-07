@@ -1,0 +1,89 @@
+{
+  "executed_at_utc": "2026-11-07T18:56:33.604328+00:00",
+  "branch": "fix/run-lease-fencing-r2a",
+  "base_commit": "e591b7d92f36f362f3b1bc82d4bd7f2b917b2af2",
+  "validated_commit": "c16fe85f005f807b2c15e9effc2dc86052cd4fc7",
+  "environment": "Python 3.13.5; pytest 9.0.2; PostgreSQL 17.11; loopback-only disposable amodex_qa_task05 and amodex_qa_task05_baseline; deterministic provider simulation",
+  "runs": {
+    "initial": {
+      "tests": 30,
+      "passed": 30,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "xfail": 0
+    },
+    "r2a": {
+      "tests": 84,
+      "passed": 84,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "xfail": 0
+    },
+    "regression": {
+      "tests": 472,
+      "passed": 464,
+      "failures": 8,
+      "errors": 0,
+      "skipped": 0,
+      "xfail": 0
+    },
+    "baseline-model-intelligence": {
+      "tests": 11,
+      "passed": 3,
+      "failures": 8,
+      "errors": 0,
+      "skipped": 0,
+      "xfail": 0
+    },
+    "final-contracts": {
+      "tests": 184,
+      "passed": 183,
+      "failures": 1,
+      "errors": 0,
+      "skipped": 0,
+      "xfail": 0
+    },
+    "final-contracts-restored": {
+      "tests": 184,
+      "passed": 184,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "xfail": 0
+    }
+  },
+  "unique_candidate_tests": 472,
+  "candidate_passed": 464,
+  "candidate_preexisting_failures": 8,
+  "baseline_failed_cases_match_candidate": true,
+  "preexisting_failed_cases": [
+    "tests.integration.test_postbaseline_model_intelligence::test_real_benchmark_contract_promotes_and_routes_without_fake_vision",
+    "tests.integration.test_postbaseline_model_intelligence::test_chat_primary_failure_uses_one_bounded_fallback_and_is_idempotent",
+    "tests.integration.test_postbaseline_model_intelligence::test_chat_prefers_measured_mistral_without_reordering_agent_leaderboard",
+    "tests.integration.test_postbaseline_model_intelligence::test_ambiguous_outcome_stops_without_blind_retry_or_fallback",
+    "tests.integration.test_postbaseline_model_intelligence::test_owner_manually_recovers_uncertain_reply_with_one_free_alternate",
+    "tests.integration.test_postbaseline_model_intelligence::test_manual_recovery_stays_blocked_without_another_measured_free_route",
+    "tests.integration.test_postbaseline_model_intelligence::test_manual_recovery_claim_is_atomic_and_cannot_replay_same_decision",
+    "tests.integration.test_postbaseline_model_intelligence::test_persistent_failures_auto_demote_without_auto_promoting_again"
+  ],
+  "notes": [
+    "R2A: 84 new tests (31 unit, 53 integration). R1: 47 workspace integration + 29 unit contracts pass.",
+    "Directed runs overlap the 472 candidate tests; do not sum their totals.",
+    "Baseline export of the exact R1 commit uses a separate disposable DB and PYTHONPATH; the same eight Model Intelligence failures reproduce without R2A changes.",
+    "Historical migration test drops amodex_schema_migrations; remigrate with the existing guarded migrator before rerunning readiness suites. The intermediate readiness failure is preserved.",
+    "CR-03/05/06/07/08/09 characterizations still reproduce gaps; their passing results are not security guarantees.",
+    "Live provider files excluded explicitly. No live inference, Render, Neon, merge, PR or deploy."
+  ],
+  "source_sha256": {
+    "src/amodex/storage/postgres.py": "cdd9f2a6f013391bca5cffd0a3b5b797714b11ee58e8d90074453cd6d8419d81",
+    "src/amodex/runtime/models.py": "2b26b67eb8e4cce044dc5cf4184f889bb687c7e5ec8aa3348c2854653f841fac",
+    "src/amodex/runtime/run_lease.py": "62f62e808f14ecda6dff532241a6d915e99ce8badb4d252373cc5222a79e13fe",
+    "src/amodex/runtime/worker.py": "06a7e70a61127e7930172e38c0a60f30707867ee4982faca5b546735d792f583",
+    "tests/integration/test_run_lease_fencing_r2a.py": "e4d60c701b182ba7d5853c75c1f717c939de5e67b69edd1969dba2b6a80c860a",
+    "tests/integration/test_checkpoint_recovery_audit.py": "0629f9d6f466e0a1234a1d32ffca3eea7f238802454ed9fe806fe819c8b4e834",
+    "tests/unit/test_run_lease_policy.py": "2bd3cbcecb8079b3a7b40e8932e7f40a56ce221d49c4e343d5446bdd7f31fe77",
+    ".github/workflows/stage1-runtime.yml": "e7f745afa22f83de72f13e24c8ad6137f6910afe809090b37d3b3d99876f378f"
+  }
+}

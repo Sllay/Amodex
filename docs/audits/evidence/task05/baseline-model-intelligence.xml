@@ -1,0 +1,32 @@
+<?xml version='1.0' encoding='utf-8'?>
+<testsuites name="pytest tests">
+  <testsuite name="pytest" errors="0" failures="8" skipped="0" tests="11" time="2.010" timestamp="2026-11-07T18:52:26.992214+00:00" hostname="e3ddbf25b387">
+    <testcase classname="tests.integration.test_postbaseline_model_intelligence" name="test_step4_schema_status_and_workspace_model_ui" time="0.546" />
+    <testcase classname="tests.integration.test_postbaseline_model_intelligence" name="test_real_benchmark_contract_promotes_and_routes_without_fake_vision" time="0.058">
+      <failure message="TypeError: FakeRegistry.client_for() got an unexpected keyword argument 'operation'">TypeError: FakeRegistry.client_for() got an unexpected keyword argument 'operation'</failure>
+    </testcase>
+    <testcase classname="tests.integration.test_postbaseline_model_intelligence" name="test_chat_primary_failure_uses_one_bounded_fallback_and_is_idempotent" time="0.045">
+      <failure message="TypeError: FakeRegistry.client_for() got an unexpected keyword argument 'operation'">TypeError: FakeRegistry.client_for() got an unexpected keyword argument 'operation'</failure>
+    </testcase>
+    <testcase classname="tests.integration.test_postbaseline_model_intelligence" name="test_chat_prefers_measured_mistral_without_reordering_agent_leaderboard" time="0.047">
+      <failure message="TypeError: FakeRegistry.client_for() got an unexpected keyword argument 'operation'">TypeError: FakeRegistry.client_for() got an unexpected keyword argument 'operation'</failure>
+    </testcase>
+    <testcase classname="tests.integration.test_postbaseline_model_intelligence" name="test_ambiguous_outcome_stops_without_blind_retry_or_fallback" time="0.042">
+      <failure message="TypeError: FakeRegistry.client_for() got an unexpected keyword argument 'operation'">TypeError: FakeRegistry.client_for() got an unexpected keyword argument 'operation'</failure>
+    </testcase>
+    <testcase classname="tests.integration.test_postbaseline_model_intelligence" name="test_owner_manually_recovers_uncertain_reply_with_one_free_alternate" time="0.043">
+      <failure message="TypeError: FakeRegistry.client_for() got an unexpected keyword argument 'operation'">TypeError: FakeRegistry.client_for() got an unexpected keyword argument 'operation'</failure>
+    </testcase>
+    <testcase classname="tests.integration.test_postbaseline_model_intelligence" name="test_manual_recovery_stays_blocked_without_another_measured_free_route" time="0.042">
+      <failure message="TypeError: FakeRegistry.client_for() got an unexpected keyword argument 'operation'">TypeError: FakeRegistry.client_for() got an unexpected keyword argument 'operation'</failure>
+    </testcase>
+    <testcase classname="tests.integration.test_postbaseline_model_intelligence" name="test_manual_recovery_claim_is_atomic_and_cannot_replay_same_decision" time="0.042">
+      <failure message="TypeError: FakeRegistry.client_for() got an unexpected keyword argument 'operation'">TypeError: FakeRegistry.client_for() got an unexpected keyword argument 'operation'</failure>
+    </testcase>
+    <testcase classname="tests.integration.test_postbaseline_model_intelligence" name="test_persistent_failures_auto_demote_without_auto_promoting_again" time="0.042">
+      <failure message="TypeError: FakeRegistry.client_for() got an unexpected keyword argument 'operation'">TypeError: FakeRegistry.client_for() got an unexpected keyword argument 'operation'</failure>
+    </testcase>
+    <testcase classname="tests.integration.test_postbaseline_model_intelligence" name="test_paid_route_benchmark_is_fail_closed_before_provider_call" time="0.045" />
+    <testcase classname="tests.integration.test_postbaseline_model_intelligence" name="test_step4_schema_has_no_raw_secret_or_binary_columns" time="0.001" />
+  </testsuite>
+</testsuites>
