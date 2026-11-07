@@ -15,18 +15,70 @@ WORKSPACE_HTML = r'''<!doctype html>
 <main class="main"><header class="topbar"><div class="row"><button class="mobile-menu" onclick="toggleSide()">☰</button><div><div id="chatTitle" class="title">Amodex Workspace</div><div id="workspaceTitle" class="muted">Selecione um projeto</div></div></div><div class="row"><span id="inferenceBadge" class="badge warn">AI gated</span><button class="mobile-context" onclick="toggleContext()">Contexto</button></div></header><section id="messages" class="chat"><div class="empty"><h1>Seu espaço de trabalho</h1><p>Crie um projeto, abra chats e organize ideias. Conversar não executa código: só um Environment autorizado pode criar Runs.</p></div></section><footer class="composer-wrap"><div class="composer"><textarea id="composer" placeholder="Converse, planeje ou prepare uma tarefa…" disabled></textarea><div class="composer-actions"><div class="left-actions"><button class="subtle" onclick="openMemoryModal()" title="Salvar como memória candidata">Memória</button><button class="subtle" onclick="openDraftModal()" title="Transformar texto em Execution Draft">Cozinhar</button></div><div class="right-actions"><select id="activeEnvironment" class="hide-mobile" style="width:180px"><option value="">Sem ambiente</option></select><button class="primary" onclick="sendMessage()">Enviar</button></div></div><div class="warning">Inferência da Amodex continua bloqueada até benchmark/promoção dos modelos. O chat não executa tarefas sozinho.</div></div></footer></main>
 <aside id="context" class="context"><div class="brand"><span>Contexto</span><button class="mobile-context" onclick="toggleContext()">✕</button></div><div class="section"><h3>Project Memory</h3><div id="memoryList"></div><button onclick="openMemoryModal()">＋ Memória candidata</button></div><div class="section"><h3>Execution Drafts</h3><div id="draftList"></div></div><div class="section"><h3>Ambientes vinculados</h3><div id="boundEnvironmentList"></div><button onclick="openBindEnvironmentModal()">Vincular ambiente</button></div><div class="section"><h3>Próximas camadas</h3><div class="context-card muted">Passo 2: GitHub/Roblox Connectors<br>Passo 3: arquivos, imagens e STT<br>Passo 4: Model Intelligence</div></div></aside>
 </div>
-<div id="workspaceModal" class="modal"><form class="dialog" onsubmit="createWorkspace(event)"><h2>Novo projeto</h2><label>Nome</label><input id="newWorkspaceName" required maxlength="160"><label>Descrição</label><textarea id="newWorkspaceDescription" maxlength="4000"></textarea><div class="actions"><button type="button" onclick="closeModal('workspaceModal')">Cancelar</button><button class="primary">Criar</button></div></form></div>
-<div id="chatModal" class="modal"><form class="dialog" onsubmit="createChat(event)"><h2>Novo chat</h2><label>Título</label><input id="newChatTitle" required maxlength="200"><label>Ambiente ativo (opcional)</label><select id="newChatEnvironment"><option value="">Nenhum</option></select><div class="actions"><button type="button" onclick="closeModal('chatModal')">Cancelar</button><button class="primary">Criar</button></div></form></div>
-<div id="memoryModal" class="modal"><form class="dialog" onsubmit="createMemory(event)"><h2>Memória candidata</h2><p class="muted">Nada vira memória canônica automaticamente. Você aprova depois.</p><label>Conteúdo</label><textarea id="memoryContent" required maxlength="100000"></textarea><label>Origem (opcional)</label><input id="memorySource" maxlength="1000" placeholder="chat: decisão de arquitetura"><div class="actions"><button type="button" onclick="closeModal('memoryModal')">Cancelar</button><button class="primary">Salvar candidata</button></div></form></div>
-<div id="draftModal" class="modal"><form class="dialog" onsubmit="createDraft(event)"><h2>Execution Draft</h2><p class="muted">Draft organiza a execução, mas não inicia Run automaticamente.</p><label>Título</label><input id="draftTitle" required maxlength="200"><label>Objetivo</label><textarea id="draftObjective" required maxlength="100000"></textarea><label>Instruções</label><textarea id="draftInstructions" required maxlength="200000"></textarea><label>Validação</label><textarea id="draftValidation" maxlength="100000"></textarea><label>Environment</label><select id="draftEnvironment"><option value="">Selecionar depois</option></select><div class="actions"><button type="button" onclick="closeModal('draftModal')">Cancelar</button><button class="primary">Criar draft</button></div></form></div>
-<div id="bindEnvironmentModal" class="modal"><form class="dialog" onsubmit="bindEnvironment(event)"><h2>Vincular Environment</h2><label>Environment existente</label><select id="bindEnvironmentSelect" required></select><label>Nome no projeto (opcional)</label><input id="bindEnvironmentLabel" maxlength="160"><div class="actions"><button type="button" onclick="closeModal('bindEnvironmentModal')">Cancelar</button><button class="primary">Vincular</button></div></form></div>
+<div id="workspaceModal" class="modal"><form class="dialog" role="dialog" aria-modal="true" aria-labelledby="workspaceModalTitle" onsubmit="createWorkspace(event)"><h2 id="workspaceModalTitle">Novo projeto</h2><label for="newWorkspaceName">Nome</label><input id="newWorkspaceName" required maxlength="160"><label for="newWorkspaceDescription">Descrição</label><textarea id="newWorkspaceDescription" maxlength="4000"></textarea><div class="actions"><button type="button" onclick="closeModal('workspaceModal')">Cancelar</button><button class="primary">Criar</button></div></form></div>
+<div id="chatModal" class="modal"><form class="dialog" role="dialog" aria-modal="true" aria-labelledby="chatModalTitle" onsubmit="createChat(event)"><h2 id="chatModalTitle">Novo chat</h2><label for="newChatTitle">Título</label><input id="newChatTitle" required maxlength="200"><label for="newChatEnvironment">Ambiente ativo (opcional)</label><select id="newChatEnvironment"><option value="">Nenhum</option></select><div class="actions"><button type="button" onclick="closeModal('chatModal')">Cancelar</button><button class="primary">Criar</button></div></form></div>
+<div id="memoryModal" class="modal"><form class="dialog" role="dialog" aria-modal="true" aria-labelledby="memoryModalTitle" onsubmit="createMemory(event)"><h2 id="memoryModalTitle">Memória candidata</h2><p class="muted">Nada vira memória canônica automaticamente. Você aprova depois.</p><label for="memoryContent">Conteúdo</label><textarea id="memoryContent" required maxlength="100000"></textarea><label for="memorySource">Origem (opcional)</label><input id="memorySource" maxlength="1000" placeholder="chat: decisão de arquitetura"><div class="actions"><button type="button" onclick="closeModal('memoryModal')">Cancelar</button><button class="primary">Salvar candidata</button></div></form></div>
+<div id="draftModal" class="modal"><form class="dialog" role="dialog" aria-modal="true" aria-labelledby="draftModalTitle" onsubmit="createDraft(event)"><h2 id="draftModalTitle">Execution Draft</h2><p class="muted">Draft organiza a execução, mas não inicia Run automaticamente.</p><label for="draftTitle">Título</label><input id="draftTitle" required maxlength="200"><label for="draftObjective">Objetivo</label><textarea id="draftObjective" required maxlength="100000"></textarea><label for="draftInstructions">Instruções</label><textarea id="draftInstructions" required maxlength="200000"></textarea><label for="draftValidation">Validação</label><textarea id="draftValidation" maxlength="100000"></textarea><label for="draftEnvironment">Environment</label><select id="draftEnvironment"><option value="">Selecionar depois</option></select><div class="actions"><button type="button" onclick="closeModal('draftModal')">Cancelar</button><button class="primary">Criar draft</button></div></form></div>
+<div id="bindEnvironmentModal" class="modal"><form class="dialog" role="dialog" aria-modal="true" aria-labelledby="bindEnvironmentModalTitle" onsubmit="bindEnvironment(event)"><h2 id="bindEnvironmentModalTitle">Vincular Environment</h2><label for="bindEnvironmentSelect">Environment existente</label><select id="bindEnvironmentSelect" required></select><label for="bindEnvironmentLabel">Nome no projeto (opcional)</label><input id="bindEnvironmentLabel" maxlength="160"><div class="actions"><button type="button" onclick="closeModal('bindEnvironmentModal')">Cancelar</button><button class="primary">Vincular</button></div></form></div>
 <div id="error" class="error"></div>
 <script>
 const state={workspaces:[],workspace:null,chats:[],chat:null,messages:[],memories:[],envBindings:[],allEnvironments:[],drafts:[]};
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 async function api(path,opt={}){const r=await fetch(path,{headers:{'content-type':'application/json',...(opt.headers||{})},...opt});let body=null;try{body=await r.json()}catch{}if(!r.ok){const d=body?.detail;throw new Error(d?.message||d?.code||(typeof d==='string'?d:null)||r.statusText)}return body}
 function err(e){const x=document.getElementById('error');x.textContent=e.message||e;x.style.display='block';clearTimeout(window.__err);window.__err=setTimeout(()=>x.style.display='none',5000)}
-function openModal(id){document.getElementById(id).classList.add('open')}function closeModal(id){document.getElementById(id).classList.remove('open')}function toggleSide(){side.classList.toggle('open')}function toggleContext(){context.classList.toggle('open')}
+const modalStack=[];
+function modalFocusables(modal){
+  return [...modal.querySelectorAll('button,input,select,textarea,a[href],[tabindex]')]
+    .filter(el=>el.tabIndex>=0&&!el.disabled&&!el.closest('[inert]')&&el.getClientRects().length&&getComputedStyle(el).visibility!=='hidden');
+}
+function focusModal(modal){
+  const dialog=modal.querySelector('.dialog');
+  dialog.tabIndex=-1;
+  (modalFocusables(modal)[0]||dialog).focus();
+}
+function openModal(id){
+  const modal=document.getElementById(id);
+  if(!modal)return;
+  if(modalStack.some(entry=>entry.modal===modal))return;
+  const entry={modal,opener:document.activeElement,wasInert:modal.inert,background:[]};
+  modal.inert=false;
+  modal.classList.add('open');
+  for(const el of document.body.children){
+    if(el===modal||['SCRIPT','STYLE'].includes(el.tagName))continue;
+    entry.background.push([el,el.inert]);
+    el.inert=true;
+  }
+  modalStack.push(entry);
+  focusModal(modal);
+}
+function closeModal(id){
+  const entry=modalStack.at(-1);
+  if(!entry||entry.modal.id!==id)return;
+  modalStack.pop();
+  entry.modal.classList.remove('open');
+  entry.modal.inert=entry.wasInert;
+  for(const [el,wasInert] of entry.background)el.inert=wasInert;
+  if(entry.opener?.isConnected&&!entry.opener.closest('[inert]')&&entry.opener.getClientRects().length)entry.opener.focus();
+  else if(modalStack.length)focusModal(modalStack.at(-1).modal);
+}
+document.addEventListener('keydown',event=>{
+  const entry=modalStack.at(-1);
+  if(!entry)return;
+  if(event.key==='Escape'){
+    event.preventDefault();event.stopPropagation();closeModal(entry.modal.id);return;
+  }
+  if(event.key!=='Tab')return;
+  const controls=modalFocusables(entry.modal),first=controls[0],last=controls.at(-1);
+  if(!first){event.preventDefault();focusModal(entry.modal);return}
+  if(!controls.includes(document.activeElement)||(event.shiftKey&&document.activeElement===first)||(!event.shiftKey&&document.activeElement===last)){
+    event.preventDefault();(event.shiftKey?last:first).focus();
+  }
+},true);
+document.addEventListener('focusin',event=>{
+  const modal=modalStack.at(-1)?.modal;
+  if(modal&&!modal.contains(event.target))focusModal(modal);
+});
+function toggleSide(){side.classList.toggle('open')}function toggleContext(){context.classList.toggle('open')}
 function openWorkspaceModal(){openModal('workspaceModal')}function openChatModal(){if(!state.workspace)return err(new Error('Crie ou selecione um projeto primeiro'));fillEnvironmentSelects();openModal('chatModal')}function openMemoryModal(){if(!state.workspace)return err(new Error('Selecione um projeto'));if(state.chat&&composer.value.trim()&&!memoryContent.value)memoryContent.value=composer.value.trim();openModal('memoryModal')}function openDraftModal(){if(!state.chat)return err(new Error('Selecione um chat'));const text=composer.value.trim();if(text){if(!draftObjective.value)draftObjective.value=text;if(!draftInstructions.value)draftInstructions.value=text}fillEnvironmentSelects();openModal('draftModal')}function openBindEnvironmentModal(){if(!state.workspace)return err(new Error('Selecione um projeto'));fillEnvironmentSelects();openModal('bindEnvironmentModal')}
 async function boot(){try{const [status,spaces,envs]=await Promise.all([api('/v1/workspace/status'),api('/v1/workspaces'),api('/v1/environments').catch(()=>[])]);statusBadge.textContent=status.workspace_schema_ready?'ready':'not ready';inferenceBadge.textContent=status.chat_inference==='GATED_BENCHMARK_PENDING'?'AI gated':'AI';state.workspaces=spaces;state.allEnvironments=envs;renderWorkspaces();if(spaces.length)await selectWorkspace(spaces[0].workspace_id)}catch(e){err(e)}}
 function renderWorkspaces(){workspaceList.innerHTML=state.workspaces.length?state.workspaces.map(w=>`<button class="item ${state.workspace?.workspace_id===w.workspace_id?'active':''}" onclick="selectWorkspace('${esc(w.workspace_id)}')"><strong>${esc(w.name)}</strong><small>${esc(w.description||w.workspace_id)}</small></button>`).join(''):'<div class="muted">Nenhum projeto ainda.</div>'}

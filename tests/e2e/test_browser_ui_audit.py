@@ -82,7 +82,6 @@ def test_context_control_fits_mobile_viewport(logged_in_page: Page, width: int, 
     assert box["x"] >= 0 and box["x"] + box["width"] <= width
 
 
-@pytest.mark.xfail(strict=True, reason="QA-02: project modal does not close with Escape")
 def test_project_modal_closes_with_escape(logged_in_page: Page) -> None:
     page = logged_in_page
     page.set_viewport_size({"width": 1440, "height": 900})
@@ -94,7 +93,6 @@ def test_project_modal_closes_with_escape(logged_in_page: Page) -> None:
     expect(page.locator("#newWorkspaceName")).not_to_be_visible(timeout=1000)
 
 
-@pytest.mark.xfail(strict=True, reason="QA-02: project modal lacks dialog semantics and initial focus")
 def test_project_modal_has_dialog_semantics_and_focus(logged_in_page: Page) -> None:
     page = logged_in_page
     page.set_viewport_size({"width": 1440, "height": 900})
@@ -102,6 +100,45 @@ def test_project_modal_has_dialog_semantics_and_focus(logged_in_page: Page) -> N
     page.locator(".project-hub button.primary").click()
     expect(page.get_by_role("dialog", name="Novo projeto")).to_be_visible(timeout=1000)
     expect(page.locator("#newWorkspaceName")).to_be_focused()
+
+
+@pytest.mark.parametrize("width,height", [(1440, 900), (414, 896)])
+@pytest.mark.parametrize("modal,title,field", [
+    ("workspaceModal", "Novo projeto", "newWorkspaceName"),
+    ("chatModal", "Novo chat", "newChatTitle"),
+    ("memoryModal", "Memória candidata", "memoryContent"),
+    ("draftModal", "Execution Draft", "draftTitle"),
+    ("bindEnvironmentModal", "Vincular Environment", "bindEnvironmentSelect"),
+])
+def test_shared_modal_keyboard_and_background_isolation(
+    logged_in_page: Page, width: int, height: int, modal: str, title: str, field: str,
+) -> None:
+    page = logged_in_page
+    page.set_viewport_size({"width": width, "height": height})
+    opener = page.locator(".topbar .mobile-menu") if width <= 700 else page.locator(".project-launch")
+    opener.focus()
+    # Exercise the real shared helper and markup without persisting test data.
+    page.evaluate("id => openModal(id)", modal)
+    dialog = page.get_by_role("dialog", name=title, exact=True)
+    expect(dialog).to_be_visible()
+    expect(dialog).to_have_attribute("aria-modal", "true")
+    expect(page.locator("#" + field)).to_be_focused()
+    expect(page.locator(".app")).to_have_attribute("inert", "")
+    page.keyboard.press("Shift+Tab")
+    expect(dialog.locator("button").last).to_be_focused()
+    page.keyboard.press("Tab")
+    expect(page.locator("#" + field)).to_be_focused()
+    # An attempted focus on the background must not escape the modal.
+    opener.evaluate("element => element.focus()")
+    expect(page.locator("#" + field)).to_be_focused()
+    assert dialog.evaluate("element => [...element.querySelectorAll('input,textarea,select')].every(field => field.labels.length > 0)")
+    page.keyboard.press("Escape")
+    expect(dialog).not_to_be_visible()
+    expect(opener).to_be_focused()
+    expect(page.locator(".app")).not_to_have_attribute("inert", "")
+    page.evaluate("id => openModal(id)", modal)
+    dialog.get_by_role("button", name="Cancelar", exact=True).click()
+    expect(opener).to_be_focused()
 
 
 def test_model_header_fits_small_mobile(logged_in_page: Page) -> None:
