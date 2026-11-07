@@ -311,12 +311,18 @@ class PostgresEnvironmentProductRepository:
         with psycopg.connect(self._dsn, row_factory=dict_row) as conn:
             with conn.transaction():
                 row = conn.execute(
-                    "SELECT state FROM amodex_environment_runner_jobs WHERE job_id=%s FOR UPDATE",
+                    "SELECT state,github_run_id,lease_expires_at FROM amodex_environment_runner_jobs WHERE job_id=%s FOR UPDATE",
                     (job_id,),
                 ).fetchone()
                 if row is None:
                     raise KeyError(job_id)
                 current = RunnerJobState(row["state"])
+                if github_run_id is not None and row["github_run_id"] != github_run_id:
+                    raise EnvironmentStateError("RUNNER_LEASE_OWNER_MISMATCH", job_id)
+                if current in {RunnerJobState.CLAIMED, RunnerJobState.RUNNING} and (
+                    row["lease_expires_at"] is None
+                ):
+                    raise EnvironmentStateError("RUNNER_LEASE_MISSING", job_id)
                 if current not in {
                     RunnerJobState.CLAIMED,
                     RunnerJobState.RUNNING,
