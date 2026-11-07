@@ -6,7 +6,7 @@ Base auditada: **`1ca72365a63c2134921de58224bc68f73add203e`**, HEAD remoto confi
 
 Escopo de escrita: novos testes de caracterização, este relatório e evidências. Produção, código de aplicação, migrations, workflows, dependências e branches anteriores permaneceram inalterados. Não houve deploy, integração de branches AMODEX, inferência real, redispatch externo ou acesso a banco Neon. Os testes Git trabalham exclusivamente com repositórios temporários locais, inclusive os merges que os testes existentes de promoção realizam em suas próprias fixtures.
 
-As quinze fontes solicitadas existem nessa revisão. Blob Git, último commit que tocou cada arquivo, SHA-256 e tamanho estão registrados no [manifesto de fontes](evidence/task03/source-manifest.json), junto de sete fontes complementares. Isso evita confundir código auditado com outra branch ou versão implantada.
+As quinze fontes solicitadas existem nessa revisão. Blob Git, último commit que tocou cada arquivo, SHA-256 e tamanho estão registrados no [manifesto de fontes](evidence/task03/source-manifest.json), junto das fontes complementares. Isso evita confundir código auditado com outra branch ou versão implantada.
 
 ## A. Fluxo real e relações atuais
 
@@ -67,6 +67,7 @@ As linhas pontilhadas são lacunas de composição, não ausência dos component
 | Run Events | PostgreSQL, `UNIQUE(run_id, seq)`, row lock, estado/revision/evento na mesma transação | Base do histórico canônico. Injeção de falha na gravação de evento reverte estado e revision |
 | Revision/fencing de Run | Token aumenta em claim/reclaim e bloqueia dono/token antigos após takeover | Preservar o mecanismo, acrescentar validação de expiração e vincular a attempts explícitos. Revision incrementada não equivale a CAS fornecido pelo caller |
 | Provider request intent | Estado NONE/STARTED/COMPLETED, chave e resposta duráveis por Run | Reutilizar classificação de ambiguidade; expandir para múltiplas operações por Task/Attempt, sem perder compatibilidade com o slot legado |
+| Decisões/attempts de Model Intelligence | Inspeção de `storage/model_intelligence.py` e migration 0006: decision ligada à mensagem owner com unicidade; attempts STARTED/terminal e request_key persistidos, únicos por decision/attempt_number | Preservar esse registro especializado do chat. Model-route attempt não é TaskPackage.attempt_id nem lease de execução; vincular receipts por referência, sem criar outro sistema de roteamento |
 | Lease de Runner Job | Row com owner, heartbeat, expiry; claim concorrente serializado | Reutilizar tabela e APIs. Acrescentar attempt/fence/revision e autenticação consistente; não considerar contagem de heartbeat como geração de autoridade |
 | TaskPackage | Contrato serializável e autoridade scoped | Persistir versão/hash e referências a Task/Attempt; não gerar um segundo pacote específico para cada engine |
 | DAG/OwnershipRegistry | Snapshot serializável; estados, contadores e leases em memória | Persistir plano e snapshot com controle de versão, mantendo o mesmo validador/orquestrador. Restore sozinho não revalida lease |
@@ -255,6 +256,7 @@ Project + Environment + Session
 
 - Run é agregado durável e superfície pública; suas events continuam canônicas.
 - Task é nó lógico do plano. Attempt é uma autorização concreta e não pode ser reaproveitada após perda definitiva. Job é o envelope de execução do Attempt, não o TaskPackage nem o checkpoint.
+- Attempts especializados de Model Intelligence continuam como tentativas de chamada/rota dentro de operações do Provider System. Não são renomeados para TaskAttempt nem usados como substituto de autorização do worker; mapear IDs e receipts sem duplicar sua seleção/contabilização.
 - Persistir o TaskPackage emitido, package revision, hash e vínculos Run/Task/Attempt. `github_run_id` + `GITHUB_RUN_ATTEMPT` identificam a execução externa; não substituem o UUID do Attempt ou seu fence.
 - Novo recovery gera novo attempt_id/job_id e fence maior. Reconcile da mesma chamada de dispatch não gera nova execução; só descobre/acknowledge o que já existe.
 - Boundaries de scope/capability continuam nos contratos comuns. Environment Adapter decide capacidades/provisionamento, Provider System decide rota/custo/transporte; nenhum deles vira uma segunda autoridade de scheduling.

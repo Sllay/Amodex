@@ -154,6 +154,20 @@
       "last_commit": "13a5d7039a23eef4d5d5ea20c71efb587bf51561",
       "sha256": "967acbb3aa2a48266255c4b497f5a3645d6c6dc35ee7cd9f33fdd66de877d69c",
       "lines": 265
+    },
+    {
+      "path": "src/amodex/storage/model_intelligence.py",
+      "blob": "77dc39d20d74fcb377045dfa3071b57c4b453846",
+      "last_commit": "857f26b59fac30539c8889b1608aa550b4651517",
+      "sha256": "3da3992891bbfd3af6447ea84fc2b0161d291366d8ea5e3c4a4e7f58dc063a3c",
+      "lines": 487
+    },
+    {
+      "path": "migrations/postbaseline/0006_model_intelligence.sql",
+      "blob": "e2de331da70a9dc5eca109067ac96d787f8ca398",
+      "last_commit": "a4f5ceb690f3ea77aa44fec412aa05ea24b56f7d",
+      "sha256": "9c5e6cc8b37191bb4b3de323372e964eb0d0f85f5f236b7f4f4065ae106acdd5",
+      "lines": 102
     }
   ]
 }
