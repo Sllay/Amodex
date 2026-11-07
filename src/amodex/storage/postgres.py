@@ -438,6 +438,42 @@ class PostgresRunRepository:
                     )
                     return _run_from_row(updated)
 
+    def renew_lease(
+        self, *, run_id: str, worker_id: str, fencing_token: int, lease_seconds: int = 30,
+    ) -> RunRecord:
+        """Extend current authority in an independent, bounded transaction; never resurrect it."""
+        self._validate_lease_seconds(lease_seconds)
+        with psycopg.connect(
+            self._dsn, row_factory=dict_row, connect_timeout=3,
+            options="-c statement_timeout=3000 -c lock_timeout=1000",
+            tcp_user_timeout=4000, keepalives_idle=2, keepalives_interval=1, keepalives_count=2,
+        ) as conn:
+            with conn.transaction():
+                with conn.cursor() as cur:
+                    row = self._lock_owned_run(
+                        cur, run_id=run_id, worker_id=worker_id, fencing_token=fencing_token,
+                    )
+                    seq = int(row["event_seq"]) + 1
+                    cur.execute(
+                        """
+                        UPDATE amodex_runs
+                        SET lease_expires_at=GREATEST(
+                                lease_expires_at, clock_timestamp()+make_interval(secs => %s)),
+                            revision=revision+1, event_seq=%s, updated_at=clock_timestamp()
+                        WHERE run_id=%s AND lease_expires_at > clock_timestamp()
+                        RETURNING *
+                        """,
+                        (lease_seconds, seq, run_id),
+                    )
+                    updated = cur.fetchone()
+                    if updated is None:
+                        raise StaleLeaseError(reason="LEASE_EXPIRED")
+                    self._insert_event(
+                        cur, run_id=run_id, seq=seq, kind=EventKind.LEASE_RENEWED,
+                        payload={"lease_seconds": lease_seconds, "fencing_token": fencing_token},
+                    )
+                    return _run_from_row(updated)
+
     @staticmethod
     def _validate_lease_seconds(lease_seconds: int) -> None:
         if type(lease_seconds) is not int or not 1 <= lease_seconds <= 300:
