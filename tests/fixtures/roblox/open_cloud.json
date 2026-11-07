@@ -1,0 +1,9 @@
+{
+  "path": "universes/123/places/456/versions/7/luau-execution-sessions/session-fixture/tasks/task-fixture",
+  "states": ["QUEUED", "PROCESSING", "COMPLETE"],
+  "output": {"results": [{"ok": true, "checks": 3, "score": 42}]},
+  "log_pages": [
+    {"luauExecutionSessionTaskLogs": [{"messages": ["AMODEX_LUAU_OK checks=3 score=42"]}], "nextPageToken": "fixture-page-2"},
+    {"luauExecutionSessionTaskLogs": [], "nextPageToken": ""}
+  ]
+}

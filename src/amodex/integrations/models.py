@@ -61,3 +61,26 @@ class EngineIntegrationAdapter(Protocol):
     def detect(self, repository_root: str) -> EngineIntegrationProfile | None:
         """Return a deterministic profile when the repository matches this adapter."""
         ...
+
+
+class VisualTestAdapter(Protocol):
+    """Future authorized visual session; observations include evidence references.
+
+    This interface grants no platform access and has no Roblox implementation yet.
+    """
+
+    def observe(self) -> dict[str, object]:
+        """Return observed facts and screenshot/evidence references."""
+        ...
+
+    def press(self, control: str, *, duration_seconds: float = 0.1) -> None:
+        """Press a bounded input in the explicitly authorized test session."""
+        ...
+
+    def wait(self, seconds: float) -> None:
+        """Wait a bounded duration without generating additional input."""
+        ...
+
+    def verify(self, expected: dict[str, object]) -> bool:
+        """Check expectations against observations; no proof from HTTP status alone."""
+        ...
