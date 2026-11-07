@@ -156,6 +156,9 @@ def test_godot_environment_dispatch_claim_report_usage_and_dashboard(environment
         assert denied.status_code == 401
 
         auth = {"authorization": "Bearer runner-test-secret"}
+        invalid_identity = client.post(f"/v1/runner-jobs/{job['job_id']}/claim", headers=auth)
+        assert invalid_identity.status_code == 422
+        assert environment_product.get_runner_job(job["job_id"]).state.value == "DISPATCHED"
         claimed = client.post(
             f"/v1/runner-jobs/{job['job_id']}/claim?github_run_id=12345",
             headers=auth,
@@ -167,7 +170,8 @@ def test_godot_environment_dispatch_claim_report_usage_and_dashboard(environment
         assert "godot.headless" in claim["capabilities"]
         assert "godot.mcp-headless" in claim["capabilities"]
 
-        running = client.post(f"/v1/runner-jobs/{job['job_id']}/running", headers=auth)
+        running = client.post(f"/v1/runner-jobs/{job['job_id']}/running", headers=auth,
+                              json={"github_run_id": "12345"})
         assert running.status_code == 200
         assert running.json()["state"] == "RUNNING"
 

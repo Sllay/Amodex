@@ -1,7 +1,7 @@
-"""Characterization, not approval: some assertions demonstrate current defects.
+"""CR-01/02 regressions and characterization of still-open CR-03 through CR-09.
 
 Only loopback PostgreSQL, local Git fixtures and deterministic fakes are used.
-No production behavior is changed by this audit.
+Passing characterization cases for other issues are not product approval.
 """
 from __future__ import annotations
 
@@ -84,17 +84,23 @@ def claim(client, job_id, owner="workflow-a"):
     return response
 
 
-def test_running_currently_has_no_owner_parameter(audit):
+def test_running_requires_the_claim_owner(audit):
     client, _, _, jobs, _, job_id, *_ = audit
     claim(client, job_id)
     assert client.post(f"/v1/runner-jobs/{job_id}/running").status_code == 401
-    # A holder of the shared runner token need not prove it is workflow-a.
     response = client.post(f"/v1/runner-jobs/{job_id}/running", headers=AUTH)
-    assert response.status_code == 200
+    assert response.status_code == 422
+    wrong = client.post(f"/v1/runner-jobs/{job_id}/running", headers=AUTH,
+                        json={"github_run_id": "other-workflow"})
+    assert wrong.status_code == 409
+    assert jobs.get_runner_job(job_id).state == RunnerJobState.CLAIMED
+    correct = client.post(f"/v1/runner-jobs/{job_id}/running", headers=AUTH,
+                          json={"github_run_id": "workflow-a"})
+    assert correct.status_code == 200
     assert jobs.get_runner_job(job_id).github_run_id == "workflow-a"
 
 
-def test_private_access_gate_currently_blocks_machine_claim_even_with_valid_runner_token(audit):
+def test_private_access_gate_allows_machine_claim_without_a_human_cookie(audit):
     _, runs, product, jobs, _, job_id, *_ = audit
     app = create_app(runs, product_repository=product, environment_product_repository=jobs,
                      runner_dispatcher=RecordingDispatcher(), runner_control_token=TOKEN)
@@ -102,17 +108,18 @@ def test_private_access_gate_currently_blocks_machine_claim_even_with_valid_runn
                                               session_ttl_seconds=3600))
     with TestClient(app, base_url="https://local-fixture.test") as machine:
         path = f"/v1/runner-jobs/{job_id}/claim?github_run_id=workflow-a"
-        blocked = machine.post(path, headers=AUTH)
-        assert blocked.status_code == 401
-        assert blocked.json()["detail"] == "Amodex access passcode required"
-        assert jobs.get_runner_job(job_id).state == RunnerJobState.DISPATCHED
-        # Adding the synthetic owner session proves the request reaches the
-        # separate runner bearer check. Actual workflows never acquire it.
+        assert machine.get("/v1/projects", headers=AUTH).status_code == 401
+        accepted = machine.post(path, headers=AUTH)
+        assert accepted.status_code == 200
+        assert not machine.cookies
+        assert jobs.get_runner_job(job_id).state == RunnerJobState.CLAIMED
+        assert machine.get("/v1/projects", headers=AUTH).status_code == 401
         assert machine.post("/auth/passcode", data={"passcode": "246810"}).status_code == 200
-        assert machine.post(path, headers=AUTH).status_code == 200
+        assert machine.get("/v1/projects").status_code == 200
+        assert machine.post(f"/v1/runner-jobs/{job_id}/running", json={"github_run_id": "workflow-a"}).status_code == 401
 
 
-def test_omitted_terminal_identity_currently_bypasses_owner_check_and_does_not_complete_run(audit):
+def test_terminal_identity_is_required_while_job_and_run_remain_separate(audit):
     client, runs, _, jobs, _, job_id, run_id, *_ = audit
     claim(client, job_id)
     path = f"/v1/runner-jobs/{job_id}/report"
@@ -120,7 +127,10 @@ def test_omitted_terminal_identity_currently_bypasses_owner_check_and_does_not_c
     wrong = client.post(path, json={**body, "github_run_id": "other-workflow"}, headers=AUTH)
     assert wrong.status_code == 409
     assert wrong.json()["detail"]["code"] == "RUNNER_LEASE_OWNER_MISMATCH"
-    accepted = client.post(path, json=body, headers=AUTH)
+    omitted = client.post(path, json=body, headers=AUTH)
+    assert omitted.status_code == 422
+    assert jobs.get_runner_job(job_id).state == RunnerJobState.CLAIMED
+    accepted = client.post(path, json={**body, "github_run_id": "workflow-a"}, headers=AUTH)
     assert accepted.status_code == 200
     assert jobs.get_runner_job(job_id).state == RunnerJobState.COMPLETED
     assert accepted.json()["result_commit"] is None  # No validation evidence is required.
@@ -129,11 +139,17 @@ def test_omitted_terminal_identity_currently_bypasses_owner_check_and_does_not_c
 
 
 @pytest.mark.parametrize("state", ["COMPLETED", "FAILED", "CANCELLED"])
-def test_unclaimed_dispatched_job_currently_accepts_identityless_terminal_report(audit, state):
+@pytest.mark.parametrize("phase", ["DISPATCHED", "DISPATCH_UNKNOWN"])
+def test_unclaimed_job_rejects_normal_runner_terminal_reports(audit, state, phase):
     client, _, _, jobs, _, job_id, *_ = audit
+    if phase == "DISPATCH_UNKNOWN":
+        with psycopg.connect(jobs.dsn) as conn:
+            conn.execute("UPDATE amodex_environment_runner_jobs SET state=%s WHERE job_id=%s", (phase, job_id))
     response = client.post(f"/v1/runner-jobs/{job_id}/report", headers=AUTH,
-                           json={"state": state, "summary": "synthetic pre-claim report"})
-    assert response.status_code == 200
+                           json={"state": state, "summary": "synthetic pre-claim report", "github_run_id": "workflow-a"})
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "RUNNER_JOB_TERMINAL_CONFLICT"
+    assert jobs.get_runner_job(job_id).state.value == phase
     assert jobs.get_runner_job(job_id).claimed_at is None
 
 
@@ -143,12 +159,14 @@ def test_expired_runner_lease_rejects_renewal_running_and_report_without_reclaim
     expire(jobs, job_id)
     assert client.post(f"/v1/runner-jobs/{job_id}/heartbeat", headers=AUTH,
                        json={"github_run_id": "workflow-a"}).status_code == 409
-    assert client.post(f"/v1/runner-jobs/{job_id}/running", headers=AUTH).status_code == 409
+    assert client.post(f"/v1/runner-jobs/{job_id}/running", headers=AUTH,
+                       json={"github_run_id": "workflow-a"}).status_code == 409
     for owner in ["workflow-a", None]:
         response = client.post(f"/v1/runner-jobs/{job_id}/report", headers=AUTH,
                                json={"state": "COMPLETED", "summary": "late", "github_run_id": owner})
-        assert response.status_code == 409
-        assert response.json()["detail"]["code"] == "RUNNER_LEASE_LOST"
+        assert response.status_code == (409 if owner is not None else 422)
+        if owner is not None:
+            assert response.json()["detail"]["code"] == "RUNNER_LEASE_LOST"
     assert client.post(f"/v1/runner-jobs/{job_id}/claim", headers=AUTH,
                        params={"github_run_id": "replacement"}).status_code == 409
     assert jobs.get_runner_job(job_id).state == RunnerJobState.CLAIMED
