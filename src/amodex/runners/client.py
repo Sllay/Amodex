@@ -16,6 +16,8 @@ from typing import Any
 
 import httpx
 
+from amodex.environments.product import require_github_run_id
+
 
 class RunnerClientError(RuntimeError):
     pass
@@ -64,17 +66,18 @@ class RunnerControlClient:
         return body
 
     def claim(self, *, job_id: str, github_run_id: str) -> dict[str, Any]:
-        params = {"github_run_id": github_run_id} if github_run_id else None
+        params = {"github_run_id": require_github_run_id(github_run_id)}
         return self._request("POST", f"/v1/runner-jobs/{job_id}/claim", params=params)
 
-    def running(self, *, job_id: str) -> dict[str, Any]:
-        return self._request("POST", f"/v1/runner-jobs/{job_id}/running")
+    def running(self, *, job_id: str, github_run_id: str) -> dict[str, Any]:
+        return self._request("POST", f"/v1/runner-jobs/{job_id}/running",
+                             payload={"github_run_id": require_github_run_id(github_run_id)})
 
     def heartbeat(self, *, job_id: str, github_run_id: str) -> dict[str, Any]:
         return self._request(
             "POST",
             f"/v1/runner-jobs/{job_id}/heartbeat",
-            payload={"github_run_id": github_run_id},
+            payload={"github_run_id": require_github_run_id(github_run_id)},
         )
 
     def report(
@@ -84,7 +87,7 @@ class RunnerControlClient:
         state: str,
         summary: str,
         result_commit: str | None = None,
-        github_run_id: str | None = None,
+        github_run_id: str,
         evidence: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return self._request(
@@ -94,7 +97,7 @@ class RunnerControlClient:
                 "state": state,
                 "summary": summary,
                 "result_commit": result_commit,
-                "github_run_id": github_run_id,
+                "github_run_id": require_github_run_id(github_run_id),
                 "evidence": evidence or {},
             },
         )
@@ -118,6 +121,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     running = sub.add_parser("running")
     running.add_argument("job_id")
+    running.add_argument("--github-run-id", required=True)
 
     heartbeat = sub.add_parser("heartbeat")
     heartbeat.add_argument("job_id")
@@ -128,7 +132,7 @@ def build_parser() -> argparse.ArgumentParser:
     report.add_argument("--state", choices=("COMPLETED", "FAILED", "CANCELLED"), required=True)
     report.add_argument("--summary", required=True)
     report.add_argument("--result-commit")
-    report.add_argument("--github-run-id")
+    report.add_argument("--github-run-id", required=True)
     report.add_argument("--evidence-json")
     return parser
 
@@ -145,7 +149,7 @@ def main(argv: list[str] | None = None) -> None:
                     encoding="utf-8",
                 )
         elif args.command == "running":
-            result = client.running(job_id=args.job_id)
+            result = client.running(job_id=args.job_id, github_run_id=args.github_run_id)
         elif args.command == "heartbeat":
             result = client.heartbeat(job_id=args.job_id, github_run_id=args.github_run_id)
         else:

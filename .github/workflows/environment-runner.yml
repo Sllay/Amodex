@@ -61,6 +61,7 @@ jobs:
           env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --frozen \
             python -m amodex.runners.client claim "$AMODEX_JOB_ID" \
               --github-run-id "$GITHUB_RUN_ID" --output "$CLAIM"
+          echo "RUNNER_JOB_CLAIMED=true" >> "$GITHUB_ENV"
           python3 - "$CLAIM" "$GITHUB_ENV" <<'PY'
           import json, re, sys
           body=json.load(open(sys.argv[1],encoding='utf-8'))
@@ -133,7 +134,8 @@ jobs:
         run: |
           set -euo pipefail
           env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --frozen \
-            python -m amodex.runners.client running "$AMODEX_JOB_ID"
+            python -m amodex.runners.client running "$AMODEX_JOB_ID" \
+              --github-run-id "$GITHUB_RUN_ID"
 
       - name: Install Godot and Node only for Godot Environments
         if: ${{ env.TARGET_ENGINE == 'godot' }}
@@ -236,7 +238,7 @@ jobs:
               --evidence-json "$RUNNER_TEMP/evidence.json"
 
       - name: Report runner failure
-        if: ${{ failure() }}
+        if: ${{ failure() && env.RUNNER_JOB_CLAIMED == 'true' }}
         continue-on-error: true
         shell: bash
         run: |

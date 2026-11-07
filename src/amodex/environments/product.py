@@ -117,17 +117,33 @@ class RunnerClaimResponse(ContractModel):
     capabilities: tuple[str, ...]
 
 
-class RunnerJobHeartbeatRequest(ContractModel):
+def require_github_run_id(value: str) -> str:
+    """An opaque caller-supplied workflow ID, never a cryptographic identity."""
+    if (not isinstance(value, str) or not 1 <= len(value) <= 100
+            or not value.isprintable() or any(char.isspace() for char in value)):
+        raise ValueError("github_run_id must be 1-100 printable characters without whitespace")
+    return value
+
+
+class RunnerJobIdentityRequest(ContractModel):
     schema_version: int = 1
     github_run_id: str = Field(min_length=1, max_length=100)
 
+    @field_validator("github_run_id")
+    @classmethod
+    def workflow_identity(cls, value: str) -> str:
+        return require_github_run_id(value)
 
-class RunnerReportRequest(ContractModel):
+
+class RunnerJobHeartbeatRequest(RunnerJobIdentityRequest):
+    pass
+
+
+class RunnerReportRequest(RunnerJobIdentityRequest):
     schema_version: int = 1
     state: RunnerJobState
     summary: str = Field(min_length=1, max_length=4000)
     result_commit: str | None = Field(default=None, pattern=r"^[0-9a-f]{40}$")
-    github_run_id: str | None = Field(default=None, max_length=100)
     evidence: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("state")

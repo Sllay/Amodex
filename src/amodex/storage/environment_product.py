@@ -16,6 +16,7 @@ from amodex.environments.product import (
     UsageProjection,
     capabilities_for_engine,
     runner_kind_for_engine,
+    require_github_run_id,
 )
 from amodex.providers.budget import TaskBudgetClass
 from amodex.storage.environment import EnvironmentStateError
@@ -196,7 +197,8 @@ class PostgresEnvironmentProductRepository:
         assert updated is not None
         return _runner_job_from_row(updated)
 
-    def claim_runner_job(self, *, job_id: str, github_run_id: str | None = None) -> dict[str, Any]:
+    def claim_runner_job(self, *, job_id: str, github_run_id: str) -> dict[str, Any]:
+        require_github_run_id(github_run_id)
         with psycopg.connect(self._dsn, row_factory=dict_row) as conn:
             with conn.transaction():
                 row = conn.execute(
@@ -246,7 +248,8 @@ class PostgresEnvironmentProductRepository:
             "capabilities": capabilities_for_engine(job.engine),
         }
 
-    def mark_running(self, *, job_id: str) -> RunnerJobRecord:
+    def mark_running(self, *, job_id: str, github_run_id: str) -> RunnerJobRecord:
+        require_github_run_id(github_run_id)
         with psycopg.connect(self._dsn, row_factory=dict_row) as conn:
             with conn.transaction():
                 row = conn.execute(
@@ -255,18 +258,21 @@ class PostgresEnvironmentProductRepository:
                     SET state='RUNNING', updated_at=NOW(),
                         last_heartbeat_at=NOW(), lease_expires_at=NOW() + INTERVAL '2 minutes',
                         heartbeat_count=heartbeat_count + 1
-                    WHERE job_id=%s AND state='CLAIMED' AND lease_expires_at > NOW()
+                    WHERE job_id=%s AND github_run_id=%s
+                      AND state='CLAIMED' AND lease_expires_at > NOW()
                     RETURNING *
                     """,
-                    (job_id,),
+                    (job_id, github_run_id),
                 ).fetchone()
                 if row is None:
                     exists = conn.execute(
-                        "SELECT state FROM amodex_environment_runner_jobs WHERE job_id=%s",
+                        "SELECT state,github_run_id FROM amodex_environment_runner_jobs WHERE job_id=%s",
                         (job_id,),
                     ).fetchone()
                     if exists is None:
                         raise KeyError(job_id)
+                    if exists["github_run_id"] != github_run_id:
+                        raise EnvironmentStateError("RUNNER_LEASE_OWNER_MISMATCH", job_id)
                     raise EnvironmentStateError(
                         "RUNNER_JOB_STATE_CONFLICT",
                         f"{job_id}:{exists['state']}->RUNNING",
@@ -276,6 +282,7 @@ class PostgresEnvironmentProductRepository:
     def heartbeat_runner_job(
         self, *, job_id: str, github_run_id: str
     ) -> RunnerJobRecord:
+        require_github_run_id(github_run_id)
         with psycopg.connect(self._dsn, row_factory=dict_row) as conn:
             with conn.transaction():
                 row = conn.execute(
@@ -313,8 +320,9 @@ class PostgresEnvironmentProductRepository:
         state: RunnerJobState,
         summary: str,
         result_commit: str | None,
-        github_run_id: str | None,
+        github_run_id: str,
     ) -> RunnerJobRecord:
+        require_github_run_id(github_run_id)
         if state not in {RunnerJobState.COMPLETED, RunnerJobState.FAILED, RunnerJobState.CANCELLED}:
             raise ValueError("terminal runner state required")
         with psycopg.connect(self._dsn, row_factory=dict_row) as conn:
@@ -326,23 +334,20 @@ class PostgresEnvironmentProductRepository:
                 if row is None:
                     raise KeyError(job_id)
                 current = RunnerJobState(row["state"])
-                if github_run_id is not None and row["github_run_id"] != github_run_id:
-                    raise EnvironmentStateError("RUNNER_LEASE_OWNER_MISMATCH", job_id)
-                if current in {RunnerJobState.CLAIMED, RunnerJobState.RUNNING}:
-                    if row["lease_expires_at"] is None:
-                        raise EnvironmentStateError("RUNNER_LEASE_MISSING", job_id)
-                    if row["lease_expired"]:
-                        raise EnvironmentStateError("RUNNER_LEASE_LOST", job_id)
                 if current not in {
                     RunnerJobState.CLAIMED,
                     RunnerJobState.RUNNING,
-                    RunnerJobState.DISPATCHED,
-                    RunnerJobState.DISPATCH_UNKNOWN,
                 }:
                     raise EnvironmentStateError(
                         "RUNNER_JOB_TERMINAL_CONFLICT",
                         f"{job_id}:{current.value}",
                     )
+                if row["github_run_id"] != github_run_id:
+                    raise EnvironmentStateError("RUNNER_LEASE_OWNER_MISMATCH", job_id)
+                if row["lease_expires_at"] is None:
+                    raise EnvironmentStateError("RUNNER_LEASE_MISSING", job_id)
+                if row["lease_expired"]:
+                    raise EnvironmentStateError("RUNNER_LEASE_LOST", job_id)
                 updated = conn.execute(
                     """
                     UPDATE amodex_environment_runner_jobs

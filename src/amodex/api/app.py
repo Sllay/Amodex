@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import asyncio
-import hmac
 import os
 import re
 from collections.abc import Callable
 from dataclasses import asdict
 from datetime import datetime, timezone
+from typing import Annotated
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from pydantic import AfterValidator
+
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import HTMLResponse
 
@@ -22,6 +24,8 @@ from amodex.environments.product import (
     RunnerClaimResponse,
     RunnerDispatchRequest,
     RunnerJobHeartbeatRequest,
+    RunnerJobIdentityRequest,
+    require_github_run_id,
     RunnerJobRecord,
     RunnerJobState,
     RunnerKind,
@@ -50,6 +54,7 @@ from amodex.storage.environment_product import PostgresEnvironmentProductReposit
 from amodex.storage.postgres import PostgresRunRepository
 from amodex.storage.product import PostgresProductRepository, ProductStateError
 from .web import DASHBOARD_HTML
+from .runner_auth import install_runner_authorization
 
 RepositoryResolver = Callable[[Request], PostgresRunRepository]
 _SECRET_REF_RE = re.compile(r"^env://([A-Z][A-Z0-9_]*)$")
@@ -115,6 +120,7 @@ def create_app(
 
     db_lock = asyncio.Lock() if serialize_db else None
     app = FastAPI(title="Amodex Control Plane", version=_RELEASE)
+    runner_authority = install_runner_authorization(app, runner_control_token)
 
     def resolve_repository(request: Request) -> PostgresRunRepository:
         if repository_resolver is not None:
@@ -209,20 +215,6 @@ def create_app(
         except Exception as exc:
             raise HTTPException(status_code=503, detail="environment product database unavailable") from exc
         return environment_product_repository
-
-    def authorize_runner(request: Request) -> None:
-        if not runner_control_token:
-            raise HTTPException(
-                status_code=503,
-                detail={
-                    "code": "RUNNER_AUTH_NOT_CONFIGURED",
-                    "message": "AMODEX_RUNNER_CONTROL_TOKEN is not configured",
-                },
-            )
-        supplied = request.headers.get("authorization", "")
-        expected = f"Bearer {runner_control_token}"
-        if not hmac.compare_digest(supplied, expected):
-            raise HTTPException(status_code=401, detail="invalid runner authorization")
 
     def environment_error(exc: Exception) -> HTTPException:
         if isinstance(exc, KeyError):
@@ -577,13 +569,13 @@ def create_app(
             raise HTTPException(status_code=404, detail="runner job not found")
         return item
 
-    @app.post("/v1/runner-jobs/{job_id}/claim", response_model=RunnerClaimResponse)
+    @app.post("/v1/runner-jobs/{job_id}/claim", response_model=RunnerClaimResponse,
+              dependencies=[Depends(runner_authority.require)])
     async def claim_runner_job(
         job_id: str,
         request: Request,
-        github_run_id: str = Query(..., min_length=1, max_length=100),
+        github_run_id: Annotated[str, Query(min_length=1, max_length=100), AfterValidator(require_github_run_id)],
     ) -> RunnerClaimResponse:
-        authorize_runner(request)
         try:
             payload = environment_product().claim_runner_job(
                 job_id=job_id,
@@ -600,21 +592,21 @@ def create_app(
         )
         return RunnerClaimResponse(**payload)
 
-    @app.post("/v1/runner-jobs/{job_id}/running", response_model=RunnerJobRecord)
-    async def mark_runner_job_running(job_id: str, request: Request) -> RunnerJobRecord:
-        authorize_runner(request)
+    @app.post("/v1/runner-jobs/{job_id}/running", response_model=RunnerJobRecord,
+              dependencies=[Depends(runner_authority.require)])
+    async def mark_runner_job_running(job_id: str, body: RunnerJobIdentityRequest) -> RunnerJobRecord:
         try:
-            return environment_product().mark_running(job_id=job_id)
+            return environment_product().mark_running(job_id=job_id, github_run_id=body.github_run_id)
         except (KeyError, EnvironmentStateError) as exc:
             raise environment_error(exc) from exc
 
-    @app.post("/v1/runner-jobs/{job_id}/heartbeat", response_model=RunnerJobRecord)
+    @app.post("/v1/runner-jobs/{job_id}/heartbeat", response_model=RunnerJobRecord,
+              dependencies=[Depends(runner_authority.require)])
     async def heartbeat_runner_job(
         job_id: str,
         body: RunnerJobHeartbeatRequest,
         request: Request,
     ) -> RunnerJobRecord:
-        authorize_runner(request)
         try:
             return environment_product().heartbeat_runner_job(
                 job_id=job_id,
@@ -623,13 +615,13 @@ def create_app(
         except (KeyError, EnvironmentStateError) as exc:
             raise environment_error(exc) from exc
 
-    @app.post("/v1/runner-jobs/{job_id}/report", response_model=RunnerJobRecord)
+    @app.post("/v1/runner-jobs/{job_id}/report", response_model=RunnerJobRecord,
+              dependencies=[Depends(runner_authority.require)])
     async def report_runner_job(
         job_id: str,
         body: RunnerReportRequest,
         request: Request,
     ) -> RunnerJobRecord:
-        authorize_runner(request)
         try:
             item = environment_product().report_runner_job(
                 job_id=job_id,
