@@ -71,7 +71,6 @@ def test_missing_session_requires_login_again(logged_in_page: Page) -> None:
 
 
 @pytest.mark.parametrize("width,height", [(414, 896), (390, 844)])
-@pytest.mark.xfail(strict=True, reason="QA-01: Contexto control is clipped outside the mobile viewport")
 def test_context_control_fits_mobile_viewport(logged_in_page: Page, width: int, height: int) -> None:
     page = logged_in_page
     page.set_viewport_size({"width": width, "height": height})
@@ -105,7 +104,6 @@ def test_project_modal_has_dialog_semantics_and_focus(logged_in_page: Page) -> N
     expect(page.locator("#newWorkspaceName")).to_be_focused()
 
 
-@pytest.mark.xfail(strict=True, reason="QA-03: Model Intelligence header overflows at 390 pixels")
 def test_model_header_fits_small_mobile(logged_in_page: Page) -> None:
     page = logged_in_page
     page.set_viewport_size({"width": 390, "height": 844})
