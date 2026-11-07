@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+from urllib.parse import urlparse
 
 import pytest
 from playwright.sync_api import Page, expect
@@ -9,6 +10,22 @@ from playwright.sync_api import Page, expect
 
 E2E_BASE_URL = os.environ.get("AMODEX_E2E_BASE_URL", "https://127.0.0.1:8765").rstrip("/")
 E2E_PASSCODE = os.environ.get("AMODEX_E2E_PASSCODE", "246810")
+
+
+@pytest.fixture(scope="session", autouse=True)
+def isolated_e2e_target() -> None:
+    """These tests write data: never run them against a public deployment."""
+    if urlparse(E2E_BASE_URL).hostname not in {"localhost", "127.0.0.1", "::1"}:
+        pytest.fail("E2E writes require a loopback AMODEX_E2E_BASE_URL; production is read-only")
+
+
+@pytest.fixture(scope="session")
+def browser_type_launch_args(browser_type_launch_args: dict[str, object], browser_name: str) -> dict[str, object]:
+    """Allow an existing Chromium when browser downloads are unavailable."""
+    executable = os.environ.get("AMODEX_E2E_CHROMIUM_EXECUTABLE")
+    if executable and browser_name == "chromium":
+        return {**browser_type_launch_args, "executable_path": executable}
+    return browser_type_launch_args
 
 
 @pytest.fixture(scope="session")
