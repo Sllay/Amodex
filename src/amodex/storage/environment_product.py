@@ -34,7 +34,16 @@ class PostgresEnvironmentProductRepository:
     def schema_ready(self) -> bool:
         with psycopg.connect(self._dsn) as conn:
             row = conn.execute(
-                "SELECT to_regclass('public.amodex_environment_runner_jobs')"
+                """
+                SELECT
+                    to_regclass('public.amodex_environment_runner_jobs') IS NOT NULL
+                    AND EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_schema='public'
+                          AND table_name='amodex_environment_runner_jobs'
+                          AND column_name='lease_expires_at'
+                    )
+                """
             ).fetchone()
         return bool(row and row[0])
 
