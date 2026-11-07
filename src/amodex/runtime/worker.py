@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from amodex.contracts.ids import new_uuid7
 from amodex.providers.base import ProviderClient, ProviderFailure
@@ -11,6 +11,7 @@ from amodex.providers.gemini import GeminiProvider
 from amodex.providers.governor import AdmissionStatus, ProviderGovernor
 from amodex.storage.postgres import PostgresRunRepository
 from .models import EventKind, ProviderRequestState, RunRecord, RunState
+from .run_lease import RunLeasePolicy, RunLeaseRenewal
 
 
 @dataclass(slots=True)
@@ -19,11 +20,12 @@ class Stage1Worker:
     provider: ProviderClient
     governor: ProviderGovernor
     worker_id: str
+    lease_policy: RunLeasePolicy = field(default_factory=RunLeasePolicy)
 
-    def _apply_control_if_requested(self, run: RunRecord) -> RunRecord | None:
+    def _apply_control_if_requested(self, run: RunRecord, renewal: RunLeaseRenewal) -> RunRecord | None:
         desired = self.repository.get_run_control_state(run.run_id)
         if desired == "PAUSED":
-            return self.repository.transition(
+            return renewal.call(self.repository.transition,
                 run_id=run.run_id,
                 worker_id=self.worker_id,
                 fencing_token=run.fencing_token,
@@ -33,7 +35,7 @@ class Stage1Worker:
                 release_lease=True,
             )
         if desired == "CANCELLED":
-            return self.repository.transition(
+            return renewal.call(self.repository.transition,
                 run_id=run.run_id,
                 worker_id=self.worker_id,
                 fencing_token=run.fencing_token,
@@ -45,16 +47,27 @@ class Stage1Worker:
         return None
 
     def process_once(self, *, free_quota_available: bool = True) -> RunRecord | None:
-        run = self.repository.claim_next(worker_id=self.worker_id)
+        run = self.repository.claim_next(
+            worker_id=self.worker_id, lease_seconds=self.lease_policy.lease_seconds,
+        )
         if run is None:
             return None
 
-        controlled = self._apply_control_if_requested(run)
+        with RunLeaseRenewal(
+            self.repository, run_id=run.run_id, worker_id=self.worker_id,
+            fencing_token=run.fencing_token, policy=self.lease_policy,
+        ) as renewal:
+            return self._process_claimed(run, renewal, free_quota_available=free_quota_available)
+
+    def _process_claimed(
+        self, run: RunRecord, renewal: RunLeaseRenewal, *, free_quota_available: bool,
+    ) -> RunRecord:
+        controlled = self._apply_control_if_requested(run, renewal)
         if controlled is not None:
             return controlled
 
         if run.provider_request_state == ProviderRequestState.STARTED:
-            return self.repository.transition(
+            return renewal.call(self.repository.transition,
                 run_id=run.run_id,
                 worker_id=self.worker_id,
                 fencing_token=run.fencing_token,
@@ -70,7 +83,7 @@ class Stage1Worker:
 
         if run.provider_request_state == ProviderRequestState.COMPLETED:
             if not run.result_text:
-                return self.repository.transition(
+                return renewal.call(self.repository.transition,
                     run_id=run.run_id,
                     worker_id=self.worker_id,
                     fencing_token=run.fencing_token,
@@ -80,7 +93,7 @@ class Stage1Worker:
                     last_error_code="PROVIDER_COMPLETION_CORRUPT",
                     release_lease=True,
                 )
-            return self.repository.transition(
+            return renewal.call(self.repository.transition,
                 run_id=run.run_id,
                 worker_id=self.worker_id,
                 fencing_token=run.fencing_token,
@@ -96,7 +109,7 @@ class Stage1Worker:
 
         decision = self.governor.admit(free_quota_available=free_quota_available)
         if decision.status == AdmissionStatus.WAITING_PROVIDER:
-            return self.repository.transition(
+            return renewal.call(self.repository.transition,
                 run_id=run.run_id,
                 worker_id=self.worker_id,
                 fencing_token=run.fencing_token,
@@ -107,7 +120,7 @@ class Stage1Worker:
                 release_lease=True,
             )
         if decision.status != AdmissionStatus.ADMITTED or decision.route is None:
-            return self.repository.transition(
+            return renewal.call(self.repository.transition,
                 run_id=run.run_id,
                 worker_id=self.worker_id,
                 fencing_token=run.fencing_token,
@@ -119,7 +132,7 @@ class Stage1Worker:
             )
 
         route = decision.route
-        run = self.repository.transition(
+        run = renewal.call(self.repository.transition,
             run_id=run.run_id,
             worker_id=self.worker_id,
             fencing_token=run.fencing_token,
@@ -130,12 +143,12 @@ class Stage1Worker:
             model=route.model,
         )
 
-        controlled = self._apply_control_if_requested(run)
+        controlled = self._apply_control_if_requested(run, renewal)
         if controlled is not None:
             return controlled
 
         request_key = new_uuid7()
-        run = self.repository.mark_provider_request_started(
+        run = renewal.call(self.repository.mark_provider_request_started,
             run_id=run.run_id,
             worker_id=self.worker_id,
             fencing_token=run.fencing_token,
@@ -144,6 +157,7 @@ class Stage1Worker:
             model=route.model,
         )
 
+        renewal.check()
         try:
             response = self.provider.generate(
                 model=route.model,
@@ -152,7 +166,7 @@ class Stage1Worker:
             )
         except ProviderFailure as exc:
             waiting_for_free_quota = exc.code == "RATE_LIMITED"
-            return self.repository.transition(
+            return renewal.call(self.repository.transition,
                 run_id=run.run_id,
                 worker_id=self.worker_id,
                 fencing_token=run.fencing_token,
@@ -181,7 +195,7 @@ class Stage1Worker:
                 release_lease=True,
             )
 
-        run = self.repository.mark_provider_request_completed(
+        run = renewal.call(self.repository.mark_provider_request_completed,
             run_id=run.run_id,
             worker_id=self.worker_id,
             fencing_token=run.fencing_token,
@@ -190,7 +204,7 @@ class Stage1Worker:
         )
 
         if self.repository.get_run_control_state(run.run_id) == "CANCELLED":
-            return self.repository.transition(
+            return renewal.call(self.repository.transition,
                 run_id=run.run_id,
                 worker_id=self.worker_id,
                 fencing_token=run.fencing_token,
@@ -205,7 +219,7 @@ class Stage1Worker:
                 release_lease=True,
             )
 
-        return self.repository.transition(
+        return renewal.call(self.repository.transition,
             run_id=run.run_id,
             worker_id=self.worker_id,
             fencing_token=run.fencing_token,
@@ -230,6 +244,7 @@ def main() -> None:
         provider=GeminiProvider(api_key=os.environ["GEMINI_API_KEY"]),
         governor=ProviderGovernor.stage1_default(),
         worker_id=f"worker-{new_uuid7()}",
+        lease_policy=RunLeasePolicy.from_environment(),
     )
     result = worker.process_once(free_quota_available=_free_quota_available_from_env())
     if result is not None:
