@@ -1,4 +1,4 @@
-"""Local-only browser audit. Known defects are strict XFAIL, never approvals.
+"""Local-only browser audit and regression coverage for confirmed fixes.
 
 Reuse the workspace fixtures; no provider calls, external auth or production writes.
 """
@@ -32,6 +32,17 @@ def test_workspace_navigation_at_required_viewports(logged_in_page: Page, width:
     page.set_viewport_size({"width": width, "height": height})
     errors: list[str] = []
     page.on("pageerror", lambda error: errors.append(str(error)))
+    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+    context_button = page.locator(".topbar .mobile-context")
+    if context_button.is_visible():
+        box = context_button.bounding_box()
+        assert box and box["x"] >= 0 and box["x"] + box["width"] <= width
+        context_button.focus()
+        page.keyboard.press("Enter")
+        page.wait_for_function("document.querySelector('#context').getBoundingClientRect().right <= innerWidth + 1")
+        expect(page.locator("#context")).to_have_class("context open")
+        page.locator("#context .mobile-context").click()
+        expect(page.locator("#context")).to_have_class("context")
     if width <= 700:
         page.locator(".mobile-menu").focus()
         page.keyboard.press("Enter")
@@ -141,9 +152,40 @@ def test_shared_modal_keyboard_and_background_isolation(
     expect(opener).to_be_focused()
 
 
-def test_model_header_fits_small_mobile(logged_in_page: Page) -> None:
+@pytest.mark.parametrize("width,height", VIEWPORTS)
+def test_model_header_fits_small_mobile(logged_in_page: Page, width: int, height: int) -> None:
     page = logged_in_page
-    page.set_viewport_size({"width": 390, "height": 844})
+    page.set_viewport_size({"width": width, "height": height})
     page.goto(E2E_BASE_URL + "/models", wait_until="networkidle")
-    evidence(page, "models-small-mobile")
+    evidence(page, f"models-{width}x{height}")
     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+
+
+def test_nested_modal_restores_parent_focus_and_original_background_state(logged_in_page: Page) -> None:
+    page = logged_in_page
+    page.set_viewport_size({"width": 1440, "height": 900})
+    opener = page.locator(".project-launch")
+    opener.focus()
+    page.evaluate("document.querySelector('#sideScrim').inert = true; openModal('workspaceModal')")
+    page.evaluate("openModal('memoryModal')")
+    expect(page.locator("#memoryContent")).to_be_focused()
+    page.keyboard.press("Escape")
+    expect(page.locator("#newWorkspaceName")).to_be_focused()
+    expect(page.locator(".app")).to_have_attribute("inert", "")
+    page.keyboard.press("Escape")
+    expect(opener).to_be_focused()
+    expect(page.locator(".app")).not_to_have_attribute("inert", "")
+    expect(page.locator("#sideScrim")).to_have_attribute("inert", "")
+
+
+@pytest.mark.parametrize("opener,second_field", [
+    ("openWorkspaceModal()", "#newWorkspaceDescription"),
+    ("openChatModal('global')", "#newChatEnvironment"),
+])
+def test_modal_does_not_steal_focus_back_from_second_field(logged_in_page: Page, opener: str, second_field: str) -> None:
+    page = logged_in_page
+    page.evaluate(opener)
+    page.locator(second_field).focus()
+    # Allow legacy delayed autofocus to run if accidentally reintroduced.
+    page.wait_for_timeout(60)
+    expect(page.locator(second_field)).to_be_focused()
