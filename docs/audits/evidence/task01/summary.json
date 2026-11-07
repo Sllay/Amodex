@@ -1,0 +1,495 @@
+{
+  "recorded_at_utc": "2026-11-07T15:39:07.738150+00:00",
+  "tested_application_commit": "6eefd66fe00fae54183b71874f9a2bde63737bde",
+  "branch": "test/browser-mcp-ui-audit",
+  "environment": "isolated local PostgreSQL and HTTPS web API; no production access",
+  "browser": "Chromium 156.0.8078.79 Debian 13",
+  "playwright": "1.64.1",
+  "pytest_playwright": "0.10.0",
+  "playwright_mcp": "0.0.84",
+  "viewports": [
+    [
+      1440,
+      900
+    ],
+    [
+      414,
+      896
+    ],
+    [
+      390,
+      844
+    ],
+    [
+      768,
+      1024
+    ]
+  ],
+  "results": {
+    "baseline_https": {
+      "passed": 8,
+      "deselected": 1
+    },
+    "baseline_offline": {
+      "passed": 1,
+      "deselected": 8
+    },
+    "contracts_prepared": {
+      "passed": 50,
+      "failed": 1
+    },
+    "new_audit": {
+      "passed": 6,
+      "xfailed_strict": 5
+    },
+    "known_defects_runxfail": {
+      "failed": 5,
+      "deselected": 6
+    },
+    "production": "BLOCKED_PROXY_POLICY",
+    "webkit": "BLOCKED_BROWSER_DOWNLOAD_POLICY"
+  },
+  "measurements": [
+    {
+      "viewport": [
+        1440,
+        900
+      ],
+      "route": "connections",
+      "overflow": 0
+    },
+    {
+      "viewport": [
+        1440,
+        900
+      ],
+      "route": "models",
+      "overflow": 0
+    },
+    {
+      "viewport": [
+        1440,
+        900
+      ],
+      "topbar": {
+        "rect": {
+          "x": 290,
+          "y": 0,
+          "width": 830,
+          "height": 58,
+          "top": 0,
+          "right": 1120,
+          "bottom": 58,
+          "left": 290
+        },
+        "controls": [
+          {
+            "text": "☰",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "width": 0,
+              "height": 0,
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          {
+            "text": "Contexto",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "width": 0,
+              "height": 0,
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          }
+        ]
+      },
+      "focus": [
+        {
+          "id": "",
+          "tag": "BUTTON",
+          "inModal": false
+        },
+        {
+          "id": "",
+          "tag": "BUTTON",
+          "inModal": false
+        },
+        {
+          "id": "",
+          "tag": "BUTTON",
+          "inModal": false
+        },
+        {
+          "id": "",
+          "tag": "BUTTON",
+          "inModal": false
+        },
+        {
+          "id": "newWorkspaceDescription",
+          "tag": "TEXTAREA",
+          "inModal": true
+        },
+        {
+          "id": "",
+          "tag": "BUTTON",
+          "inModal": true
+        },
+        {
+          "id": "",
+          "tag": "BUTTON",
+          "inModal": true
+        },
+        {
+          "id": "",
+          "tag": "BODY",
+          "inModal": false
+        }
+      ],
+      "modalSemantics": {
+        "role": null,
+        "ariaModal": null,
+        "label": null
+      },
+      "escapeCloses": false
+    },
+    {
+      "viewport": [
+        414,
+        896
+      ],
+      "route": "connections",
+      "overflow": 0
+    },
+    {
+      "viewport": [
+        414,
+        896
+      ],
+      "route": "models",
+      "overflow": 0
+    },
+    {
+      "viewport": [
+        414,
+        896
+      ],
+      "topbar": {
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "width": 414,
+          "height": 58,
+          "top": 0,
+          "right": 414,
+          "bottom": 58,
+          "left": 0
+        },
+        "controls": [
+          {
+            "text": "☰",
+            "rect": {
+              "x": 10,
+              "y": 7.5,
+              "width": 40.34375,
+              "height": 42,
+              "top": 7.5,
+              "right": 50.34375,
+              "bottom": 49.5,
+              "left": 10
+            }
+          },
+          {
+            "text": "Contexto",
+            "rect": {
+              "x": 386.796875,
+              "y": 7.5,
+              "width": 76.140625,
+              "height": 42,
+              "top": 7.5,
+              "right": 462.9375,
+              "bottom": 49.5,
+              "left": 386.796875
+            }
+          }
+        ]
+      },
+      "focus": [
+        {
+          "id": "",
+          "tag": "BUTTON",
+          "inModal": false
+        },
+        {
+          "id": "",
+          "tag": "BUTTON",
+          "inModal": false
+        },
+        {
+          "id": "",
+          "tag": "BUTTON",
+          "inModal": false
+        },
+        {
+          "id": "",
+          "tag": "BUTTON",
+          "inModal": false
+        },
+        {
+          "id": "newWorkspaceDescription",
+          "tag": "TEXTAREA",
+          "inModal": true
+        },
+        {
+          "id": "",
+          "tag": "BUTTON",
+          "inModal": true
+        },
+        {
+          "id": "",
+          "tag": "BUTTON",
+          "inModal": true
+        },
+        {
+          "id": "",
+          "tag": "BODY",
+          "inModal": false
+        }
+      ],
+      "modalSemantics": {
+        "role": null,
+        "ariaModal": null,
+        "label": null
+      },
+      "escapeCloses": false
+    },
+    {
+      "viewport": [
+        390,
+        844
+      ],
+      "route": "connections",
+      "overflow": 0
+    },
+    {
+      "viewport": [
+        390,
+        844
+      ],
+      "route": "models",
+      "overflow": 18
+    },
+    {
+      "viewport": [
+        390,
+        844
+      ],
+      "topbar": {
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "width": 390,
+          "height": 58,
+          "top": 0,
+          "right": 390,
+          "bottom": 58,
+          "left": 0
+        },
+        "controls": [
+          {
+            "text": "☰",
+            "rect": {
+              "x": 10,
+              "y": 7.5,
+              "width": 40.34375,
+              "height": 42,
+              "top": 7.5,
+              "right": 50.34375,
+              "bottom": 49.5,
+              "left": 10
+            }
+          },
+          {
+            "text": "Contexto",
+            "rect": {
+              "x": 375.75,
+              "y": 7.5,
+              "width": 76.140625,
+              "height": 42,
+              "top": 7.5,
+              "right": 451.890625,
+              "bottom": 49.5,
+              "left": 375.75
+            }
+          }
+        ]
+      },
+      "focus": [
+        {
+          "id": "",
+          "tag": "BUTTON",
+          "inModal": false
+        },
+        {
+          "id": "",
+          "tag": "BUTTON",
+          "inModal": false
+        },
+        {
+          "id": "",
+          "tag": "BUTTON",
+          "inModal": false
+        },
+        {
+          "id": "",
+          "tag": "BUTTON",
+          "inModal": false
+        },
+        {
+          "id": "",
+          "tag": "BUTTON",
+          "inModal": false
+        },
+        {
+          "id": "",
+          "tag": "BUTTON",
+          "inModal": false
+        },
+        {
+          "id": "newWorkspaceName",
+          "tag": "INPUT",
+          "inModal": true
+        },
+        {
+          "id": "newWorkspaceDescription",
+          "tag": "TEXTAREA",
+          "inModal": true
+        }
+      ],
+      "modalSemantics": {
+        "role": null,
+        "ariaModal": null,
+        "label": null
+      },
+      "escapeCloses": false
+    },
+    {
+      "viewport": [
+        768,
+        1024
+      ],
+      "route": "connections",
+      "overflow": 0
+    },
+    {
+      "viewport": [
+        768,
+        1024
+      ],
+      "route": "models",
+      "overflow": 0
+    },
+    {
+      "viewport": [
+        768,
+        1024
+      ],
+      "topbar": {
+        "rect": {
+          "x": 260,
+          "y": 0,
+          "width": 508,
+          "height": 58,
+          "top": 0,
+          "right": 768,
+          "bottom": 58,
+          "left": 260
+        },
+        "controls": [
+          {
+            "text": "☰",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "width": 0,
+              "height": 0,
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          {
+            "text": "Contexto",
+            "rect": {
+              "x": 657.90625,
+              "y": 7.5,
+              "width": 94.09375,
+              "height": 42,
+              "top": 7.5,
+              "right": 752,
+              "bottom": 49.5,
+              "left": 657.90625
+            }
+          }
+        ]
+      },
+      "focus": [
+        {
+          "id": "",
+          "tag": "BUTTON",
+          "inModal": false
+        },
+        {
+          "id": "",
+          "tag": "BUTTON",
+          "inModal": false
+        },
+        {
+          "id": "",
+          "tag": "BUTTON",
+          "inModal": false
+        },
+        {
+          "id": "",
+          "tag": "BUTTON",
+          "inModal": false
+        },
+        {
+          "id": "",
+          "tag": "BUTTON",
+          "inModal": false
+        },
+        {
+          "id": "",
+          "tag": "BUTTON",
+          "inModal": false
+        },
+        {
+          "id": "newWorkspaceName",
+          "tag": "INPUT",
+          "inModal": true
+        },
+        {
+          "id": "newWorkspaceName",
+          "tag": "INPUT",
+          "inModal": true
+        }
+      ],
+      "modalSemantics": {
+        "role": null,
+        "ariaModal": null,
+        "label": null
+      },
+      "escapeCloses": false
+    }
+  ],
+  "evidence_note": "Only synthetic local data. No request bodies, credentials, session state or private production data."
+}

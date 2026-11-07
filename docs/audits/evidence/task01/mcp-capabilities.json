@@ -1,0 +1,51 @@
+[
+  {
+    "tool": "browser_navigate",
+    "isError": false,
+    "text": [
+      "### Ran Playwright code\n```js\nawait page.goto('http://127.0.0.1:8770/');\n```\n### Page\n- Page URL: http://127.0.0.1:8770/\n- Page Title: MCP safe fixture\n- Console: 1 errors, 0 warnings\n### Snapshot\n- [Snapshot](artifacts/qa/mcp/page-2026-11-07T15-31-51-286Z.yml)\n### Events\n- New console entries: artifacts/qa/mcp/console-2026-11-07T15-31-51-154Z.log#L1"
+    ]
+  },
+  {
+    "tool": "browser_snapshot",
+    "isError": false,
+    "text": [
+      "### Page\n- Page URL: http://127.0.0.1:8770/\n- Page Title: MCP safe fixture\n- Console: 1 errors, 0 warnings\n### Snapshot\n```yaml\n- button \"Safe click\" [ref=e2]\n```"
+    ]
+  },
+  {
+    "tool": "browser_click",
+    "isError": false,
+    "text": [
+      "### Ran Playwright code\n```js\nawait page.locator('#safe').click();\n```\n### Page\n- Page URL: http://127.0.0.1:8770/\n- Page Title: MCP safe fixture\n- Console: 3 errors, 1 warnings\n### Snapshot\n- [Snapshot](artifacts/qa/mcp/page-2026-11-07T15-31-57-446Z.yml)\n### Events\n- New console entries: artifacts/qa/mcp/console-2026-11-07T15-31-51-154Z.log#L2-L4"
+    ]
+  },
+  {
+    "tool": "browser_evaluate",
+    "isError": false,
+    "text": [
+      "### Result\n\"Clicked\"\n### Ran Playwright code\n```js\nawait page.evaluate('() => document.querySelector(\"#safe\").textContent');\n```"
+    ]
+  },
+  {
+    "tool": "browser_take_screenshot",
+    "isError": false,
+    "text": [
+      "### Result\n- [Screenshot of viewport](./mcp-safe-click.png)\n### Ran Playwright code\n```js\n// Screenshot viewport and save it as ./mcp-safe-click.png\nawait page.screenshot({\n  path: './mcp-safe-click.png',\n  scale: 'css',\n  type: 'png'\n});\n```"
+    ]
+  },
+  {
+    "tool": "browser_console_messages",
+    "isError": false,
+    "text": [
+      "### Result\nTotal messages: 4 (Errors: 3, Warnings: 1)\n\n[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:8770/favicon.ico:0\n[WARNING] QA synthetic console event @ http://127.0.0.1:8770/:0\n[ERROR] Failed to load resource: net::ERR_UNSAFE_PORT @ http://127.0.0.1:1/qa-failed:0\n[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:8770/qa-missing:0"
+    ]
+  },
+  {
+    "tool": "browser_network_requests",
+    "isError": false,
+    "text": [
+      "### Result\n1. [GET] http://127.0.0.1:8770/ => [200] OK\n2. [GET] http://127.0.0.1:8770/qa-missing => [404] Not Found\n3. [GET] http://127.0.0.1:1/qa-failed => [FAILED] net::ERR_UNSAFE_PORT"
+    ]
+  }
+]

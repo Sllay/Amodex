@@ -1,0 +1,23 @@
+{
+  "timestamp": "2026-11-07T15:33:36.776370+00:00",
+  "requests": [
+    {
+      "path": "/",
+      "blocked": "<urlopen error Tunnel connection failed: 403 Forbidden>",
+      "elapsed_seconds": 0.036
+    },
+    {
+      "path": "/healthz",
+      "blocked": "<urlopen error Tunnel connection failed: 403 Forbidden>",
+      "elapsed_seconds": 0.005
+    },
+    {
+      "path": "/readyz",
+      "blocked": "<urlopen error Tunnel connection failed: 403 Forbidden>",
+      "elapsed_seconds": 0.004
+    },
+    {
+      "browser_error": "Page.goto: net::ERR_TUNNEL_CONNECTION_FAILED at https://amodex.onrender.com/"
+    }
+  ]
+}
