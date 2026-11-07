@@ -151,7 +151,7 @@ class ModelIntelligenceService:
                 )
 
         try:
-            client = self._execution_registry.client_for(candidate)
+            client = self._execution_registry.client_for(candidate, operation="benchmark")
         except ProviderExecutionDenied as exc:
             raise ModelIntelligenceError(
                 "BENCHMARK_EXECUTION_DENIED", str(exc), status_code=403
@@ -503,7 +503,7 @@ class ModelIntelligenceService:
             self._progress(decision_id=decision_id, stage="provider_wait", started=started_total)
             started = perf_counter()
             try:
-                client = self._execution_registry.client_for(candidate)
+                client = self._execution_registry.client_for(candidate, operation="chat")
                 response = await asyncio.to_thread(
                     client.generate,
                     model=candidate.model,
