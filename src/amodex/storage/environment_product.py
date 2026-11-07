@@ -311,7 +311,7 @@ class PostgresEnvironmentProductRepository:
         with psycopg.connect(self._dsn, row_factory=dict_row) as conn:
             with conn.transaction():
                 row = conn.execute(
-                    "SELECT state,github_run_id,lease_expires_at FROM amodex_environment_runner_jobs WHERE job_id=%s FOR UPDATE",
+                    "SELECT state,github_run_id,lease_expires_at, (lease_expires_at <= NOW()) AS lease_expired FROM amodex_environment_runner_jobs WHERE job_id=%s FOR UPDATE",
                     (job_id,),
                 ).fetchone()
                 if row is None:
@@ -319,10 +319,11 @@ class PostgresEnvironmentProductRepository:
                 current = RunnerJobState(row["state"])
                 if github_run_id is not None and row["github_run_id"] != github_run_id:
                     raise EnvironmentStateError("RUNNER_LEASE_OWNER_MISMATCH", job_id)
-                if current in {RunnerJobState.CLAIMED, RunnerJobState.RUNNING} and (
-                    row["lease_expires_at"] is None
-                ):
-                    raise EnvironmentStateError("RUNNER_LEASE_MISSING", job_id)
+                if current in {RunnerJobState.CLAIMED, RunnerJobState.RUNNING}:
+                    if row["lease_expires_at"] is None:
+                        raise EnvironmentStateError("RUNNER_LEASE_MISSING", job_id)
+                    if row["lease_expired"]:
+                        raise EnvironmentStateError("RUNNER_LEASE_LOST", job_id)
                 if current not in {
                     RunnerJobState.CLAIMED,
                     RunnerJobState.RUNNING,
