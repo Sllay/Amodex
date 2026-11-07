@@ -117,7 +117,7 @@ class RunnerClaimResponse(ContractModel):
     capabilities: tuple[str, ...]
 
 
-class RunnerHeartbeatRequest(ContractModel):
+class RunnerJobHeartbeatRequest(ContractModel):
     schema_version: int = 1
     github_run_id: str = Field(min_length=1, max_length=100)
 
