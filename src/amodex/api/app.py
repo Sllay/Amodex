@@ -858,6 +858,21 @@ def create_app(
                         "subject_id": item["job_id"],
                     }
                 )
+            if (
+                item["state"] in {RunnerJobState.CLAIMED.value, RunnerJobState.RUNNING.value}
+                and item.get("lease_expires_at")
+            ):
+                lease_expires_at = datetime.fromisoformat(
+                    str(item["lease_expires_at"]).replace("Z", "+00:00")
+                )
+                if lease_expires_at <= datetime.now(timezone.utc):
+                    blockers.append(
+                        {
+                            "kind": "RUNNER_LEASE_EXPIRED",
+                            "detail": "runner heartbeat expired; inspect evidence before any manual retry",
+                            "subject_id": item["job_id"],
+                        }
+                    )
 
         timeline = list(audit_rows)
         for run in runs[:25]:
