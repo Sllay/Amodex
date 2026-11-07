@@ -274,7 +274,12 @@ def test_chat_prefers_primary_model_even_when_agent_scores_higher() -> None:
     service = object.__new__(ModelIntelligenceService)
     service._workspace = FakeWorkspace()
     service._repository = repo
-    service._execution_registry = SimpleNamespace(client_for=lambda candidate: FakeClient())
+    def client_for(candidate, *, operation):
+        assert operation == "chat"
+        assert candidate.provider in {"nvidia", "groq"}
+        return FakeClient()
+
+    service._execution_registry = SimpleNamespace(client_for=client_for)
     service._chat_prompt = lambda *args: "Converse em portugues"
     service._candidate_for_route = lambda route_id: SimpleNamespace(
         route_id=route_id,
