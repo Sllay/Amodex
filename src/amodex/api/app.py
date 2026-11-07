@@ -21,7 +21,7 @@ from amodex.environments.product import (
     ProjectBindRequest,
     RunnerClaimResponse,
     RunnerDispatchRequest,
-    RunnerHeartbeatRequest,
+    RunnerJobHeartbeatRequest,
     RunnerJobRecord,
     RunnerJobState,
     RunnerKind,
@@ -611,7 +611,7 @@ def create_app(
     @app.post("/v1/runner-jobs/{job_id}/heartbeat", response_model=RunnerJobRecord)
     async def heartbeat_runner_job(
         job_id: str,
-        body: RunnerHeartbeatRequest,
+        body: RunnerJobHeartbeatRequest,
         request: Request,
     ) -> RunnerJobRecord:
         authorize_runner(request)
