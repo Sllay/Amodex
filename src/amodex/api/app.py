@@ -21,6 +21,7 @@ from amodex.environments.product import (
     ProjectBindRequest,
     RunnerClaimResponse,
     RunnerDispatchRequest,
+    RunnerHeartbeatRequest,
     RunnerJobRecord,
     RunnerJobState,
     RunnerKind,
@@ -604,6 +605,21 @@ def create_app(
         authorize_runner(request)
         try:
             return environment_product().mark_running(job_id=job_id)
+        except (KeyError, EnvironmentStateError) as exc:
+            raise environment_error(exc) from exc
+
+    @app.post("/v1/runner-jobs/{job_id}/heartbeat", response_model=RunnerJobRecord)
+    async def heartbeat_runner_job(
+        job_id: str,
+        body: RunnerHeartbeatRequest,
+        request: Request,
+    ) -> RunnerJobRecord:
+        authorize_runner(request)
+        try:
+            return environment_product().heartbeat_runner_job(
+                job_id=job_id,
+                github_run_id=body.github_run_id,
+            )
         except (KeyError, EnvironmentStateError) as exc:
             raise environment_error(exc) from exc
 
