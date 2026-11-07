@@ -121,6 +121,20 @@ jobs:
           env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --frozen \
             python -m amodex.runners.client running "$AMODEX_JOB_ID"
 
+      - name: Start durable runner heartbeat
+        shell: bash
+        run: |
+          set -euo pipefail
+          (
+            while true; do
+              sleep 30
+              env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --frozen \
+                python -m amodex.runners.client heartbeat "$AMODEX_JOB_ID" \
+                  --github-run-id "$GITHUB_RUN_ID" || exit 1
+            done
+          ) >"$RUNNER_TEMP/runner-heartbeat.log" 2>&1 &
+          echo "$!" > "$RUNNER_TEMP/runner-heartbeat.pid"
+
       - name: Install Godot and Node only for Godot Environments
         if: ${{ env.TARGET_ENGINE == 'godot' }}
         shell: bash
@@ -233,6 +247,17 @@ jobs:
                 --state FAILED \
                 --summary "Disposable runner failed; inspect GitHub Actions evidence" \
                 --github-run-id "$GITHUB_RUN_ID"
+          fi
+
+      - name: Stop durable runner heartbeat
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          PID_FILE="$RUNNER_TEMP/runner-heartbeat.pid"
+          if [ -f "$PID_FILE" ]; then
+            kill "$(cat "$PID_FILE")" 2>/dev/null || true
+            rm -f "$PID_FILE"
           fi
 
       - name: Prove project repository was never pushed or credential-persisted
