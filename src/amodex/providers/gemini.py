@@ -12,7 +12,9 @@ from .base import ProviderFailure
 class GeminiProvider:
     provider_name = "gemini"
 
-    def __init__(\n        self, *, api_key: str, timeout_seconds: float = 45.0, timeout: httpx.Timeout | None = None\n    ) -> None:
+    def __init__(
+        self, *, api_key: str, timeout_seconds: float = 45.0, timeout: httpx.Timeout | None = None
+    ) -> None:
         if not api_key:
             raise ValueError("Gemini API key is required")
         self._api_key = api_key
