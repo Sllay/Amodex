@@ -54,6 +54,10 @@ class OpenAICompatibleProvider:
         self._extra_headers = dict(extra_headers or {})
         self._user_only_instructions = user_only_instructions
 
+    def hermes_settings(self) -> tuple[str, str]:
+        """In-memory execution boundary only. Never serialize or log this tuple."""
+        return self._base_url, self._api_key
+
     def generate(self, *, model: str, prompt: str, request_key: str) -> ProviderResponse:
         if not model.strip():
             raise ValueError("model is required")

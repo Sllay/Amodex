@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
@@ -80,9 +81,9 @@ class PostgresRunRepository:
                         applied.append(path.name)
         return tuple(applied)
 
-    def create_run(self, *, prompt: str, project_id: str | None = None) -> RunRecord:
+    def create_run(self, *, prompt: str, project_id: str | None = None, connection=None) -> RunRecord:
         run_id = new_uuid7()
-        with psycopg.connect(self._dsn, row_factory=dict_row) as conn:
+        with (nullcontext(connection) if connection is not None else psycopg.connect(self._dsn, row_factory=dict_row)) as conn:
             with conn.transaction():
                 with conn.cursor() as cur:
                     project_column = self._column_exists(cur, table="amodex_runs", column="project_id")
@@ -156,7 +157,7 @@ class PostgresRunRepository:
                 row = cur.fetchone()
         return str(row[0]) if row else "ACTIVE"
 
-    def claim_next(self, *, worker_id: str, lease_seconds: int = 30) -> RunRecord | None:
+    def claim_next(self, *, worker_id: str, lease_seconds: int = 30, run_id: str | None = None) -> RunRecord | None:
         self._validate_lease_seconds(lease_seconds)
         with psycopg.connect(self._dsn, row_factory=dict_row) as conn:
             with conn.transaction():
@@ -169,6 +170,11 @@ class PostgresRunRepository:
                               AND c.desired_state IN ('PAUSED','CANCELLED')
                         )
                     """ if controls else ""
+                    # Supervised coding intents may only be claimed explicitly;
+                    # the generic worker must never replay their provider loop.
+                    target_filter = "AND run_id = %s" if run_id is not None else ""
+                    if run_id is None and self._table_exists(cur, "amodex_supervised_executions"):
+                        target_filter = "AND NOT EXISTS (SELECT 1 FROM amodex_supervised_executions s WHERE s.run_id=amodex_runs.run_id)"
                     cur.execute(
                         f"""
                         SELECT * FROM amodex_runs
@@ -181,6 +187,7 @@ class PostgresRunRepository:
                             )
                         )
                         {control_filter}
+                        {target_filter}
                         ORDER BY created_at, run_id
                         FOR UPDATE SKIP LOCKED
                         LIMIT 1
@@ -189,7 +196,7 @@ class PostgresRunRepository:
                             RunState.QUEUED.value,
                             RunState.CLAIMED.value,
                             RunState.RUNNING.value,
-                        ),
+                        ) + ((run_id,) if run_id is not None else ()),
                     )
                     row = cur.fetchone()
                     if row is None:
@@ -250,11 +257,12 @@ class PostgresRunRepository:
         result_text: str | None = None,
         last_error_code: str | None = None,
         release_lease: bool = False,
+        connection=None,
     ) -> RunRecord:
         payload = payload or {}
         if state in {RunState.QUEUED, RunState.CLAIMED}:
             raise ValueError("worker transitions cannot enqueue or claim runs")
-        with psycopg.connect(self._dsn, row_factory=dict_row) as conn:
+        with (nullcontext(connection) if connection is not None else psycopg.connect(self._dsn, row_factory=dict_row)) as conn:
             with conn.transaction():
                 with conn.cursor() as cur:
                     row = self._lock_owned_run(

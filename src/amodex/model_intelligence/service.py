@@ -654,6 +654,30 @@ class ModelIntelligenceService:
         cutoff = self._utcnow() - timedelta(seconds=stale_after_seconds)
         return self._repository.reconcile_stale_decisions(cutoff=cutoff)
 
+    def supervised_coding_candidate(self) -> ModelCandidate | None:
+        """Measured implementation route plus a fresh, explicit free-quota grant.
+
+        This is selection only; the registry and Governor must still admit it.
+        No billing or quota facts are synthesized from credential presence.
+        """
+        for route in self._ranked_routes(profile=WorkerProfileKind.IMPLEMENTATION, required_context_tokens=16000):
+            row = self._repository.get_route(route.route_id)
+            if row is None:
+                continue
+            candidate = self._candidate_from_row(row)
+            if candidate.provider not in {"groq", "nvidia", "openrouter"}:
+                continue  # Hermes requires the existing OpenAI-compatible adapter.
+            if candidate.provider == "openrouter" and not candidate.model.endswith(":free"):
+                continue  # A random free router does not pin the measured model.
+            for observed in self._routing_repository.latest_availability():
+                if (observed.provider == candidate.provider
+                        and observed.credential_pool_id == candidate.credential_pool_id
+                        and observed.billing_class == BillingClass.FREE
+                        and observed.health == ProviderHealth.HEALTHY and observed.quota_available
+                        and timedelta(0) <= self._utcnow() - observed.observed_at <= timedelta(minutes=5)):
+                    return candidate
+        return None
+
     def _ranked_routes(
         self,
         *,

@@ -21,7 +21,7 @@ from amodex.storage.environment_product import PostgresEnvironmentProductReposit
 from amodex.storage.postgres import PostgresRunRepository
 from test_postbaseline_environment_product import _create_scoped_run
 
-LATE = ("postbaseline/0008_runner_dispatch_idempotency.sql", "postbaseline/0009_runner_terminal_receipts.sql")
+LATE = ("postbaseline/0008_runner_dispatch_idempotency.sql", "postbaseline/0009_runner_terminal_receipts.sql", "postbaseline/0010_supervised_coding.sql")
 
 
 @pytest.fixture
@@ -64,7 +64,7 @@ def prior_schema(tmp_path):
 def test_upgrade_and_reentry_preserve_legacy_without_fabricating_receipt(prior_schema):
     dsn,uri,apply,job = prior_schema
     before = database_readiness(uri,migrations_root="migrations")
-    assert not before['schema_compatible'] and before['missing_migrations']==2
+    assert not before['schema_compatible'] and before['missing_migrations']==len(LATE)
     upgrade = apply("migrations")
     assert set(upgrade.applied)==set(LATE)
     assert apply("migrations").applied==()

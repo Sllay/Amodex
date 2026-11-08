@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping
 
 from amodex.contracts.models import TaskPackage
-from amodex.tools.roblox_luau import RobloxLuauTestTool, TOOL_NAME as ROBLOX_TOOL_NAME
+from amodex.tools.roblox_luau import RobloxLuauTestTool, analyze_luau, TOOL_NAME as ROBLOX_TOOL_NAME
 from amodex.tools.scoped_workspace import (
     PathLease,
     ScopedContextCapsule,
@@ -148,6 +148,10 @@ def register_hermes_plugin(ctx: Any) -> None:
             "additionalProperties": False,
         },
     )
+    if "amodex_luau_validate" in bridge.expected_tool_names:
+        register_tool("amodex_luau_validate", "Analyze the authorized Luau file locally; never execute or publish it.",
+                      {"type": "object", "properties": {"path": {"type": "string"}},
+                       "required": ["path"], "additionalProperties": False})
     if ROBLOX_TOOL_NAME in bridge.expected_tool_names:
         register_tool(
             ROBLOX_TOOL_NAME,
@@ -170,6 +174,8 @@ class HermesScopedWorker:
         "LANG",
         "LC_ALL",
         "TMPDIR",
+        "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
+        "http_proxy", "https_proxy", "all_proxy", "no_proxy",
     )
 
     def __init__(
@@ -185,6 +191,9 @@ class HermesScopedWorker:
         worker_id: str = "hermes-scoped-worker",
         event_sink: Callable[[dict[str, Any]], None] | None = None,
         roblox_tool: RobloxLuauTestTool | None = None,
+        analyzer: Path | None = None,
+        authority_check: Callable[[], None] | None = None,
+        transport_guard: Any | None = None,
     ) -> None:
         if task != tools.task:
             raise HermesWorkerError("Hermes worker TaskPackage differs from tool boundary TaskPackage")
@@ -200,17 +209,24 @@ class HermesScopedWorker:
         if roblox_tool is not None and roblox_tool.tools is not tools:
             raise HermesWorkerError("Roblox tool must share the worker's task boundary")
         self.roblox_tool = roblox_tool
+        self.analyzer = analyzer
+        self.authority_check = authority_check
+        self.transport_guard = transport_guard
         self._agent: Any | None = None
         self._leases: dict[str, PathLease] = {}
 
     @property
     def expected_tool_names(self) -> set[str]:
         names = set(EXPECTED_TOOL_NAMES)
+        if self.analyzer is not None and "luau.validate" in self.task.scope.allowed_operations:
+            names.add("amodex_luau_validate")
         if self.roblox_tool is not None and self.roblox_tool.available:
             names.add(ROBLOX_TOOL_NAME)
         return names
 
     def _verify_hermes(self) -> None:
+        if self.transport_guard is not None and (self.hermes_root / ".env").exists():
+            raise HermesWorkerError("supervised Hermes checkout must not contain a global .env fallback")
         completed = subprocess.run(
             ["git", "-C", str(self.hermes_root), "rev-parse", "HEAD"],
             capture_output=True,
@@ -379,6 +395,10 @@ class HermesScopedWorker:
             self.tools.release_write_lease(lease_id=lease.lease_id, owner=self.worker_id)
 
     def invoke_tool(self, name: str, raw_params: Any) -> str:
+        if self.authority_check is not None:
+            self.authority_check()  # Failure aborts the loop, not a model-readable retry hint.
+        if self.transport_guard is not None:
+            self.transport_guard.tool_step()
         try:
             params = _params_dict(raw_params)
             if name == "amodex_read_file":
@@ -435,6 +455,13 @@ class HermesScopedWorker:
                     "stdout": completed.stdout,
                     "stderr": completed.stderr,
                 }
+            elif name == "amodex_luau_validate":
+                if name not in self.expected_tool_names or set(params) != {"path"}:
+                    raise HermesToolInputError("local Luau validation not authorized")
+                source = self.tools.read_file(_required_string(params, "path"), max_bytes=16000)
+                validation = analyze_luau(source, self.analyzer)
+                result = {"ok": validation["status"] == "PASS", "tool": name,
+                          "sha256": hashlib.sha256(source.encode()).hexdigest(), **validation}
             elif name == ROBLOX_TOOL_NAME:
                 if name not in self.expected_tool_names or self.roblox_tool is None:
                     raise HermesToolInputError("Roblox tool is not authorized for this task")
@@ -445,6 +472,7 @@ class HermesScopedWorker:
                 )}
             else:
                 raise HermesToolInputError(f"unknown Amodex tool: {name}")
+            self.record_event("tool_result", tool_name=name, status=result.get("ok"))
             return json.dumps(result, sort_keys=True)
         except (HermesToolInputError, ToolPolicyError, FileNotFoundError) as exc:
             return json.dumps(
@@ -497,17 +525,23 @@ class HermesScopedWorker:
                 skip_memory=True,
                 skip_context_files=True,
                 skip_background_review=True,
-                max_iterations=12,
+                max_iterations=6 if self.transport_guard is not None else 12,
+                **({"max_tokens": 512, "run_budget_seconds": 60, "fallback_model": None}
+                   if self.transport_guard is not None else {}),
                 ephemeral_system_prompt=self._system_policy(),
             )
             if hasattr(agent, "client") and hasattr(agent.client, "max_retries"):
                 agent.client.max_retries = 0
             self._agent = agent
             try:
+                if self.transport_guard is not None:
+                    self.transport_guard.attach(agent)
                 result = agent.run_conversation(
                     user_message=self._user_message(instruction, capsule),
                     task_id=str(self.task.task_id),
                 )
+                if self.transport_guard is not None:
+                    self.transport_guard.check()
                 return self._extract_final(result)
             finally:
                 try:

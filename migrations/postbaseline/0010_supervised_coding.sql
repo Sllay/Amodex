@@ -1,0 +1,32 @@
+-- Additive, opt-in supervised Web -> existing Hermes task handoff.
+CREATE TABLE IF NOT EXISTS amodex_supervised_executions (
+    execution_id UUID PRIMARY KEY,
+    run_id UUID NOT NULL UNIQUE REFERENCES amodex_runs(run_id),
+    draft_id UUID NOT NULL UNIQUE REFERENCES amodex_execution_drafts(draft_id),
+    environment_id UUID NOT NULL REFERENCES amodex_environments(environment_id),
+    project_id UUID NOT NULL REFERENCES amodex_projects(project_id),
+    resource_id UUID NOT NULL REFERENCES amodex_connector_resources(resource_id),
+    intent_key TEXT NOT NULL CHECK (length(intent_key) BETWEEN 16 AND 128),
+    intent_digest TEXT NOT NULL CHECK (intent_digest ~ '^[a-f0-9]{64}$'),
+    task_package JSONB NOT NULL,
+    grant_digest TEXT NOT NULL,
+    path TEXT NOT NULL,
+    source TEXT NOT NULL CHECK (octet_length(source) <= 16000),
+    source_sha256 TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('AWAITING_APPROVAL','STARTED','RUNNING','COMPLETED','BLOCKED','FAILED','CANCELLED','UNKNOWN_OUTCOME')),
+    phase TEXT NOT NULL,
+    error_code TEXT NULL,
+    approved_at TIMESTAMPTZ NULL,
+    started_at TIMESTAMPTZ NULL,
+    deadline TIMESTAMPTZ NULL,
+    route JSONB NULL,
+    calls JSONB NOT NULL DEFAULT '[]',
+    events JSONB NOT NULL DEFAULT '[]',
+    artifact JSONB NULL,
+    local_validation JSONB NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(environment_id, intent_key),
+    CHECK (status='AWAITING_APPROVAL' OR approved_at IS NOT NULL)
+);
+CREATE INDEX IF NOT EXISTS idx_supervised_executions_recent ON amodex_supervised_executions(created_at DESC);

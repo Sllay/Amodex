@@ -22,6 +22,8 @@ from amodex.api.model_intelligence_web import MODEL_INTELLIGENCE_HTML, augment_m
 from amodex.api.multimodal_routes import build_multimodal_router
 from amodex.api.multimodal_web import augment_workspace_html
 from amodex.api.streaming_upload_routes import build_streaming_upload_router
+from amodex.api.supervised_routes import build_supervised_router
+from amodex.runtime.supervised_execution import SupervisedExecutionService, grants_from_environment
 from amodex.api.theme_web import augment_theme_html
 from amodex.api.ui_stability_web import augment_ui_stability_html
 from amodex.api.web import DASHBOARD_HTML
@@ -94,6 +96,7 @@ def create_workspace_app(
     provider_execution_registry: ProviderExecutionRegistry | None = None,
     model_intelligence_service: ModelIntelligenceService | None = None,
     dsn: str | None = None,
+    supervised_service: SupervisedExecutionService | None = None,
 ) -> FastAPI:
     """Compose the web-first surface without creating a second control plane."""
     database_url = dsn or os.environ.get("AMODEX_DATABASE_URL", "")
@@ -170,6 +173,11 @@ def create_workspace_app(
             and "GET" in (getattr(route, "methods", None) or set())
         )
     ]
+    supervised_service = supervised_service or SupervisedExecutionService(
+        dsn=database_url or workspace_repository.dsn, grants=grants_from_environment(),
+        intelligence=model_intelligence_service, registry=provider_execution_registry,
+    )
+    base_app.include_router(build_supervised_router(supervised_service))
     base_app.include_router(build_workspace_router(workspace_repository))
     base_app.include_router(build_global_chat_router(workspace_repository))
     base_app.include_router(
@@ -237,6 +245,7 @@ def create_workspace_app(
         html = augment_workspace_v2_html(html)
         html = augment_workspace_cache_html(html)
         html = augment_ui_stability_html(html)
+        html = html.replace(marker, '<div class="section"><a href="/supervised" style="display:block;padding:14px">Luau supervisionado</a></div>' + marker, 1)
         return augment_theme_html(html)
 
     @base_app.get("/connections", response_class=HTMLResponse, include_in_schema=False)

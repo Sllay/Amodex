@@ -213,6 +213,7 @@ def install_access_gate(app: FastAPI, config: AccessGateConfig | None = None) ->
             return await call_next(request)
 
         if session_is_valid(request.cookies.get(_COOKIE_NAME)):
+            request.state.owner_authorized = True
             return await call_next(request)
 
         accept = request.headers.get("accept", "")

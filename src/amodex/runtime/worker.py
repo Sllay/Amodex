@@ -59,6 +59,23 @@ class Stage1Worker:
         ) as renewal:
             return self._process_claimed(run, renewal, free_quota_available=free_quota_available)
 
+    def process_scoped(self, *, run_id: str, operation):
+        """One explicitly selected durable task, under the existing R2A lease.
+
+        The caller must acquire its one-shot intent before entering. No polling,
+        reclaim loop or provider retry is introduced here.
+        """
+        run = self.repository.claim_next(
+            worker_id=self.worker_id, lease_seconds=self.lease_policy.lease_seconds, run_id=run_id,
+        )
+        if run is None:
+            return None
+        with RunLeaseRenewal(
+            self.repository, run_id=run.run_id, worker_id=self.worker_id,
+            fencing_token=run.fencing_token, policy=self.lease_policy,
+        ) as renewal:
+            return operation(run, renewal)
+
     def _process_claimed(
         self, run: RunRecord, renewal: RunLeaseRenewal, *, free_quota_available: bool,
     ) -> RunRecord:

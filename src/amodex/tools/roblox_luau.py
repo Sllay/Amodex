@@ -29,6 +29,26 @@ TOOL_NAME = "amodex_roblox_luau_test"
 SECRET_NAME = "AMODEX_ROBLOX_OPEN_CLOUD_API_KEY"
 
 
+def analyze_luau(source: str, analyzer: Path | None) -> dict[str, Any]:
+    if analyzer is None:
+        return {"status": "UNAVAILABLE"}
+    # Analyze the exact bytes subsequently submitted, without project config,
+    # user-controlled argv, shell, inherited credentials, or executing Luau.
+    with tempfile.TemporaryDirectory(prefix="amodex-luau-") as directory:
+        snapshot = Path(directory) / "test.luau"
+        snapshot.write_text(source, encoding="utf-8")
+        try:
+            result = subprocess.run(
+                [str(analyzer), str(snapshot)], cwd=directory,
+                env={"LANG": "C", "HOME": directory}, shell=False,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                timeout=10, check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return {"status": "ERROR"}
+    return {"status": "PASS" if result.returncode == 0 else "FAIL", "returncode": result.returncode}
+
+
 @dataclass(frozen=True)
 class SupervisedLuauApproval:
     """Trusted runner input, issued after review of pure source; never model input.
@@ -109,23 +129,7 @@ class RobloxLuauTestTool:
             raise ToolPolicyError("RUN_AUTHORITY_BLOCKED")
 
     def _analyze(self, source: str) -> dict[str, Any]:
-        if self.analyzer is None:
-            return {"status": "UNAVAILABLE"}
-        # Analyze the exact bytes subsequently submitted, without project config,
-        # user-controlled argv, shell, inherited credentials, or executing Luau.
-        with tempfile.TemporaryDirectory(prefix="amodex-luau-") as directory:
-            snapshot = Path(directory) / "test.luau"
-            snapshot.write_text(source, encoding="utf-8")
-            try:
-                result = subprocess.run(
-                    [str(self.analyzer), str(snapshot)], cwd=directory,
-                    env={"LANG": "C", "HOME": directory}, shell=False,
-                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                    timeout=10, check=False,
-                )
-            except (OSError, subprocess.TimeoutExpired):
-                return {"status": "ERROR"}
-        return {"status": "PASS" if result.returncode == 0 else "FAIL", "returncode": result.returncode}
+        return analyze_luau(source, self.analyzer)
 
     @staticmethod
     def _safe_logs(logs: tuple[str, ...], secret: str) -> tuple[list[str], bool]:
