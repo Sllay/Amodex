@@ -43,6 +43,11 @@ def database():
         c.execute(sql.SQL('CREATE DATABASE {} TEMPLATE {}').format(sql.Identifier(name),sql.Identifier(p.path[1:])))
     dsn=p._replace(path='/'+name).geturl()
     try:
+        # The source may already include 0010 in another developer's QA DB.
+        # Normalize ONLY the new feature, ONLY inside this disposable clone.
+        with psycopg.connect(dsn) as c:
+            c.execute('DROP TABLE IF EXISTS amodex_supervised_executions')
+            c.execute("DELETE FROM amodex_schema_migrations WHERE version='postbaseline/0010_supervised_coding.sql'")
         # Rehearse rollback of only the new additive DDL before committing it.
         with psycopg.connect(dsn) as c:
             c.execute(Path('migrations/postbaseline/0010_supervised_coding.sql').read_text())

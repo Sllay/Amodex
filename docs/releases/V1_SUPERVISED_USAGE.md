@@ -35,6 +35,16 @@ O JSON não contém credenciais. O navegador não pode enviar roots, executávei
 7. Vincular **uma** credencial gratuita autorizada nas configurações seguras desse host. O registry existente exige pool e rota explicitamente `free`; `unknown` permanece bloqueado. Para este adapter, selecionar uma rota **medida e ELIGIBLE** de implementação, com tool-calling/coding e contexto de pelo menos 16.000 tokens, pelos contratos existentes de Model Intelligence. Há suporte aos adapters OpenAI-compatible existentes de Groq/NVIDIA e a um modelo OpenRouter medido com sufixo `:free`; não se usa o roteador aleatório `openrouter/free` nem se cria um adapter Gemini novo.
 8. A observação existente de disponibilidade precisa ser `HEALTHY`, `free`, com cota disponível e idade entre zero e cinco minutos. Não fabricar medições nem transformar credencial presente em prova de gratuidade/cota. Se a rota ainda não foi medida/aprovada, preparar essa autorização separadamente, sem benchmarks/inferência pagos. Após a aprovação da tarefa, o processo verifica uma vez a autenticação/conectividade e a presença do modelo com GET `/models`, sem retry. HTTP 200 nesse GET **não** certifica custo ou cota; são gates independentes.
 
+Referências já usadas pelo registry (somente nomes; valores entram pelas configurações seguras do host):
+
+| Adapter | Referência da credencial | Classificação de billing | Destino HTTPS necessário |
+| --- | --- | --- | --- |
+| Groq | `GROQ_API_KEY` | `AMODEX_GROQ_BILLING_CLASS` | `api.groq.com` |
+| NVIDIA | `NVIDIA_API_KEY` | `AMODEX_NVIDIA_BILLING_CLASS` | `integrate.api.nvidia.com` |
+| OpenRouter | `OPENROUTER_API_KEY` | `AMODEX_OPENROUTER_BILLING_CLASS` | `openrouter.ai` |
+
+O proprietário deve verificar a gratuidade/cota antes de autorizar uma classificação `free`; não basta mudar uma string de configuração. O destino e a substituição do segredo HTTP também precisam estar autorizados no host executor, quando esse mecanismo for utilizado. Não houve mudança de network policy nesta tarefa.
+
 O segredo HTTP do Codex não é disponibilizado automaticamente ao Render, e a credencial Roblox não é uma credencial de modelo. Não copiar valores para chat, Git, prompts ou browser. Preservar o proxy e a CA configurados no host; o adapter mantém essas variáveis no processo isolado do Hermes.
 
 ## Operação no celular

@@ -1,0 +1,125 @@
+{
+  "recorded_at": "2026-11-08T13:15:39.735631+00:00",
+  "branch": "release/amodex-v1-supervised",
+  "base_sha": "e1309cacd8c6c95fc8e9ae816e4e23dc4617d36e",
+  "checkpoint_b_sha": "ab1e041aa6fd8817660f6b0bd676e2aad84c8d46",
+  "checkpoint_c_functional_sha": "7e6d256d772a97175719496054a7801362eb7df8",
+  "classification": "V1_BLOCKED",
+  "real_model": "REAL_MODEL_BLOCKED",
+  "real_provider_requests": 0,
+  "roblox_requests": 0,
+  "production_changes": false,
+  "checkpoint_a_repeated": false,
+  "distinct_new_cases": 47,
+  "affected_regression_cases": 19,
+  "pytest": {
+    "affected-regressions.xml": {
+      "tests": 19,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0
+    },
+    "isolated-launcher.xml": {
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0
+    },
+    "checkpoint-c.xml": {
+      "tests": 10,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0
+    },
+    "checkpoint-b.xml": {
+      "tests": 43,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0
+    },
+    "qa-baseline-compatibility.xml": {
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0
+    }
+  },
+  "python": "3.13.5",
+  "packages": {
+    "pytest": "9.0.2",
+    "fastapi": "0.162.0",
+    "pydantic": "2.13.5",
+    "httpx": "0.28.1",
+    "psycopg": "3.3.6",
+    "playwright": "1.58.0",
+    "openai": "2.29.0",
+    "python-dotenv": "1.2.1",
+    "rich": "14.3.3",
+    "fire": "0.7.1",
+    "tenacity": "9.1.4",
+    "tomli-w": "1.2.0",
+    "ruamel.yaml": "0.18.16",
+    "requests": "2.32.5",
+    "jinja2": "3.1.6",
+    "prompt-toolkit": "3.0.52",
+    "croniter": "6.2.0",
+    "snowballstemmer": "3.0.1",
+    "packaging": "26.0",
+    "truststore": "0.10.4",
+    "psutil": "7.2.2"
+  },
+  "hermes_commit": "adecc4024456b387b1518813b90bd60c82b51287",
+  "hermes_probe_provider": "deterministic loopback HTTP, no real inference",
+  "analyzer_sha256": "151d8490740c7afc10638ef6e396fd50ab6f4b02a4ddf3b924abdea30f0e9820",
+  "mobile": {
+    "browser": "Chromium 156.0.8078.79",
+    "viewport": [
+      390,
+      844
+    ],
+    "touch": true,
+    "iphone_hardware_tested": false,
+    "safari_tested": false
+  },
+  "database": {
+    "target": "isolated loopback clones of previously validated A baseline",
+    "new_migrations_applied_only": [
+      "postbaseline/0010_supervised_coding.sql"
+    ],
+    "new_ddl_rollback_and_reentry": true
+  },
+  "commands": [
+    "PYTHONPATH=src python -m pytest tests/integration/test_v1_supervised_execution.py tests/unit/test_v1_supervised_guard.py tests/unit/test_v1_supervised_selection.py --junitxml=docs/releases/evidence/v1-supervised/bc/checkpoint-b.xml -xq",
+    "PYTHONPATH=src:tests/integration python -m pytest tests/integration/test_v1_supervised_mobile.py tests/integration/test_v1_supervised_execution.py::test_web_composition_exposes_private_mobile_entry tests/integration/test_v1_supervised_execution.py::test_wrong_target_scope_or_source_is_denied --junitxml=docs/releases/evidence/v1-supervised/bc/checkpoint-c.xml -xq",
+    "PYTHONPATH=src python -m pytest tests/integration/test_v1_supervised_execution.py::test_actual_isolated_launcher_persists_missing_real_model_block --junitxml=docs/releases/evidence/v1-supervised/bc/isolated-launcher.xml -xq",
+    "PYTHONPATH=src:tests/integration python -m pytest tests/unit/test_access_gate.py tests/integration/test_run_lease_fencing_r2a.py::test_claim_skips_locked_rows_and_increments_fence tests/integration/test_run_lease_fencing_r2a.py::test_valid_transition_and_renewal_extend_without_shortening tests/integration/test_run_lease_fencing_r2a.py::test_fast_provider_completes_once_and_stops_renewal tests/integration/test_runner_dispatch_idempotency_r3.py::test_two_identical_posts_overlap_during_sending_and_only_one_dispatches tests/integration/test_runner_terminal_receipts_r2b.py::test_response_lost_after_commit_is_recognized_once tests/integration/test_runner_terminal_receipts_r2b.py::test_receipt_query_requires_machine_auth_and_exact_identity tests/integration/test_runner_supervision_ownership_r4.py::test_server_rejection_prevents_launch_and_late_report tests/integration/test_roblox_agent_execution.py::test_unconfigured_worker_keeps_original_surface tests/integration/test_roblox_agent_execution.py::test_deterministic_agent_edits_analyzes_executes_and_reads_result_through_worker_run --junitxml=docs/releases/evidence/v1-supervised/bc/affected-regressions.xml -xq",
+    "PYTHONPATH=src python scripts/v1_supervised_hermes_probe.py --hermes-root /tmp/amodex-v1-hermes-runtime --analyzer /tmp/amodex-task08-tools/luau-analyze --output docs/releases/evidence/v1-supervised/bc/pinned-hermes-loopback.json",
+    "PYTHONPATH=src python scripts/v1_supervised_hermes_probe.py --hermes-root /tmp/amodex-v1-hermes-runtime --analyzer /tmp/amodex-task08-tools/luau-analyze --mode http500 --output /tmp/amodex-pinned-probe-failure.json",
+    "PYTHONPATH=src python scripts/v1_supervised_preflight.py > docs/releases/evidence/v1-supervised/bc/provider-preflight.json",
+    "PYTHONPATH=src python -m pytest tests/integration/test_v1_supervised_execution.py::test_actual_isolated_launcher_persists_missing_real_model_block --junitxml=docs/releases/evidence/v1-supervised/bc/qa-baseline-compatibility.xml -xq (source QA DB already includes 0010; only disposable clone normalized)"
+  ],
+  "test_environment": {
+    "AMODEX_TEST_DATABASE_URL": "loopback amodex_qa_v1_closeout (new tests clone it), amodex_qa_v1_bc_regression (affected regressions)",
+    "AMODEX_TEST_LUAU_ANALYZER": "/tmp/amodex-task08-tools/luau-analyze",
+    "AMODEX_TEST_EVIDENCE_DIR": "docs/releases/evidence/v1-supervised/bc"
+  },
+  "intermediate_failures_corrected": [
+    "test fixture project engine column",
+    "Playwright argument signature/closed details text",
+    "expected UI blocker copy after explanatory text",
+    "pinned Hermes per-request client escaped initial-only hooks; guarded factory and added regression"
+  ],
+  "artifact_checksums": {
+    "affected-regressions.xml": "34864b072640dc93344da144ef256bf9387c566f98f3fce3ef336e577b8b1b72",
+    "checkpoint-b.xml": "79f58220ca9ceff2f7ed052a66d345c6e2d1d9c73d50a30760e8f686a5363991",
+    "checkpoint-c.xml": "c3b5673baa66a5d70a9902b3d8ba4d6149caf0452850239bcc66d317bd5fd099",
+    "isolated-launcher.xml": "67f687f0522cc5b72e305564dd41e421b6fe9a4314a2435af08fe5998402230b",
+    "mobile-blocked.png": "74f98c78eb6c6fec0d62799f14f556868a8088fdb2323c56f84bdb3be4c43114",
+    "mobile-simulated.png": "c47311e3b2d0be3fc848aeb18534f29a96faf9bb897e0382b0bc1cc267810114",
+    "pinned-hermes-http500.json": "5c898a4d53e37ffe08ba124ae6682aa9155b9c60ec4d1280d33cae2bcbca7040",
+    "pinned-hermes-loopback.json": "5bfe5ffec5c1af3587b12a0468451e470633780428e33159b7647c19ea1d664b",
+    "provider-preflight.json": "f3fe2704ade86621dc282680ffad44cc9b95989ccb1c388578ee8696bc8f9c03",
+    "qa-baseline-compatibility.xml": "6dec6627433b32fe542942941ca311d64ec487d8f9c06146b6b5a6eabf598fcc"
+  },
+  "production_code_changed_after_checkpoint_c": false
+}
