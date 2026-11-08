@@ -139,11 +139,15 @@ child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(30)'])
 open({str(pidfile)!r},'w').write(str(os.getpid())+' '+str(child.pid))
 time.sleep(30)
 '''
-    def heartbeat(number):
-        if number == 2:
-            assert pidfile.exists()
-    control = Control([A.HEALTHY, A.LEASE_LOST], heartbeat)
-    with supervisor(tmp_path, control) as s:
+    class LossAfterStarted(Control):
+        def check_authority(self, **kwargs):
+            result = super().check_authority(**kwargs)
+            # Inject loss only once both processes actually announced readiness.
+            # A fixed second heartbeat races Python process startup on busy hosts.
+            ready = pidfile.exists() and len(pidfile.read_text().split()) == 2
+            return replace(result, status=A.LEASE_LOST) if ready else result
+    control = LossAfterStarted()
+    with supervisor(tmp_path, control, work_timeout_seconds=2) as s:
         result = s.run(python(source), operation="provider")
         assert result.status == "BLOCKED" and result.outcome_unknown
         assert s.run(python(source), operation="provider").status == "BLOCKED"

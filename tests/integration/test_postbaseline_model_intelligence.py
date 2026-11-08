@@ -94,7 +94,8 @@ class FakeRegistry:
         self.candidates = {item.route_id: item for item in candidates}
         self.clients = {item.route_id: FakeProvider(name=item.provider) for item in candidates}
 
-    def client_for(self, candidate):
+    def client_for(self, candidate, *, operation="chat"):
+        assert operation in {"chat", "benchmark"}
         configured = self.candidates.get(candidate.route_id)
         if configured is None:
             raise ProviderExecutionDenied("fixture route unavailable")

@@ -1,0 +1,30 @@
+{
+  "checkpoint": "A",
+  "source_base": "af79465c4920d269d5823e854cda295c8b7abe93",
+  "tests": {
+    "passed": 65,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "scope": [
+    "migration upgrade 13 to 15 with legacy data",
+    "migration reentrancy",
+    "transactional DDL rollback rehearsal",
+    "readiness rejects missing migrations",
+    "targeted R1/R2A/R2B/R3/R4 regressions",
+    "existing deterministic Hermes tool path",
+    "Model Intelligence contracts and resilience",
+    "offline zero-cost host preflight"
+  ],
+  "corrections": [
+    "FakeRegistry now accepts the production operation keyword; eight baseline failures resolved without changing production routing.",
+    "R4 descendant-cleanup test injects loss after explicit child readiness, removing a process-startup timing race."
+  ],
+  "database": "PostgreSQL 17.11; disposable loopback databases only",
+  "production_migrations_changed": false,
+  "live_inference": false,
+  "open_cloud_requests": 0,
+  "production_source_changes": false,
+  "junit_policy": "Latest result per testcase; no xfail/skip; initial failures preserved as described corrections."
+}
