@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+import json
 from urllib.parse import urlparse
 import os
 
@@ -9,6 +10,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from amodex.contracts.ids import new_uuid7
 from amodex.api.app import create_app
 from amodex.api.workspace_app import create_workspace_app
 from amodex.deployment.migrations import apply_production_migrations, database_endpoint_identity
@@ -68,7 +70,8 @@ def workspace(request, environment_product_state, monkeypatch, tmp_path):
 def mutate(case, action, *, client=None, headers=None, owner=OWNER):
     body = {"github_run_id": owner}
     if action == "report":
-        body.update(state="COMPLETED", summary="synthetic validation")
+        body.update(state="COMPLETED", summary="synthetic validation",
+                    attempt_id=case.jobs.get_runner_job(case.job_id).execution_attempt_id or new_uuid7())
     return (client or case.machine).post(case.prefix+"/"+action, headers=headers,
                                         params=body if action == "claim" else None,
                                         json=None if action == "claim" else body)
@@ -177,7 +180,7 @@ def test_terminal_report_requires_claim(workspace, phase, terminal):
         with psycopg.connect(case.jobs.dsn) as conn:
             conn.execute("UPDATE amodex_environment_runner_jobs SET state=%s WHERE job_id=%s", (phase, case.job_id))
     response = case.machine.post(case.prefix+"/report", headers=AUTH,
-                                 json={"github_run_id": OWNER, "state": terminal, "summary": "pre-claim"})
+                                 json={"github_run_id": OWNER, "attempt_id": new_uuid7(), "state": terminal, "summary": "pre-claim"})
     assert response.status_code == 409
     assert response.json()["detail"]["code"] == "RUNNER_JOB_TERMINAL_CONFLICT"
     assert case.jobs.get_runner_job(case.job_id).state.value == phase
@@ -187,7 +190,7 @@ def test_terminal_report_requires_claim(workspace, phase, terminal):
 def test_claimed_owner_can_report_failure_or_cancellation(workspace, terminal):
     assert mutate(workspace, "claim", headers=AUTH).status_code == 200
     response = workspace.machine.post(workspace.prefix+"/report", headers=AUTH,
-                                     json={"github_run_id": OWNER, "state": terminal, "summary": "post-claim"})
+                                     json={"github_run_id": OWNER, "attempt_id": workspace.jobs.get_runner_job(workspace.job_id).execution_attempt_id, "state": terminal, "summary": "post-claim"})
     assert response.status_code == 200
 
 
@@ -229,8 +232,30 @@ def test_actual_cli_and_client_work_through_the_real_workspace_gate(workspace, m
                 ["running", case.job_id], ["heartbeat", case.job_id],
                 ["report", case.job_id, "--state", "COMPLETED", "--summary", "synthetic CLI report"]]
     for command in commands:
+        if command[0] == "report":
+            command += ["--attempt-id", case.jobs.get_runner_job(case.job_id).execution_attempt_id]
         runner_cli.main([*command, "--github-run-id", OWNER])
     assert claim_file.is_file()
     assert case.jobs.get_runner_job(case.job_id).state.value == "COMPLETED"
     assert not case.machine.cookies
-    assert TOKEN not in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert TOKEN not in output
+    confirmation = json.loads(output.splitlines()[-1])
+    assert confirmation["receipt_id"] == case.jobs.get_runner_job(case.job_id).terminal_receipt_id
+    assert confirmation["attempt_id"] == case.jobs.get_runner_job(case.job_id).execution_attempt_id
+
+
+def test_machine_can_only_read_its_exact_terminal_receipt_through_private_gate(workspace):
+    case=workspace
+    assert mutate(case,'claim',headers=AUTH).status_code==200
+    receipt=mutate(case,'report',headers=AUTH).json()
+    query=case.prefix+'/terminal-receipt'
+    params={'github_run_id':OWNER,'attempt_id':receipt['attempt_id'],'report_digest':receipt['report_digest']}
+    assert case.machine.get(query,params=params).status_code==401
+    read=case.machine.get(query,params=params,headers=AUTH)
+    assert read.status_code==200 and read.json()==receipt
+    assert not case.machine.cookies
+    assert case.machine.get('/v1/projects',headers=AUTH).status_code==401
+    assert case.machine.get(query+'/extra',params=params,headers=AUTH).status_code==401
+    assert case.machine.post(query,json=params,headers=AUTH).status_code==401
+    assert case.machine.get(query,params={**params,'github_run_id':'other'},headers=AUTH).status_code==409

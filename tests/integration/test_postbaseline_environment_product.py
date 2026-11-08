@@ -51,6 +51,7 @@ def environment_product_state() -> tuple[
         conn.execute(Path("migrations/postbaseline/0002_environment_product_runners.sql").read_text(encoding="utf-8"))
         conn.execute(Path("migrations/postbaseline/0004_environment_runner_leases.sql").read_text())
         conn.execute(Path("migrations/postbaseline/0008_runner_dispatch_idempotency.sql").read_text())
+        conn.execute(Path("migrations/postbaseline/0009_runner_terminal_receipts.sql").read_text())
         conn.execute(
             """
             TRUNCATE
@@ -184,6 +185,7 @@ def test_godot_environment_dispatch_claim_report_usage_and_dashboard(environment
             json={
                 "state": "COMPLETED",
                 "summary": "Godot headless + MCP validation passed",
+                "attempt_id": claim["job"]["execution_attempt_id"],
                 "result_commit": "a" * 40,
                 "github_run_id": "12345",
                 "evidence": {"godot": True, "mcp": True},

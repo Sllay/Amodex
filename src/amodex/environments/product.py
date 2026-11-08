@@ -4,13 +4,15 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
+import hashlib
+import json
 import re
 from typing import Any, Literal
 
 from pydantic import Field, field_validator
 
 from amodex.contracts.base import ContractModel, require_utc
-from amodex.contracts.ids import UUIDv7Str
+from amodex.contracts.ids import UUIDv7Str, validate_uuid7
 from amodex.providers.budget import TaskBudgetClass
 
 
@@ -113,6 +115,8 @@ class RunnerJobRecord(ContractModel):
     dispatch_started_at: datetime | None = None
     dispatch_finished_at: datetime | None = None
     dispatch_error_code: str | None = None
+    execution_attempt_id: UUIDv7Str | None = None
+    terminal_receipt_id: UUIDv7Str | None = None
 
     @field_validator("created_at", "updated_at", "claimed_at", "completed_at", "last_heartbeat_at", "lease_expires_at",
                      "dispatch_started_at", "dispatch_finished_at")
@@ -155,7 +159,8 @@ class RunnerJobHeartbeatRequest(RunnerJobIdentityRequest):
 
 
 class RunnerReportRequest(RunnerJobIdentityRequest):
-    schema_version: int = 1
+    schema_version: Literal[1] = 1
+    attempt_id: UUIDv7Str
     state: RunnerJobState
     summary: str = Field(min_length=1, max_length=4000)
     result_commit: str | None = Field(default=None, pattern=r"^[0-9a-f]{40}$")
@@ -167,6 +172,62 @@ class RunnerReportRequest(RunnerJobIdentityRequest):
         if value not in {RunnerJobState.COMPLETED, RunnerJobState.FAILED, RunnerJobState.CANCELLED}:
             raise ValueError("runner report state must be terminal")
         return value
+
+    def digest(self, job_id: str) -> str:
+        # Hash the complete normalized intent, BEFORE redacting presentation text.
+        value = {"job_id": validate_uuid7(job_id), **self.model_dump(mode="json")}
+        return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"),
+            ensure_ascii=False, allow_nan=False).encode()).hexdigest()
+
+    def safe_evidence(self) -> dict[str, Any]:
+        """A small evidence contract, not an arbitrary log/header storage channel."""
+        if len(json.dumps(self.evidence, allow_nan=False)) > 8192:
+            raise ValueError("REPORT_EVIDENCE_INVALID")
+        for key, value in self.evidence.items():
+            valid = False
+            if key in {"godot", "mcp", "godot_import", "godot_mcp_probe"}:
+                valid = type(value) is bool
+            elif key in {"checks", "score"}:
+                valid = type(value) is int and -1_000_000_000 <= value <= 1_000_000_000
+            elif key == "source_sha":
+                valid = isinstance(value, str) and re.fullmatch(r"[0-9a-f]{40}", value) is not None
+            elif key == "runner":
+                valid = isinstance(value, str) and value in {"github-actions", "desktop", "deterministic", "local-test"}
+            elif key == "engine":
+                valid = isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_. -]{1,100}", value) is not None
+            elif key == "github_run_id":
+                valid = value == self.github_run_id
+            elif key == "references":
+                valid = isinstance(value, list) and len(value) <= 20 and all(
+                    isinstance(ref, str) and re.fullmatch(r"(?:evidence|artifact)://[A-Za-z0-9][A-Za-z0-9_./-]{0,199}", ref)
+                    and ".." not in ref.split("/") for ref in value)
+            if not valid:
+                raise ValueError("REPORT_EVIDENCE_INVALID")
+        return self.evidence
+
+    def safe_summary(self) -> str:
+        text = "".join(c for c in self.summary if c.isprintable())
+        text = re.sub(r"(?i)bearer\s+\S+", "[REDACTED]", text)
+        text = re.sub(r"(?i)(?:authorization|x-api-key|token|secret|password)\s*[:=].*", "[REDACTED]", text)
+        return re.sub(r"https?://\S+", "[URL REDACTED]", text)[:4000]
+
+
+class RunnerTerminalReceipt(ContractModel):
+    schema_version: Literal[1] = 1
+    receipt_id: UUIDv7Str
+    job_id: UUIDv7Str
+    attempt_id: UUIDv7Str
+    github_run_id: str
+    report_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    state: RunnerJobState
+    summary: str
+    result_commit: str | None
+    evidence: dict[str, Any]
+    audit_id: UUIDv7Str
+    environment_id: UUIDv7Str
+    session_id: UUIDv7Str
+    run_id: UUIDv7Str
+    committed_at: datetime
 
 
 class UsageProjection(ContractModel):

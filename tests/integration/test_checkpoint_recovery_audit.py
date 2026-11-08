@@ -1,4 +1,4 @@
-"""CR-01/02/04 regressions and R3 dispatch regressions; characterization of still-open CR-05/06/08/09.
+"""R1/R2A/R3/R2B regressions and characterization of remaining Recovery gaps.
 
 Only loopback PostgreSQL, local Git fixtures and deterministic fakes are used.
 Passing characterization cases for other issues are not product approval.
@@ -19,6 +19,8 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from amodex.contracts.ids import new_uuid7
+from amodex.storage.product import PostgresProductRepository
 from amodex.api.app import create_app
 from amodex.api.access_gate import AccessGateConfig, install_access_gate
 from amodex.environments.product import RunnerJobState
@@ -123,7 +125,7 @@ def test_terminal_identity_is_required_while_job_and_run_remain_separate(audit):
     client, runs, _, jobs, _, job_id, run_id, *_ = audit
     claim(client, job_id)
     path = f"/v1/runner-jobs/{job_id}/report"
-    body = {"state": "COMPLETED", "summary": "synthetic report"}
+    body = {"state": "COMPLETED", "summary": "synthetic report", "attempt_id": jobs.get_runner_job(job_id).execution_attempt_id}
     wrong = client.post(path, json={**body, "github_run_id": "other-workflow"}, headers=AUTH)
     assert wrong.status_code == 409
     assert wrong.json()["detail"]["code"] == "RUNNER_LEASE_OWNER_MISMATCH"
@@ -146,7 +148,7 @@ def test_unclaimed_job_rejects_normal_runner_terminal_reports(audit, state, phas
         with psycopg.connect(jobs.dsn) as conn:
             conn.execute("UPDATE amodex_environment_runner_jobs SET state=%s WHERE job_id=%s", (phase, job_id))
     response = client.post(f"/v1/runner-jobs/{job_id}/report", headers=AUTH,
-                           json={"state": state, "summary": "synthetic pre-claim report", "github_run_id": "workflow-a"})
+                           json={"state": state, "summary": "synthetic pre-claim report", "attempt_id": new_uuid7(), "github_run_id": "workflow-a"})
     assert response.status_code == 409
     assert response.json()["detail"]["code"] == "RUNNER_JOB_TERMINAL_CONFLICT"
     assert jobs.get_runner_job(job_id).state.value == phase
@@ -163,7 +165,7 @@ def test_expired_runner_lease_rejects_renewal_running_and_report_without_reclaim
                        json={"github_run_id": "workflow-a"}).status_code == 409
     for owner in ["workflow-a", None]:
         response = client.post(f"/v1/runner-jobs/{job_id}/report", headers=AUTH,
-                               json={"state": "COMPLETED", "summary": "late", "github_run_id": owner})
+                               json={"state": "COMPLETED", "summary": "late", "attempt_id": jobs.get_runner_job(job_id).execution_attempt_id, "github_run_id": owner})
         assert response.status_code == (409 if owner is not None else 422)
         if owner is not None:
             assert response.json()["detail"]["code"] == "RUNNER_LEASE_LOST"
@@ -213,33 +215,35 @@ def test_repeated_dispatch_post_reuses_job_and_external_attempt(audit):
     assert len(dispatcher.job_ids) == 1
 
 
-def test_report_retry_is_conflict_after_completion_not_idempotent_success(audit):
-    client, _, product, _, _, job_id, *_ = audit
+def test_report_retry_returns_original_receipt_without_duplicate_audit(audit):
+    client, _, product, jobs, _, job_id, *_ = audit
     claim(client, job_id)
-    body = {"state": "COMPLETED", "summary": "same result", "github_run_id": "workflow-a"}
+    body = {"state": "COMPLETED", "summary": "same result", "github_run_id": "workflow-a", "attempt_id": jobs.get_runner_job(job_id).execution_attempt_id}
     path = f"/v1/runner-jobs/{job_id}/report"
-    assert client.post(path, json=body, headers=AUTH).status_code == 200
+    first = client.post(path, json=body, headers=AUTH)
+    assert first.status_code == 200
     repeated = client.post(path, json=body, headers=AUTH)
-    assert repeated.status_code == 409
-    assert repeated.json()["detail"]["code"] == "RUNNER_JOB_TERMINAL_CONFLICT"
+    assert repeated.status_code == 200 and repeated.json() == first.json()
     assert sum(e.action == "RUNNER_JOB_COMPLETED" for e in product.list_audit()) == 1
 
 
-def test_terminal_commit_and_audit_are_currently_separate_transactions(audit, monkeypatch):
+def test_terminal_and_audit_failure_roll_back_together(audit, monkeypatch):
     client, _, product, jobs, _, job_id, *_ = audit
     claim(client, job_id)
-    original = product.append_audit
-    def fail_audit(**kwargs):
-        if kwargs["action"] == "RUNNER_JOB_COMPLETED":
-            raise RuntimeError("synthetic audit persistence failure")
-        return original(**kwargs)
-    monkeypatch.setattr(product, "append_audit", fail_audit)
-    body = {"state": "COMPLETED", "summary": "result persisted before audit", "github_run_id": "workflow-a"}
-    path = f"/v1/runner-jobs/{job_id}/report"
+    original = PostgresProductRepository._insert_audit
+    def fail_audit(cur, **kwargs):
+        if kwargs['action'] == 'RUNNER_JOB_COMPLETED':
+            raise RuntimeError('synthetic audit failure')
+        return original(cur, **kwargs)
+    monkeypatch.setattr(PostgresProductRepository, '_insert_audit', staticmethod(fail_audit))
+    body = {'state':'COMPLETED','summary':'atomic validation','github_run_id':'workflow-a',
+            'attempt_id':jobs.get_runner_job(job_id).execution_attempt_id}
+    path = f'/v1/runner-jobs/{job_id}/report'
     assert client.post(path, json=body, headers=AUTH).status_code == 500
-    assert jobs.get_runner_job(job_id).state == RunnerJobState.COMPLETED
-    assert not any(e.action == "RUNNER_JOB_COMPLETED" for e in product.list_audit())
-    assert client.post(path, json=body, headers=AUTH).status_code == 409
+    assert jobs.get_runner_job(job_id).state == RunnerJobState.CLAIMED
+    assert not any(e.action == 'RUNNER_JOB_COMPLETED' for e in product.list_audit())
+    monkeypatch.setattr(PostgresProductRepository, '_insert_audit', staticmethod(original))
+    assert client.post(path, json=body, headers=AUTH).status_code == 200
 
 
 def test_run_rejects_expired_owner_before_and_after_takeover(audit):

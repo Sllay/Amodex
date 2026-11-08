@@ -28,6 +28,7 @@ def owned(scope, monkeypatch, tmp_path):
         return s.client.request(method, url, **{k: kwargs[k] for k in ("headers", "json", "params") if k in kwargs})
     monkeypatch.setattr(httpx, "request", request)
     s.job, s.calls = job, calls
+    s.attempt = s.jobs.get_runner_job(job).execution_attempt_id
     s.control = RunnerControlClient("http://testserver", "local-r3-test-token")
     s.supervisor = lambda client=s.control: RunnerSupervisor(client=client, job_id=job, github_run_id="owner",
         state_file=tmp_path/"state.json", interval_seconds=.04, grace_seconds=.1, control_timeout_seconds=2)
@@ -48,7 +49,7 @@ def test_server_rejection_prevents_launch_and_late_report(owned, tmp_path, fault
         with psycopg.connect(s.jobs.dsn) as conn:
             conn.execute("UPDATE amodex_environment_runner_jobs SET github_run_id='other' WHERE job_id=%s", (s.job,))
     elif fault == "terminal":
-        s.jobs.report_runner_job(job_id=s.job, github_run_id="owner", state=RunnerJobState.COMPLETED, summary="already done", result_commit=None)
+        s.jobs.report_runner_job(job_id=s.job, github_run_id="owner", state=RunnerJobState.COMPLETED, summary="already done", result_commit=None, attempt_id=s.attempt)
     else:
         s.control = RunnerControlClient("http://testserver", "incorrect-synthetic-token")
         expected = AuthorityStatus.AUTH_REJECTED
@@ -81,7 +82,7 @@ def test_expiry_during_active_process_stops_and_server_still_rejects_late_report
         assert supervisor.report(state="FAILED", summary="late").status == "REPORT_BLOCKED"
     assert not marker.exists() and "report" not in s.calls
     with pytest.raises(RunnerClientError) as rejected:
-        s.control.report(job_id=s.job, github_run_id="owner", state="COMPLETED", summary="bypass attempt")
+        s.control.report(job_id=s.job, github_run_id="owner", state="COMPLETED", summary="bypass attempt", attempt_id=s.attempt)
     assert rejected.value.status == AuthorityStatus.LEASE_LOST
     assert s.jobs.get_runner_job(s.job).state.value == "CLAIMED"
 

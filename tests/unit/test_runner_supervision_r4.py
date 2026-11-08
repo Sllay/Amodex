@@ -16,6 +16,10 @@ import pytest
 
 from amodex.runners.client import AuthorityStatus as A, HeartbeatResult, RunnerControlClient
 from amodex.runners.supervisor import RunnerSupervisor
+from amodex.environments.product import RunnerReportRequest, RunnerTerminalReceipt
+
+JOB = "019a3d70-0000-7000-8000-000000000001"
+ATTEMPT = "019a3d70-0000-7000-8000-000000000002"
 
 
 class Control:
@@ -29,18 +33,23 @@ class Control:
         self.beats += 1
         if self.on_heartbeat: self.on_heartbeat(self.beats)
         status = self.replies.pop(0) if self.replies else A.HEALTHY
-        return HeartbeatResult(status, lease_expires_at=datetime.now(timezone.utc)+timedelta(seconds=60))
+        return HeartbeatResult(status, lease_expires_at=datetime.now(timezone.utc)+timedelta(seconds=60), attempt_id=ATTEMPT)
 
     def running(self, **kwargs):
         return {**kwargs, "state": "RUNNING"}
 
     def report(self, **kwargs):
         self.reports.append(kwargs)
-        return {**kwargs}
+        job = kwargs['job_id']
+        body = RunnerReportRequest(**{k:v for k,v in kwargs.items() if k!='job_id'})
+        return RunnerTerminalReceipt(receipt_id=JOB,job_id=job,attempt_id=body.attempt_id,
+            github_run_id=body.github_run_id,report_digest=body.digest(job),state=body.state,
+            summary=body.summary,result_commit=body.result_commit,evidence=body.evidence,
+            audit_id=JOB,environment_id=JOB,session_id=JOB,run_id=JOB,committed_at=datetime.now(timezone.utc)).model_dump(mode='json')
 
 
 def supervisor(tmp_path, control=None, **kwargs):
-    return RunnerSupervisor(client=control or Control(), job_id="job", github_run_id="owner",
+    return RunnerSupervisor(client=control or Control(), job_id=JOB, github_run_id="owner",
         state_file=tmp_path/"supervision.json", interval_seconds=0.03, grace_seconds=0.08,
         control_timeout_seconds=0.2, **kwargs)
 
@@ -73,7 +82,7 @@ def test_response_classification_uses_status_and_api_code_not_message(monkeypatc
     calls = []
     def request(*args, **kwargs):
         calls.append(kwargs)
-        body = {"job_id": "job", "github_run_id": "owner", "state": "RUNNING",
+        body = {"job_id": "job", "github_run_id": "owner", "state": "RUNNING", "execution_attempt_id": ATTEMPT,
                 "lease_expires_at": (datetime.now(timezone.utc)+timedelta(seconds=60)).isoformat()}
         if status != 200: body = {"detail": {"code": code, "message": "private-body secret-token"}}
         return httpx.Response(status, json=body)
@@ -104,7 +113,7 @@ def test_timeout_and_network_failure_are_unconfirmed_not_definitive_loss(monkeyp
     ({"lease_expires_at": "2000-01-01T00:00:00"}, A.AUTHORITY_UNCONFIRMED),
 ])
 def test_inconclusive_or_incompatible_acknowledgement(monkeypatch, change, expected):
-    body = {"job_id": "job", "github_run_id": "owner", "state": "RUNNING",
+    body = {"job_id": "job", "github_run_id": "owner", "state": "RUNNING", "execution_attempt_id": ATTEMPT,
             "lease_expires_at": (datetime.now(timezone.utc)+timedelta(seconds=60)).isoformat(), **change}
     monkeypatch.setattr(httpx, "request", lambda *a, **k: httpx.Response(200, json=body))
     assert RunnerControlClient("https://unused.invalid", "synthetic").check_authority(job_id="job", github_run_id="owner").status == expected
@@ -216,7 +225,7 @@ def test_ambiguous_terminal_report_is_never_replayed(tmp_path):
 
 def test_stale_started_operation_blocks_after_simulated_sigkill(tmp_path):
     # SIGKILL cannot run Python cleanup. Persisted STARTED is conservatively unknown.
-    (tmp_path/"supervision.json").write_text(json.dumps({"job_id":"job", "github_run_id":"owner", "operations":{"provider":"STARTED"}}))
+    (tmp_path/"supervision.json").write_text(json.dumps({"job_id":JOB, "github_run_id":"owner", "operations":{"provider":"STARTED"}}))
     control = Control()
     with supervisor(tmp_path, control) as s:
         assert s.run(python("pass"), operation="provider").status == "BLOCKED"
@@ -307,6 +316,10 @@ def test_live_sigterm_reaches_supervisor_and_cleans_process_group(tmp_path):
     # Run in a separate main thread/process so real SIGTERM exercises the handler.
     runner.write_text(f'''from pathlib import Path
 from amodex.runners.supervisor import RunnerSupervisor
+from amodex.environments.product import RunnerReportRequest, RunnerTerminalReceipt
+
+JOB = "019a3d70-0000-7000-8000-000000000001"
+ATTEMPT = "019a3d70-0000-7000-8000-000000000002"
 from test_runner_supervision_r4 import Control,python
 with RunnerSupervisor(client=Control(),job_id='job',github_run_id='owner',state_file=Path({str(tmp_path/'state')!r}),interval_seconds=.03,grace_seconds=.08) as s:
  r=s.run(python("import os,time; open({str(child)!r},'w').write(str(os.getpid())); time.sleep(30)"),operation='work')

@@ -23,6 +23,7 @@ import time
 from dataclasses import asdict, dataclass
 
 from amodex.runners.client import AuthorityStatus, RunnerClientError, RunnerControlClient
+from amodex.environments.product import RunnerReportRequest, RunnerTerminalReceipt
 
 
 @dataclass(frozen=True)
@@ -31,6 +32,7 @@ class SupervisionResult:
     returncode: int | None = None
     authority: str | None = None
     outcome_unknown: bool = False
+    receipt_id: str | None = None
 
 
 class RunnerSupervisor:
@@ -116,11 +118,11 @@ class RunnerSupervisor:
         self._save()
 
     @contextmanager
-    def _bounded_control(self):
+    def _bounded_control(self, *, require_lease: bool = True):
         # Bound the whole request, not just each HTTP transport phase. This also
         # stops an inconclusive/slow response from outliving our known lease.
         timeout = self.control_timeout
-        if self._lease_deadline is not None:
+        if require_lease and self._lease_deadline is not None:
             timeout = min(timeout, self._lease_deadline - time.monotonic())
         if timeout <= 0:
             raise TimeoutError()
@@ -151,6 +153,13 @@ class RunnerSupervisor:
             if not isinstance(status, AuthorityStatus):
                 raise ValueError("invalid authority result")
             if status == AuthorityStatus.HEALTHY:
+                if not result.attempt_id:
+                    raise ValueError("missing execution identity")
+                if self.state.get("attempt_id", result.attempt_id) != result.attempt_id:
+                    status = AuthorityStatus.LEASE_LOST
+                else:
+                    self.state["attempt_id"] = result.attempt_id
+                    self._save()
                 remaining = (result.lease_expires_at - datetime.now(timezone.utc)).total_seconds()
                 if remaining <= 0:
                     status = AuthorityStatus.LEASE_LOST
@@ -313,20 +322,48 @@ class RunnerSupervisor:
             self._record_cancel()
             return SupervisionResult("CANCELLED")
         self.state["terminal_attempted"] = True
+        body = RunnerReportRequest(attempt_id=self.state["attempt_id"],github_run_id=self.owner,
+            state=state,summary=summary,result_commit=result_commit,evidence=evidence or {})
+        body.safe_evidence()
+        self.state["terminal_intent"] = {"attempt_id": body.attempt_id, "report_digest": body.digest(self.job_id), "state": state}
         self._save()
         try:
             with self._bounded_control():
                 receipt = self.client.report(job_id=self.job_id, github_run_id=self.owner, state=state,
-                                             summary=summary, result_commit=result_commit, evidence=evidence)
-            if (receipt.get("job_id"), receipt.get("github_run_id"), receipt.get("state")) != (self.job_id, self.owner, state):
-                raise ValueError("inconclusive receipt")
-            return SupervisionResult("REPORTED", outcome_unknown=self.state.get("outcome_unknown", False))
+                                             summary=body.summary, result_commit=body.result_commit,
+                                             evidence=body.evidence, attempt_id=body.attempt_id)
+            accepted = self._recognize_receipt(receipt)
+            return SupervisionResult("REPORTED", outcome_unknown=self.state.get("outcome_unknown", False), receipt_id=accepted.receipt_id)
         except RunnerClientError as exc:
             self.state.update(blocked=exc.status.value, work_stopped=True)
             self._save()
             return SupervisionResult("REPORT_UNKNOWN", authority=exc.status.value, outcome_unknown=True)
         except Exception:
             return SupervisionResult("REPORT_UNKNOWN", outcome_unknown=True)
+
+    def _recognize_receipt(self, value: dict) -> RunnerTerminalReceipt:
+        receipt = RunnerTerminalReceipt.model_validate(value)
+        intent = self.state["terminal_intent"]
+        if (receipt.job_id, receipt.github_run_id, receipt.attempt_id, receipt.report_digest, receipt.state.value) != (
+                self.job_id, self.owner, intent["attempt_id"], intent["report_digest"], intent["state"]):
+            raise ValueError("receipt mismatch")
+        self.state["receipt_id"] = receipt.receipt_id
+        self._save()
+        return receipt
+
+    def reconcile_receipt(self) -> SupervisionResult:
+        """Explicit read-only recognition: never heartbeat, POST, dispatch or work."""
+        intent = self.state.get("terminal_intent")
+        if self._lock_file is None or not self.state.get("terminal_attempted") or not intent:
+            return SupervisionResult("UNKNOWN_OUTCOME", outcome_unknown=True)
+        try:
+            with self._bounded_control(require_lease=False):
+                value = self.client.terminal_receipt(job_id=self.job_id, github_run_id=self.owner,
+                    attempt_id=intent["attempt_id"], report_digest=intent["report_digest"])
+            receipt = self._recognize_receipt(value)
+            return SupervisionResult("RECONCILED", outcome_unknown=self.state.get("outcome_unknown", False), receipt_id=receipt.receipt_id)
+        except Exception:
+            return SupervisionResult("UNKNOWN_OUTCOME", outcome_unknown=True)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -339,20 +376,23 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--grace", type=float, default=2)
     parser.add_argument("--report-state", choices=("COMPLETED", "FAILED", "CANCELLED"))
     parser.add_argument("--mark-running", action="store_true")
+    parser.add_argument("--reconcile-receipt", action="store_true")
     parser.add_argument("--summary", default="Supervised runner finished")
     parser.add_argument("--result-commit-file", type=Path)
     parser.add_argument("--evidence-json", type=Path)
     args, command = parser.parse_known_args(argv)
     if command[:1] == ["--"]:
         command = command[1:]
-    if sum((bool(args.report_state), bool(command), args.mark_running)) != 1 or command and not args.operation:
+    if sum((bool(args.report_state), bool(command), args.mark_running, args.reconcile_receipt)) != 1 or command and not args.operation:
         parser.error("choose one command with --operation or one --report-state")
     try:
         client = RunnerControlClient(os.environ.get("AMODEX_CONTROL_PLANE_URL", ""),
                                      os.environ.get("AMODEX_RUNNER_CONTROL_TOKEN", ""), timeout_seconds=5)
         with RunnerSupervisor(client=client, job_id=args.job_id, github_run_id=args.github_run_id,
                               state_file=args.state_file, interval_seconds=args.interval, grace_seconds=args.grace) as supervisor:
-            if args.report_state:
+            if args.reconcile_receipt:
+                result = supervisor.reconcile_receipt()
+            elif args.report_state:
                 commit = args.result_commit_file.read_text().strip() if args.result_commit_file else None
                 evidence = json.loads(args.evidence_json.read_text()) if args.evidence_json else {}
                 result = supervisor.report(state=args.report_state, summary=args.summary, result_commit=commit, evidence=evidence)
@@ -364,7 +404,7 @@ def main(argv: list[str] | None = None) -> int:
             if result.status == "CANCELLED":
                 output["cancellation_report"] = asdict(supervisor.report(state="CANCELLED", summary="Runner cancelled under supervision"))
             print(json.dumps(output, sort_keys=True))
-            return 0 if result.status in {"COMPLETE", "REPORTED"} else 2
+            return 0 if result.status in {"COMPLETE", "REPORTED", "RECONCILED"} else 2
     except Exception:
         print(json.dumps({"status": "SUPERVISOR_BLOCKED", "authority": "AUTHORITY_UNCONFIRMED"}))
         return 2

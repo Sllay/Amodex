@@ -14,6 +14,7 @@ from amodex.environments.product import (
     RunnerJobRecord,
     RunnerJobState,
     RunnerKind,
+    RunnerReportRequest, RunnerTerminalReceipt,
     UsageProjection,
     capabilities_for_engine,
     runner_kind_for_engine,
@@ -22,6 +23,7 @@ from amodex.environments.product import (
 )
 from amodex.providers.budget import TaskBudgetClass
 from amodex.storage.environment import EnvironmentStateError
+from amodex.storage.product import PostgresProductRepository
 
 
 class PostgresEnvironmentProductRepository:
@@ -44,7 +46,7 @@ class PostgresEnvironmentProductRepository:
                         SELECT 1 FROM information_schema.columns
                         WHERE table_schema='public'
                           AND table_name='amodex_environment_runner_jobs'
-                          AND column_name='dispatch_status'
+                          AND column_name='terminal_receipt_id'
                     )
                     AND EXISTS (
                         SELECT 1 FROM information_schema.columns
@@ -277,11 +279,11 @@ class PostgresEnvironmentProductRepository:
                     SET state='CLAIMED', claimed_at=NOW(), updated_at=NOW(),
                         last_heartbeat_at=NOW(), lease_expires_at=NOW() + INTERVAL '2 minutes',
                         heartbeat_count=heartbeat_count + 1,
-                        github_run_id=COALESCE(%s,github_run_id)
+                        github_run_id=COALESCE(%s,github_run_id),execution_attempt_id=%s
                     WHERE job_id=%s
                     RETURNING *
                     """,
-                    (github_run_id, job_id),
+                    (github_run_id, new_uuid7(), job_id),
                 ).fetchone()
                 assert row is not None
                 context = conn.execute(
@@ -370,54 +372,84 @@ class PostgresEnvironmentProductRepository:
                     )
         return _runner_job_from_row(row)
 
-    def report_runner_job(
-        self,
-        *,
-        job_id: str,
-        state: RunnerJobState,
-        summary: str,
-        result_commit: str | None,
-        github_run_id: str,
-    ) -> RunnerJobRecord:
+    def report_runner_job(self, *, job_id: str, state: RunnerJobState, summary: str,
+                          result_commit: str | None, github_run_id: str, attempt_id: str,
+                          evidence: dict[str, Any] | None = None) -> RunnerTerminalReceipt:
         require_github_run_id(github_run_id)
-        if state not in {RunnerJobState.COMPLETED, RunnerJobState.FAILED, RunnerJobState.CANCELLED}:
-            raise ValueError("terminal runner state required")
+        body = RunnerReportRequest(state=state, summary=summary, result_commit=result_commit,
+            github_run_id=github_run_id, attempt_id=attempt_id, evidence=evidence or {})
+        body.safe_evidence()
+        try:
+            return self._commit_terminal_report(job_id=job_id, body=body)
+        except psycopg.errors.CheckViolation as exc:
+            if exc.diag.constraint_name == 'runner_receipt_lease_valid':
+                raise EnvironmentStateError('RUNNER_LEASE_LOST', job_id) from None
+            raise
+
+    def _commit_terminal_report(self, *, job_id: str, body: RunnerReportRequest) -> RunnerTerminalReceipt:
+        digest = body.digest(job_id)
         with psycopg.connect(self._dsn, row_factory=dict_row) as conn:
             with conn.transaction():
                 row = conn.execute(
-                    "SELECT state,github_run_id,lease_expires_at, (lease_expires_at <= NOW()) AS lease_expired FROM amodex_environment_runner_jobs WHERE job_id=%s FOR UPDATE",
-                    (job_id,),
+                    "SELECT * FROM amodex_environment_runner_jobs WHERE job_id=%s FOR UPDATE", (job_id,),
                 ).fetchone()
                 if row is None:
                     raise KeyError(job_id)
-                current = RunnerJobState(row["state"])
-                if current not in {
-                    RunnerJobState.CLAIMED,
-                    RunnerJobState.RUNNING,
-                }:
-                    raise EnvironmentStateError(
-                        "RUNNER_JOB_TERMINAL_CONFLICT",
-                        f"{job_id}:{current.value}",
-                    )
-                if row["github_run_id"] != github_run_id:
-                    raise EnvironmentStateError("RUNNER_LEASE_OWNER_MISMATCH", job_id)
-                if row["lease_expires_at"] is None:
-                    raise EnvironmentStateError("RUNNER_LEASE_MISSING", job_id)
-                if row["lease_expired"]:
-                    raise EnvironmentStateError("RUNNER_LEASE_LOST", job_id)
+                prior = conn.execute("SELECT * FROM amodex_runner_terminal_receipts WHERE job_id=%s", (job_id,)).fetchone()
+                if prior is not None:
+                    # Recognition only: no state, lease, audit or receipt mutation.
+                    return _matching_receipt(prior, body.github_run_id, body.attempt_id, digest)
+                if row['state'] not in {'CLAIMED', 'RUNNING'}:
+                    raise EnvironmentStateError('RUNNER_JOB_TERMINAL_CONFLICT', job_id)
+                if row['github_run_id'] != body.github_run_id:
+                    raise EnvironmentStateError('RUNNER_LEASE_OWNER_MISMATCH', job_id)
+                if str(row['execution_attempt_id']) != body.attempt_id:
+                    raise EnvironmentStateError('RUNNER_ATTEMPT_MISMATCH', job_id)
+                if row['lease_expires_at'] is None:
+                    raise EnvironmentStateError('RUNNER_LEASE_MISSING', job_id)
+                valid = conn.execute('SELECT %s::timestamptz > clock_timestamp()', (row['lease_expires_at'],)).fetchone()
+                if not valid or not next(iter(valid.values())):
+                    raise EnvironmentStateError('RUNNER_LEASE_LOST', job_id)
+                receipt_id = new_uuid7()
                 updated = conn.execute(
-                    """
-                    UPDATE amodex_environment_runner_jobs
-                    SET state=%s,summary=%s,result_commit=%s,
-                        github_run_id=COALESCE(%s,github_run_id),completed_at=NOW(),updated_at=NOW(),
-                        lease_expires_at=NULL
-                    WHERE job_id=%s
-                    RETURNING *
-                    """,
-                    (state.value, summary, result_commit, github_run_id, job_id),
+                    """UPDATE amodex_environment_runner_jobs
+                       SET state=%s,summary=%s,result_commit=%s,terminal_receipt_id=%s,
+                           completed_at=clock_timestamp(),updated_at=clock_timestamp(),lease_expires_at=NULL
+                       WHERE job_id=%s RETURNING *""",
+                    (body.state.value, body.safe_summary(), body.result_commit, receipt_id, job_id),
                 ).fetchone()
-        assert updated is not None
-        return _runner_job_from_row(updated)
+                assert updated is not None
+                with conn.cursor() as cur:
+                    audit = PostgresProductRepository._insert_audit(cur, actor='runner',
+                        action=f'RUNNER_JOB_{body.state.value}', subject_type='runner_job', subject_id=job_id,
+                        detail={'attempt_id': body.attempt_id, 'receipt_id': receipt_id,
+                                'report_digest': digest, 'result_commit': body.result_commit,
+                                'evidence': body.safe_evidence()})
+                receipt = RunnerTerminalReceipt(receipt_id=receipt_id,job_id=job_id,
+                    attempt_id=body.attempt_id,github_run_id=body.github_run_id,report_digest=digest,
+                    state=body.state,summary=body.safe_summary(),result_commit=body.result_commit,
+                    evidence=body.safe_evidence(),audit_id=str(audit['audit_id']),
+                    environment_id=str(row['environment_id']),session_id=str(row['session_id']),
+                    run_id=str(row['run_id']),committed_at=updated['completed_at'])
+                self._insert_terminal_receipt(conn, receipt, authorized_until=row['lease_expires_at'])
+        # The deferred lease check, receipt FK and audit FK have committed here.
+        return receipt
+
+    @staticmethod
+    def _insert_terminal_receipt(conn, receipt: RunnerTerminalReceipt, *, authorized_until) -> None:
+        conn.execute("""INSERT INTO amodex_runner_terminal_receipts
+            (job_id,receipt_id,attempt_id,github_run_id,report_digest,audit_id,receipt,authorized_until,committed_at)
+            VALUES (%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s)""",
+            (receipt.job_id, receipt.receipt_id, receipt.attempt_id, receipt.github_run_id,
+             receipt.report_digest, receipt.audit_id, receipt.model_dump_json(), authorized_until, receipt.committed_at))
+
+    def get_terminal_receipt(self, *, job_id: str, github_run_id: str, attempt_id: str,
+                             report_digest: str) -> RunnerTerminalReceipt | None:
+        require_github_run_id(github_run_id)
+        validate_uuid7(attempt_id)
+        with psycopg.connect(self._dsn, row_factory=dict_row) as conn:
+            row = conn.execute('SELECT * FROM amodex_runner_terminal_receipts WHERE job_id=%s', (job_id,)).fetchone()
+        return _matching_receipt(row, github_run_id, attempt_id, report_digest) if row else None
 
     def usage_projection(self, *, environment_id: str) -> UsageProjection:
         with psycopg.connect(self._dsn, row_factory=dict_row) as conn:
@@ -464,6 +496,16 @@ class PostgresEnvironmentProductRepository:
         )
 
 
+def _matching_receipt(row, owner, attempt_id, digest) -> RunnerTerminalReceipt:
+    if row['github_run_id'] != owner:
+        raise EnvironmentStateError('RUNNER_LEASE_OWNER_MISMATCH', str(row['job_id']))
+    if str(row['attempt_id']) != attempt_id:
+        raise EnvironmentStateError('RUNNER_ATTEMPT_MISMATCH', str(row['job_id']))
+    if row['report_digest'] != digest:
+        raise EnvironmentStateError('RUNNER_REPORT_CONFLICT', str(row['job_id']))
+    return RunnerTerminalReceipt.model_validate(row['receipt'])
+
+
 def _require_matching_intent(row: dict[str, Any], digest: str) -> RunnerJobRecord:
     if row["intent_digest"] != digest:
         raise EnvironmentStateError("IDEMPOTENCY_KEY_CONFLICT", "key already used with a different intent")
@@ -503,4 +545,6 @@ def _runner_job_from_row(row: dict[str, Any]) -> RunnerJobRecord:
         dispatch_started_at=row.get("dispatch_started_at"),
         dispatch_finished_at=row.get("dispatch_finished_at"),
         dispatch_error_code=row.get("dispatch_error_code"),
+        execution_attempt_id=str(row["execution_attempt_id"]) if row.get("execution_attempt_id") else None,
+        terminal_receipt_id=str(row["terminal_receipt_id"]) if row.get("terminal_receipt_id") else None,
     )

@@ -1,7 +1,7 @@
 """One runner credential authority, shared by the machine and private gates.
 
 The shared bearer is a control credential, not proof of a GitHub run's identity.
-Only these four POST routes may pass the private gate without a human session.
+Only four mutation POST routes and one receipt-only GET may bypass the human gate.
 """
 from __future__ import annotations
 
@@ -14,10 +14,12 @@ from fastapi.responses import JSONResponse
 
 _JOB_ID = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
 _MACHINE_PATH = re.compile(rf"/v1/runner-jobs/{_JOB_ID}/(?:claim|running|heartbeat|report)")
+_RECEIPT_PATH = re.compile(rf"/v1/runner-jobs/{_JOB_ID}/terminal-receipt")
 
 
 def is_runner_machine_route(request: Request) -> bool:
-    return request.method == "POST" and _MACHINE_PATH.fullmatch(request.url.path) is not None
+    return (request.method == "POST" and _MACHINE_PATH.fullmatch(request.url.path) is not None
+            or request.method == "GET" and _RECEIPT_PATH.fullmatch(request.url.path) is not None)
 
 
 @dataclass(frozen=True, slots=True)

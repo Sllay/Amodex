@@ -54,7 +54,7 @@ def test_repository_never_opens_a_connection_for_invalid_identity(monkeypatch, i
     for method in [repo.claim_runner_job, repo.mark_running, repo.heartbeat_runner_job, repo.report_runner_job]:
         kwargs = {"job_id": "synthetic", "github_run_id": identity}
         if method.__name__ == "report_runner_job":
-            kwargs.update(state=RunnerJobState.COMPLETED, summary="synthetic", result_commit=None)
+            kwargs.update(state=RunnerJobState.COMPLETED, summary="synthetic", result_commit=None, attempt_id="019a3d70-0000-7000-8000-000000000002")
         with pytest.raises(ValueError, match="github_run_id"):
             method(**kwargs)
 

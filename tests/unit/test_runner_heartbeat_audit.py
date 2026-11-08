@@ -31,7 +31,7 @@ counter=Path(os.environ['RUNNER_TEMP'])/'heartbeat-count'
 def check(self,**kwargs):
  count=int(counter.read_text())+1 if counter.exists() else 1
  counter.write_text(str(count))
- return HeartbeatResult(AuthorityStatus.HEALTHY if count==1 else AuthorityStatus.{failure},lease_expires_at=datetime.now(timezone.utc)+timedelta(seconds=60))
+ return HeartbeatResult(AuthorityStatus.HEALTHY if count==1 else AuthorityStatus.{failure},lease_expires_at=datetime.now(timezone.utc)+timedelta(seconds=60),attempt_id="019a3d70-0000-7000-8000-000000000002")
 RunnerControlClient.check_authority=check
 raise SystemExit(main(sys.argv[sys.argv.index('amodex.runners.supervisor')+1:]))
 ''')

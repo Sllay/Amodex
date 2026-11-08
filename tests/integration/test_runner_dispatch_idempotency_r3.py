@@ -104,7 +104,8 @@ def test_claim_progress_or_terminal_before_ack_never_regresses(scope, phase, amb
         if phase != "CLAIMED": s.jobs.mark_running(job_id=job_id, github_run_id="fast-owner")
         if phase not in {"CLAIMED", "RUNNING"}:
             s.jobs.report_runner_job(job_id=job_id, github_run_id="fast-owner", state=RunnerJobState(phase),
-                                     summary="progress must survive", result_commit="a"*40)
+                                     summary="progress must survive", result_commit="a"*40,
+                                     attempt_id=s.jobs.get_runner_job(job_id).execution_attempt_id)
         observed.append(s.jobs.get_runner_job(job_id))
         if ambiguous: raise RunnerDispatchError("synthetic timeout after possible acceptance")
     s.dispatcher.dispatch = dispatch

@@ -17,6 +17,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import HTMLResponse
 
 from amodex.environments.models import MemoryScope
+from amodex.contracts.ids import UUIDv7Str
 from amodex.environments.product import (
     EnvironmentCreateRequest,
     MemoryCreateRequest,
@@ -31,6 +32,7 @@ from amodex.environments.product import (
     RunnerJobState,
     RunnerKind,
     RunnerReportRequest,
+    RunnerTerminalReceipt,
     SessionCreateRequest,
 )
 from amodex.product.models import (
@@ -207,7 +209,7 @@ def create_app(
                     detail={
                         "code": "ENVIRONMENT_PRODUCT_SCHEMA_NOT_READY",
                         "message": "Environment runner schema has not been applied",
-                        "recovery": "apply migrations/postbaseline/0002_environment_product_runners.sql, 0004_environment_runner_leases.sql and 0008_runner_dispatch_idempotency.sql",
+                        "recovery": "apply runner migrations 0002, 0004, 0008 and 0009_runner_terminal_receipts.sql",
                     },
                 )
         except HTTPException:
@@ -604,35 +606,48 @@ def create_app(
         except (KeyError, EnvironmentStateError) as exc:
             raise environment_error(exc) from exc
 
-    @app.post("/v1/runner-jobs/{job_id}/report", response_model=RunnerJobRecord,
+    @app.post("/v1/runner-jobs/{job_id}/report", response_model=RunnerTerminalReceipt,
               dependencies=[Depends(runner_authority.require)])
     async def report_runner_job(
         job_id: str,
         body: RunnerReportRequest,
         request: Request,
-    ) -> RunnerJobRecord:
+    ) -> RunnerTerminalReceipt:
         try:
-            item = environment_product().report_runner_job(
+            body.safe_evidence()
+        except ValueError:
+            raise HTTPException(status_code=422, detail={"code": "REPORT_EVIDENCE_INVALID"}) from None
+        try:
+            return environment_product().report_runner_job(
                 job_id=job_id,
                 state=body.state,
                 summary=body.summary,
                 result_commit=body.result_commit,
                 github_run_id=body.github_run_id,
+                attempt_id=body.attempt_id,
+                evidence=body.evidence,
             )
         except (KeyError, EnvironmentStateError) as exc:
             raise environment_error(exc) from exc
-        product().append_audit(
-            actor="runner",
-            action=f"RUNNER_JOB_{item.state.value}",
-            subject_type="runner_job",
-            subject_id=job_id,
-            detail={
-                "summary": body.summary[:1000],
-                "result_commit": body.result_commit,
-                "evidence": body.evidence,
-            },
-        )
-        return item
+
+    @app.get("/v1/runner-jobs/{job_id}/terminal-receipt", response_model=RunnerTerminalReceipt,
+             dependencies=[Depends(runner_authority.require)])
+    def get_runner_terminal_receipt(
+        job_id: str,
+        response: Response,
+        github_run_id: Annotated[str, Query(min_length=1, max_length=100), AfterValidator(require_github_run_id)],
+        attempt_id: UUIDv7Str,
+        report_digest: Annotated[str, Query(pattern=r"^[0-9a-f]{64}$")],
+    ) -> RunnerTerminalReceipt:
+        response.headers["Cache-Control"] = "no-store"
+        try:
+            receipt = environment_product().get_terminal_receipt(job_id=job_id, github_run_id=github_run_id,
+                attempt_id=attempt_id, report_digest=report_digest)
+        except (KeyError, EnvironmentStateError) as exc:
+            raise environment_error(exc) from exc
+        if receipt is None:
+            raise HTTPException(status_code=404, detail={"code": "RUNNER_RECEIPT_NOT_FOUND"})
+        return receipt
 
     @app.post("/v1/approvals", response_model=ApprovalRecord, status_code=201)
     async def create_approval(body: ApprovalCreateRequest) -> ApprovalRecord:
