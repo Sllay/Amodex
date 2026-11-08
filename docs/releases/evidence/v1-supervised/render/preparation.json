@@ -1,0 +1,43 @@
+{
+  "base_sha": "885a458a9334ef967de912603cec557cb61c5639",
+  "functional_commit": "5566b7623f4a9bee045548f0cc38d0b9a1f95a85",
+  "python": "3.12.14",
+  "real_inference": false,
+  "render_service_accessed": false,
+  "production_changes": false,
+  "credentials_copied": false,
+  "new_migrations": 0,
+  "runtime_assets": {
+    "release_sha": "885a458a9334ef967de912603cec557cb61c5639",
+    "hermes_commit": "adecc4024456b387b1518813b90bd60c82b51287",
+    "luau_version": "0.746",
+    "archive_sha256": "30f11c9cde8be2dc0e3066d210705532aac3726a2db89a6c5078080b6faa6cf8",
+    "analyzer_sha256": "151d8490740c7afc10638ef6e396fd50ab6f4b02a4ddf3b924abdea30f0e9820"
+  },
+  "build_download": "Official pinned Luau GitHub release downloaded once; zip and binary hashes verified",
+  "clean_install": "uv pip install --python /tmp/amodex-render-clean/bin/python .[supervised]; imports from site-packages with python -I",
+  "hermes_process_peak_rss_kib": 165604,
+  "render_resource_measurement": false,
+  "render_documentation_http_status": 403,
+  "docs_attempted": [
+    "https://render.com/docs/free",
+    "https://render.com/docs/deploys",
+    "https://render.com/docs/configure-environment-variables"
+  ],
+  "test_command": "AMODEX_TEST_DATABASE_URL=<isolated loopback QA database> AMODEX_TEST_LUAU_ANALYZER=/tmp/amodex-task08-tools/luau-analyze AMODEX_TEST_RENDER_ASSETS=/tmp/amodex-render-assets PYTHONPATH=src:tests/integration python -m pytest tests/integration/test_render_supervised_preparation.py tests/unit/test_v1_supervised_selection.py --junitxml=docs/releases/evidence/v1-supervised/render/preparation.xml -xq",
+  "commands": [
+    "uv build --wheel --out-dir /tmp/amodex-render-wheel",
+    "python -m amodex.deployment.supervised_runtime --root /tmp/amodex-render-assets --hermes-source /tmp/amodex-v1-hermes-runtime --archive /tmp/amodex-task08-tools/luau.zip",
+    "python -m amodex.deployment.supervised_runtime --root /tmp/amodex-render-network-assets --hermes-source /tmp/amodex-v1-hermes-runtime"
+  ],
+  "checksums": {
+    "preparation.xml": "0a701bab7f86cd15a88530754e911eaaf0e22bd93ff4a087c7cdfc60793581fd",
+    "clean-wheel-hermes.json": "5bfe5ffec5c1af3587b12a0468451e470633780428e33159b7647c19ea1d664b"
+  },
+  "tests": {
+    "passed": 17,
+    "failures": 0,
+    "errors": 0,
+    "skips": 0
+  }
+}
