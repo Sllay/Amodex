@@ -61,8 +61,12 @@ jobs:
           env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --frozen \
             python -m amodex.runners.client claim "$AMODEX_JOB_ID" \
               --github-run-id "$GITHUB_RUN_ID" --output "$CLAIM"
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --frozen \
+            python -m amodex.runners.supervisor "$AMODEX_JOB_ID" \
+              --github-run-id "$GITHUB_RUN_ID" \
+              --state-file "$RUNNER_TEMP/runner-supervision.json" --operation claim-context -- bash -euo pipefail <<'AMODEX_SUPERVISED'
           echo "RUNNER_JOB_CLAIMED=true" >> "$GITHUB_ENV"
-          python3 - "$CLAIM" "$GITHUB_ENV" <<'PY'
+          python3 - "$RUNNER_TEMP/claim.json" "$GITHUB_ENV" <<'PY'
           import json, re, sys
           body=json.load(open(sys.argv[1],encoding='utf-8'))
           job=body['job']
@@ -87,20 +91,7 @@ jobs:
               'capabilities':body.get('capabilities',[]),
           },sort_keys=True))
           PY
-
-      - name: Start durable runner heartbeat
-        shell: bash
-        run: |
-          set -euo pipefail
-          (
-            while true; do
-              sleep 30
-              env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --frozen \
-                python -m amodex.runners.client heartbeat "$AMODEX_JOB_ID" \
-                  --github-run-id "$GITHUB_RUN_ID" || exit 1
-            done
-          ) >"$RUNNER_TEMP/runner-heartbeat.log" 2>&1 &
-          echo "$!" > "$RUNNER_TEMP/runner-heartbeat.pid"
+          AMODEX_SUPERVISED
 
       - name: Clone only the scoped project
         shell: bash
@@ -108,7 +99,12 @@ jobs:
           AMODEX_PROJECTS_TOKEN: ${{ secrets.AMODEX_PROJECTS_TOKEN }}
         run: |
           set -euo pipefail
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --frozen \
+            python -m amodex.runners.supervisor "$AMODEX_JOB_ID" \
+              --github-run-id "$GITHUB_RUN_ID" \
+              --state-file "$RUNNER_TEMP/runner-supervision.json" --operation clone-project -- bash -euo pipefail <<'AMODEX_SUPERVISED'
           PROJECT="$RUNNER_TEMP/project"
+          trap 'rm -f "$RUNNER_TEMP/amodex-git-askpass.sh"' EXIT
           if [ -n "${AMODEX_PROJECTS_TOKEN:-}" ]; then
             ASKPASS="$RUNNER_TEMP/amodex-git-askpass.sh"
             cat >"$ASKPASS" <<'SH'
@@ -128,20 +124,26 @@ jobs:
           unset AMODEX_PROJECTS_TOKEN
           echo "TARGET_PROJECT=$PROJECT" >> "$GITHUB_ENV"
           git -C "$PROJECT" rev-parse HEAD | tee "$RUNNER_TEMP/source-sha.txt"
+          AMODEX_SUPERVISED
 
       - name: Mark runner job active
         shell: bash
         run: |
           set -euo pipefail
           env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --frozen \
-            python -m amodex.runners.client running "$AMODEX_JOB_ID" \
-              --github-run-id "$GITHUB_RUN_ID"
+            python -m amodex.runners.supervisor "$AMODEX_JOB_ID" \
+              --github-run-id "$GITHUB_RUN_ID" \
+              --state-file "$RUNNER_TEMP/runner-supervision.json" --mark-running
 
       - name: Install Godot and Node only for Godot Environments
         if: ${{ env.TARGET_ENGINE == 'godot' }}
         shell: bash
         run: |
           set -euo pipefail
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --frozen \
+            python -m amodex.runners.supervisor "$AMODEX_JOB_ID" \
+              --github-run-id "$GITHUB_RUN_ID" \
+              --state-file "$RUNNER_TEMP/runner-supervision.json" --operation install-engine -- bash -euo pipefail <<'AMODEX_SUPERVISED'
           curl --fail --location --retry 3 --output "$RUNNER_TEMP/godot.zip" "$GODOT_URL"
           printf '%s  %s\n' "$GODOT_SHA256" "$RUNNER_TEMP/godot.zip" | sha256sum --check --strict
           mkdir -p "$RUNNER_TEMP/godot"
@@ -158,12 +160,17 @@ jobs:
           echo "GODOT_BIN=$GODOT_BIN" >> "$GITHUB_ENV"
           echo "NODE_HOME=$NODE_HOME" >> "$GITHUB_ENV"
           echo "$NODE_HOME/bin" >> "$GITHUB_PATH"
+          AMODEX_SUPERVISED
 
       - name: Validate Godot project headlessly
         if: ${{ env.TARGET_ENGINE == 'godot' }}
         shell: bash
         run: |
           set -euo pipefail
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --frozen \
+            python -m amodex.runners.supervisor "$AMODEX_JOB_ID" \
+              --github-run-id "$GITHUB_RUN_ID" \
+              --state-file "$RUNNER_TEMP/runner-supervision.json" --operation validate-godot -- bash -euo pipefail <<'AMODEX_SUPERVISED'
           test -f "$TARGET_PROJECT/project.godot"
           timeout 120 "$GODOT_BIN" --headless --editor --path "$TARGET_PROJECT" --quit-after 2 \
             2>&1 | tee "$RUNNER_TEMP/godot-import.log"
@@ -175,12 +182,17 @@ jobs:
             timeout 90 "$GODOT_BIN" --headless --path "$TARGET_PROJECT" \
               --script res://tests/headless_test.gd | tee "$RUNNER_TEMP/godot-project-test.log"
           fi
+          AMODEX_SUPERVISED
 
       - name: Probe Godot MCP against a disposable project copy
         if: ${{ env.TARGET_ENGINE == 'godot' }}
         shell: bash
         run: |
           set -euo pipefail
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --frozen \
+            python -m amodex.runners.supervisor "$AMODEX_JOB_ID" \
+              --github-run-id "$GITHUB_RUN_ID" \
+              --state-file "$RUNNER_TEMP/runner-supervision.json" --operation probe-mcp -- bash -euo pipefail <<'AMODEX_SUPERVISED'
           MCP_PROJECT="$RUNNER_TEMP/mcp-project"
           cp -a "$TARGET_PROJECT" "$MCP_PROJECT"
           rm -rf "$MCP_PROJECT/.godot"
@@ -196,19 +208,43 @@ jobs:
             --require-addon --require-scene-backend \
             | tee "$RUNNER_TEMP/godot-mcp-probe.json"
           grep -q '"status": "PASS"' "$RUNNER_TEMP/godot-mcp-probe.json"
+          AMODEX_SUPERVISED
 
       - name: Validate generic repository envelope
         if: ${{ env.TARGET_ENGINE != 'godot' }}
         shell: bash
         run: |
           set -euo pipefail
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --frozen \
+            python -m amodex.runners.supervisor "$AMODEX_JOB_ID" \
+              --github-run-id "$GITHUB_RUN_ID" \
+              --state-file "$RUNNER_TEMP/runner-supervision.json" --operation validate-generic -- bash -euo pipefail <<'AMODEX_SUPERVISED'
           git -C "$TARGET_PROJECT" fsck --no-progress
+          AMODEX_SUPERVISED
+
+      - name: Prove project repository was never pushed or credential-persisted
+        if: ${{ success() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --frozen \
+            python -m amodex.runners.supervisor "$AMODEX_JOB_ID" \
+              --github-run-id "$GITHUB_RUN_ID" \
+              --state-file "$RUNNER_TEMP/runner-supervision.json" --operation verify-credentials -- bash -euo pipefail <<'AMODEX_SUPERVISED'
+          if [ -d "${TARGET_PROJECT:-}/.git" ]; then
+            test -z "$(git -C "$TARGET_PROJECT" config --local --get-regexp 'http\..*\.extraheader' || true)"
+          fi
+          AMODEX_SUPERVISED
 
       - name: Build validation evidence
         if: ${{ success() }}
         shell: bash
         run: |
           set -euo pipefail
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --frozen \
+            python -m amodex.runners.supervisor "$AMODEX_JOB_ID" \
+              --github-run-id "$GITHUB_RUN_ID" \
+              --state-file "$RUNNER_TEMP/runner-supervision.json" --operation build-evidence -- bash -euo pipefail <<'AMODEX_SUPERVISED'
           python3 - "$RUNNER_TEMP/evidence.json" <<'PY'
           import json, os, pathlib, sys
           root=pathlib.Path(os.environ['RUNNER_TEMP'])
@@ -222,19 +258,19 @@ jobs:
           }
           pathlib.Path(sys.argv[1]).write_text(json.dumps(evidence,sort_keys=True),encoding='utf-8')
           PY
+          AMODEX_SUPERVISED
 
       - name: Report successful validation
         if: ${{ success() }}
         shell: bash
         run: |
           set -euo pipefail
-          SOURCE_SHA="$(cat "$RUNNER_TEMP/source-sha.txt")"
           env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --frozen \
-            python -m amodex.runners.client report "$AMODEX_JOB_ID" \
-              --state COMPLETED \
-              --summary "Disposable runner reconstructed and validated the scoped project" \
-              --result-commit "$SOURCE_SHA" \
+            python -m amodex.runners.supervisor "$AMODEX_JOB_ID" \
               --github-run-id "$GITHUB_RUN_ID" \
+              --state-file "$RUNNER_TEMP/runner-supervision.json" --report-state COMPLETED \
+              --summary "Disposable runner reconstructed and validated the scoped project" \
+              --result-commit-file "$RUNNER_TEMP/source-sha.txt" \
               --evidence-json "$RUNNER_TEMP/evidence.json"
 
       - name: Report runner failure
@@ -243,31 +279,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [ -n "${UV_BIN:-}" ]; then
-            env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --frozen \
-              python -m amodex.runners.client report "$AMODEX_JOB_ID" \
-                --state FAILED \
-                --summary "Disposable runner failed; inspect GitHub Actions evidence" \
-                --github-run-id "$GITHUB_RUN_ID"
-          fi
-
-      - name: Stop durable runner heartbeat
-        if: ${{ always() }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          PID_FILE="$RUNNER_TEMP/runner-heartbeat.pid"
-          if [ -f "$PID_FILE" ]; then
-            kill "$(cat "$PID_FILE")" 2>/dev/null || true
-            rm -f "$PID_FILE"
-          fi
-
-      - name: Prove project repository was never pushed or credential-persisted
-        if: ${{ always() }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ -d "${TARGET_PROJECT:-}/.git" ]; then
-            git -C "$TARGET_PROJECT" remote -v
-            test -z "$(git -C "$TARGET_PROJECT" config --local --get-regexp 'http\..*\.extraheader' || true)"
-          fi
+          env -u PYTHONPATH -u PYTHONHOME "$UV_BIN" run --python 3.13.5 --frozen \
+            python -m amodex.runners.supervisor "$AMODEX_JOB_ID" \
+              --github-run-id "$GITHUB_RUN_ID" \
+              --state-file "$RUNNER_TEMP/runner-supervision.json" --report-state FAILED \
+              --summary "Disposable runner failed; inspect sanitized supervision evidence"
