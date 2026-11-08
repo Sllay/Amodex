@@ -1,0 +1,87 @@
+{
+  "status": "R4_PASS",
+  "base_sha": "eec30b1ddc62d17ecae6cb64ea911e88aae55c63",
+  "implementation_sha": "7a740d5347485b1a90fd60ab212b1087f13aabaa",
+  "branch": "fix/runner-supervision-r4",
+  "final_distinct_cases": {
+    "passed": 306,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "runtime": {
+    "python": "3.13.5",
+    "pytest": "9.0.2",
+    "psycopg": "3.3.6",
+    "database": "isolated loopback PostgreSQL 17.11, amodex_qa_r3"
+  },
+  "batches": [
+    {
+      "name": "directed.xml",
+      "passed": 299,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0
+    },
+    {
+      "name": "final-supervision.xml",
+      "passed": 51,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0
+    },
+    {
+      "name": "r3-characterization.xml",
+      "passed": 3,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0
+    },
+    {
+      "name": "running.xml",
+      "passed": 2,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0
+    }
+  ],
+  "junit_policy": "latest execution per (classname,name); successful unrelated results reused after focused supervisor fixes",
+  "groups": {
+    "r4_and_heartbeat_contract": 64,
+    "r1": 65,
+    "r2a": 84,
+    "r3": 51,
+    "environment_product": 7,
+    "task08_simulated": 35
+  },
+  "process_evidence": [
+    "real SIGTERM to a separate supervisor process",
+    "SIGTERM-ignoring child requires escalation to SIGKILL",
+    "active root and child terminated and reaped after heartbeat failure",
+    "background child cleaned after normal root completion",
+    "simulated SIGKILL leaves persisted STARTED and blocks replay; no claim of cleanup after actual host kill",
+    "whole control request bounded with SIGALRM; no heartbeat thread left behind"
+  ],
+  "commands": [
+    "AMODEX_TEST_DATABASE_URL=<isolated-loopback-dsn> AMODEX_TEST_LUAU_ANALYZER=<trusted-analyzer> PYTHONPATH=src python -m pytest tests/unit/test_runner_supervision_r4.py tests/unit/test_runner_heartbeat_audit.py tests/unit/test_runner_heartbeat_contract.py tests/integration/test_runner_supervision_ownership_r4.py tests/integration/test_runner_auth_ownership_r1.py tests/unit/test_runner_authorization_r1.py tests/integration/test_run_lease_fencing_r2a.py tests/unit/test_run_lease_policy.py tests/integration/test_runner_dispatch_idempotency_r3.py tests/unit/test_runner_dispatch_contract_r3.py tests/integration/test_postbaseline_environment_product.py tests/unit/test_postbaseline_environment_product_contracts.py tests/integration/test_roblox_agent_execution.py -ra",
+    "AMODEX_TEST_DATABASE_URL=<isolated-loopback-dsn> PYTHONPATH=src python -m pytest tests/unit/test_runner_supervision_r4.py tests/unit/test_runner_heartbeat_audit.py tests/integration/test_runner_supervision_ownership_r4.py -ra",
+    "AMODEX_TEST_DATABASE_URL=<isolated-loopback-dsn> PYTHONPATH=src python -m pytest tests/integration/test_checkpoint_recovery_audit.py -k 'claim_before_dispatch or repeated_dispatch_post' -ra",
+    "PYTHONPATH=src python -m pytest tests/unit/test_runner_supervision_r4.py -k 'mark_running or unknown_running' -ra"
+  ],
+  "external_calls": {
+    "github_actions_dispatch": 0,
+    "roblox_execution": 0,
+    "paid_inference": 0
+  },
+  "migrations_changed": [],
+  "warnings": [
+    "preexisting Starlette/httpx TestClient deprecation"
+  ],
+  "limits": [
+    "POSIX foreground main-thread supervisor; Linux subreaper for descendant reaping",
+    "No infallible cleanup after supervisor SIGKILL/host failure or descendants escaping their process group",
+    "No atomic fencing or cancellation of already-started external effects",
+    "Local per-job safety file is not durable cross-host Recovery",
+    "R2B terminal acknowledgements and Job/Run/Attempt reconciliation remain pending"
+  ]
+}
