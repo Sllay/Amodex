@@ -24,3 +24,6 @@ htmlcov/
 *.db
 artifacts/
 logs/
+
+# Rebuilt assets; never authority or durable results.
+.amodex-runtime/

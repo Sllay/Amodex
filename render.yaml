@@ -3,10 +3,17 @@ services:
     name: amodex
     runtime: python
     plan: free
-    buildCommand: pip install .
-    startCommand: python scripts/migrate_production.py && uvicorn amodex.api.workspace_app:app --host 0.0.0.0 --port $PORT
+    autoDeploy: false
+    buildCommand: sh scripts/build_render.sh
+    startCommand: python scripts/start_render.py
     healthCheckPath: /healthz
     envVars:
+      - key: AMODEX_SUPERVISED_ENABLED
+        value: "1"
+      - key: AMODEX_SUPERVISED_PROJECTS_FILE
+        value: /etc/secrets/amodex-supervised-projects.json
+      - key: AMODEX_APPLY_MIGRATIONS_ON_START
+        value: "0"
       - key: PYTHON_VERSION
         value: 3.13.5
       - key: AMODEX_DATABASE_URL

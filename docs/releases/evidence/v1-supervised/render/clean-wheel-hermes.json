@@ -1,0 +1,54 @@
+{
+  "kind": "DETERMINISTIC_LOOPBACK_PROVIDER",
+  "real_model": false,
+  "hermes_commit": "adecc4024456b387b1518813b90bd60c82b51287",
+  "result": "PASS",
+  "calls": 4,
+  "input_bytes_total": 31093,
+  "tools": [
+    "amodex_read_file",
+    "amodex_patch_file",
+    "amodex_luau_validate"
+  ],
+  "local_validation": "PASS",
+  "source_matches": true,
+  "source_sha256": "1cddae5062197129c75aef30fddf7f1a54db906aa5ec421e26d4a926943682c3",
+  "ledger": [
+    {
+      "number": 1,
+      "state": "STARTED"
+    },
+    {
+      "number": 1,
+      "state": "ACK",
+      "http_status": 200
+    },
+    {
+      "number": 2,
+      "state": "STARTED"
+    },
+    {
+      "number": 2,
+      "state": "ACK",
+      "http_status": 200
+    },
+    {
+      "number": 3,
+      "state": "STARTED"
+    },
+    {
+      "number": 3,
+      "state": "ACK",
+      "http_status": 200
+    },
+    {
+      "number": 4,
+      "state": "STARTED"
+    },
+    {
+      "number": 4,
+      "state": "ACK",
+      "http_status": 200
+    }
+  ]
+}

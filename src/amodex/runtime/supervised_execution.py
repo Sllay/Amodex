@@ -90,7 +90,8 @@ def grants_from_environment():
     if not config:
         return ()
     try:
-        return tuple(ProjectGrant.model_validate(item) for item in json.loads(Path(config).read_text()))
+        from amodex.deployment.supervised_runtime import expand_grants
+        return tuple(ProjectGrant.model_validate(item) for item in expand_grants(json.loads(Path(config).read_text())))
     except Exception:
         raise SupervisedBlocked('HOST_GRANTS_INVALID') from None
 
@@ -228,6 +229,9 @@ class SupervisedExecutionService:
 
     def approve(self, execution_id, source_sha256):
         with self.connection() as conn:
+            # One supervised child for this installation; bounded Free-host capacity.
+            # Transaction lock ends before process startup/HTTP, never spans effects.
+            conn.execute("SELECT pg_advisory_xact_lock(71684610887011)")
             row = conn.execute('SELECT * FROM amodex_supervised_executions WHERE execution_id=%s FOR UPDATE', (execution_id,)).fetchone()
             if not row:
                 raise SupervisedBlocked('EXECUTION_NOT_FOUND')
@@ -235,6 +239,8 @@ class SupervisedExecutionService:
                 raise SupervisedBlocked('APPROVAL_HASH_MISMATCH')
             if row['status'] != 'AWAITING_APPROVAL':
                 return False  # Same approval after lost ACK only reads the original attempt.
+            if conn.execute("SELECT 1 FROM amodex_supervised_executions WHERE execution_id<>%s AND status IN ('STARTED','RUNNING') LIMIT 1", (execution_id,)).fetchone():
+                raise SupervisedBlocked('SUPERVISED_CAPACITY_BUSY')
             grant = self.grant_for(str(row['project_id']))
             self.authorize_target(conn, grant)
             if digest(grant.model_dump(mode='json')) != row['grant_digest'] or grant.source(row['path']) != row['source']:

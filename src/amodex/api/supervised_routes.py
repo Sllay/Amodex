@@ -48,8 +48,28 @@ def build_supervised_router(service: SupervisedExecutionService):
             raise HTTPException(503, detail={'code':'SUPERVISED_MIGRATION_REQUIRED'})
 
     def failure(exc):
-        status = 404 if exc.code == 'EXECUTION_NOT_FOUND' else 409 if exc.code in {'IDEMPOTENCY_CONFLICT','DRAFT_NOT_READY_OR_BOUND'} else 403
+        status = 404 if exc.code == 'EXECUTION_NOT_FOUND' else 409 if exc.code in {'IDEMPOTENCY_CONFLICT','DRAFT_NOT_READY_OR_BOUND','SUPERVISED_CAPACITY_BUSY'} else 403
         raise HTTPException(status, detail={'code':exc.code}) from None
+
+    @router.get('/v1/supervised/host-status')
+    def host_status():
+        from amodex.deployment.supervised_runtime import status
+        from amodex.providers.registry import ProviderExecutionRegistry, stage5_credential_pools_from_env
+        from amodex.storage.product import PostgresProductRepository
+        registry = service.registry or ProviderExecutionRegistry(stage5_credential_pools_from_env())
+        pools = registry.configuration_metadata()
+        try:
+            connections = PostgresProductRepository(service.dsn).list_provider_connections_raw()
+            web = [{"provider":r['provider'],"billing_class":r['billing_class'],"enabled":r['enabled']}
+                   for r in connections]
+            candidate = service.intelligence.supervised_coding_candidate() if service.intelligence else None
+            measured = {"provider":candidate.provider,"model":candidate.model} if candidate else None
+            code = None
+        except Exception:
+            web, measured, code = [], None, 'HOST_DIAGNOSTIC_UNCONFIRMED'
+        return {"runtime":status(),"process_pools":pools,"web_connections":web,
+                "eligible_measured_route":measured,"code":code,"inference_performed":False,
+                "note":"Web billing does not bind a process secret or establish quota; execution registry and Governor must still admit."}
 
     @router.get('/v1/supervised/options')
     def options():

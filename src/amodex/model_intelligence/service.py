@@ -660,7 +660,8 @@ class ModelIntelligenceService:
         This is selection only; the registry and Governor must still admit it.
         No billing or quota facts are synthesized from credential presence.
         """
-        for route in self._ranked_routes(profile=WorkerProfileKind.IMPLEMENTATION, required_context_tokens=16000):
+        ranked = self._ranked_routes(profile=WorkerProfileKind.IMPLEMENTATION, required_context_tokens=16000)
+        for route in sorted(ranked, key=lambda item: item.provider != "groq"):
             row = self._repository.get_route(route.route_id)
             if row is None:
                 continue

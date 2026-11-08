@@ -36,6 +36,12 @@ class ProviderExecutionRegistry:
     def __init__(self, pools: tuple[CredentialPoolConfig, ...]) -> None:
         self._pools = {pool.pool_id: pool for pool in pools}
 
+    def configuration_metadata(self) -> tuple[dict, ...]:
+        """Presence and policy only; never resolve credentials into diagnostics."""
+        return tuple({"provider":p.provider,"billing_class":p.billing_class.value,
+                      "credential_bound":bool(os.environ.get(p.secret_env)),"enabled":p.enabled}
+                     for p in self._pools.values())
+
     def client_for(
         self, candidate: ModelCandidate, *, operation: str = "chat"
     ) -> ProviderClient:

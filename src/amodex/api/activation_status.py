@@ -167,7 +167,9 @@ def activation_snapshot(
 ) -> dict[str, Any]:
     database = database_readiness(dsn, migrations_root=migrations_root)
     zero_cost = zero_cost_readiness()
-    ready = bool(database["ready"] and zero_cost["ready"])
+    from amodex.deployment.supervised_runtime import status as runtime_status
+    supervised = runtime_status()
+    ready = bool(database["ready"] and zero_cost["ready"] and (not supervised["enabled"] or supervised["ready"]))
     model_status: dict[str, Any] = {
         "available": model_intelligence_service is not None,
         "automatic_chat_inference": "UNAVAILABLE",
@@ -189,6 +191,7 @@ def activation_snapshot(
         "database": database,
         "zero_cost": zero_cost,
         "model_intelligence": model_status,
+        "supervised_runtime": supervised,
     }
 
 
