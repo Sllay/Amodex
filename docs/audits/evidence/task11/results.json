@@ -1,0 +1,83 @@
+{
+  "status": "R2B_PASS",
+  "base_sha": "c0886fb05d8b1c30bf4a2633d610f66d62205df2",
+  "implementation_sha": "c8324b499dae90bb893cfae92baee411ccaa383f",
+  "branch": "fix/runner-terminal-receipts-r2b",
+  "final_distinct_cases": {
+    "passed": 355,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "runtime": {
+    "python": "3.13.5",
+    "pytest": "9.0.2",
+    "psycopg": "3.3.6",
+    "database": "PostgreSQL 17.11; isolated loopback amodex_qa_r3"
+  },
+  "batches": [
+    {
+      "file": "directed.xml",
+      "passed": 328,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0
+    },
+    {
+      "file": "terminal-final.xml",
+      "passed": 51,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0
+    },
+    {
+      "file": "cli-final.xml",
+      "passed": 1,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0
+    }
+  ],
+  "junit_policy": "latest execution per (classname,name); overlapping successful cases counted once",
+  "groups": {
+    "new_r2b": 35,
+    "r1": 66,
+    "r2a": 84,
+    "r3": 48,
+    "r4_and_heartbeat": 64,
+    "environment_product": 7,
+    "task08_simulated": 35,
+    "targeted_recovery_characterization": 16
+  },
+  "migration": "postbaseline/0009_runner_terminal_receipts.sql",
+  "atomicity_evidence": [
+    "job row, audit insert and receipt insert share one PostgreSQL transaction",
+    "failures at audit and receipt writes roll back the whole transaction",
+    "deferred lease trigger rejects expiry during the transaction before commit",
+    "concurrent equal reports return one receipt; concurrent different reports produce one 409",
+    "post-response loss and new process query do not add audit/receipt rows",
+    "receipt read after expiry does not update lease or Job",
+    "R4 reconciliation invokes GET only, never heartbeat, report POST, provider or dispatch"
+  ],
+  "commands": [
+    "AMODEX_TEST_DATABASE_URL=<isolated-loopback-dsn> AMODEX_TEST_LUAU_ANALYZER=<trusted-analyzer> PYTHONPATH=src python -m pytest tests/integration/test_runner_terminal_receipts_r2b.py tests/unit/test_runner_supervision_r4.py tests/unit/test_runner_heartbeat_audit.py tests/unit/test_runner_heartbeat_contract.py tests/integration/test_runner_supervision_ownership_r4.py tests/integration/test_runner_auth_ownership_r1.py tests/unit/test_runner_authorization_r1.py tests/integration/test_run_lease_fencing_r2a.py tests/unit/test_run_lease_policy.py tests/integration/test_runner_dispatch_idempotency_r3.py tests/unit/test_runner_dispatch_contract_r3.py tests/integration/test_postbaseline_environment_product.py tests/unit/test_postbaseline_environment_product_contracts.py tests/integration/test_roblox_agent_execution.py -ra",
+    "AMODEX_TEST_DATABASE_URL=<isolated-loopback-dsn> PYTHONPATH=src python -m pytest tests/integration/test_runner_terminal_receipts_r2b.py tests/unit/test_runner_receipt_contract_r2b.py tests/integration/test_checkpoint_recovery_audit.py -k 'not partial_safe and not patch_repetition and not dag_json and not checkpoint_view and not external_response and not run_rejects and not run_event_failure and not stage1_rejects' -ra",
+    "AMODEX_TEST_DATABASE_URL=<isolated-loopback-dsn> PYTHONPATH=src python -m pytest tests/integration/test_runner_auth_ownership_r1.py -k actual_cli -ra"
+  ],
+  "external_calls": {
+    "github_actions_dispatch": 0,
+    "roblox_open_cloud": 0,
+    "paid_inference": 0
+  },
+  "warnings": [
+    "Starlette/httpx TestClient deprecation",
+    "Pydantic alias metadata warning during concurrent test app construction"
+  ],
+  "limits": [
+    "Execution attempt identity is server correlation, not cryptographic workflow identity.",
+    "Legacy rows without receipt remain unconfirmed; no historical proof is fabricated.",
+    "No Run/Task/Checkpoint completion is implied by a Job receipt.",
+    "Explicit receipt reconciliation never renews execution authority or repeats work.",
+    "No R5-R10 rehydration or automatic recovery is implemented."
+  ]
+}
