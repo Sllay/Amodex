@@ -1,0 +1,11 @@
+{
+  "kind": "DETERMINISTIC_LOOPBACK_PROVIDER",
+  "real_model": false,
+  "hermes_commit": "adecc4024456b387b1518813b90bd60c82b51287",
+  "result": "PASS",
+  "error_code": "PROVIDER_HTTP_ERROR",
+  "calls": 1,
+  "outcome": "UNKNOWN_OUTCOME",
+  "retry_requests": 0,
+  "mode": "http500"
+}

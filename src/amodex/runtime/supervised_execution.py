@@ -115,10 +115,11 @@ class SupervisedExecutionService:
         return matches[0]
 
     def authorize_target(self, conn, grant):
-        row = conn.execute('''SELECT e.status, e.name, r.external_id, r.name AS resource_name,
+        row = conn.execute('''SELECT e.status, e.name, project.name AS project_name, r.external_id, r.name AS resource_name,
             r.metadata, r.resource_type, c.state AS connector_state
             FROM amodex_environments e
             JOIN amodex_environment_projects p ON p.environment_id=e.environment_id AND p.project_id=%s
+            JOIN amodex_projects project ON project.project_id=p.project_id AND project.status='ACTIVE'
             JOIN amodex_workspace_environments w ON w.environment_id=e.environment_id AND w.workspace_id=%s
             JOIN amodex_workspace_projects wp ON wp.workspace_id=w.workspace_id AND wp.status='ACTIVE'
             JOIN amodex_connector_resources r ON r.bound_environment_id=e.environment_id AND r.resource_id=%s
@@ -131,6 +132,7 @@ class SupervisedExecutionService:
                 or str(row['metadata'].get('universe_id')) != '10769712453'
                 or any('teste - não entre' in row[k].casefold() for k in ('name', 'resource_name'))):
             raise SupervisedBlocked('ENVIRONMENT_RESOURCE_BLOCKED')
+        return row
 
     def options(self):
         if not self.schema_ready():
@@ -139,11 +141,12 @@ class SupervisedExecutionService:
         with self.connection() as conn:
             for g in self.grants:
                 try:
-                    self.authorize_target(conn, g)
+                    target = self.authorize_target(conn, g)
                     g.validate_host()
                 except (SupervisedBlocked, OSError):
                     continue
-                projects.append({'project_id': g.project_id, 'environment_id': g.environment_id,
+                projects.append({'project_id': g.project_id, 'project_name': target['project_name'],
+                                 'environment_name': target['name'], 'environment_id': g.environment_id,
                                  'paths': g.paths, 'base_sha': g.base_sha,
                                  'universe_id': '10769712453', 'place_id': '118200154785968'})
                 rows = conn.execute('''SELECT d.draft_id,d.title,d.objective,d.environment_id

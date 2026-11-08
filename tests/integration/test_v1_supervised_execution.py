@@ -182,7 +182,7 @@ def test_concurrent_identical_intake_and_conflicting_payload(h):
     assert conflict.status_code==409 and not h.requests
 
 
-@pytest.mark.parametrize('what',['environment','universe','place','protected_name','path','source_changed'])
+@pytest.mark.parametrize('what',['environment','universe','place','protected_name','path','source_changed','project_disabled'])
 def test_wrong_target_scope_or_source_is_denied(h,what):
     if what=='path':
         assert create(h,path='../outside.luau').status_code==403;return
@@ -190,6 +190,7 @@ def test_wrong_target_scope_or_source_is_denied(h,what):
         h.repo.joinpath('score.luau').write_text('return 100\n')
     else:
         with psycopg.connect(h.dsn) as c:
+            if what=='project_disabled':c.execute("UPDATE amodex_projects SET status='DISABLED' WHERE project_id=%s",(h.project,))
             if what=='environment':c.execute('UPDATE amodex_connector_resources SET bound_environment_id=NULL WHERE resource_id=%s',(h.resource,))
             if what=='universe':c.execute("UPDATE amodex_connector_resources SET metadata='{\"universe_id\":\"2\"}' WHERE resource_id=%s",(h.resource,))
             if what=='place':c.execute("UPDATE amodex_connector_resources SET external_id='2' WHERE resource_id=%s",(h.resource,))
@@ -276,3 +277,22 @@ def test_terminal_artifact_and_run_event_roll_back_together(h,monkeypatch):
     assert result['status']=='UNKNOWN_OUTCOME' and result['artifact'] is None
     assert h.service.runs.get_run(d['run_id']).state.value!='COMPLETED'
     assert len(h.requests)==1
+
+
+def test_actual_isolated_launcher_persists_missing_real_model_block(h,monkeypatch,tmp_path):
+    # No simulated agent/provider is installed in the child process. Deliberately
+    # absent supported credentials prove the production CLI/launcher denial path.
+    for provider in ('GEMINI','GROQ','OPENROUTER','NVIDIA'):
+        monkeypatch.delenv(provider+'_API_KEY',raising=False)
+        monkeypatch.setenv('AMODEX_'+provider+'_BILLING_CLASS','unknown')
+    config=tmp_path/'host-grants.json'
+    config.write_text(json.dumps([h.grant.model_dump(mode='json')]))
+    monkeypatch.setenv('AMODEX_SUPERVISED_PROJECTS_FILE',str(config))
+    d=create(h).json()
+    assert h.service.approve(d['execution_id'],d['source_sha256'])
+    SupervisedExecutionService.launch(h.service,d['execution_id'])
+    result=get(h,d)
+    assert result['status']=='BLOCKED' and result['error_code']=='REAL_MODEL_BLOCKED',result
+    assert result['local_validation']['status']=='PASS'
+    assert not result['calls'] and not h.requests
+    assert h.service.runs.get_run(d['run_id']).state.value=='BLOCKED'
