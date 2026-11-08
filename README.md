@@ -6,7 +6,9 @@ Amodex is not intended to be a swarm of autonomous agents debating architecture.
 
 ## Current status
 
-**Architecture/design Parts 1–3 are complete and Stage 0 feasibility is COMPLETE. Stage 1 is next.**
+**Supervised mobile V1: V1_BLOCKED, not released.** The release branch includes R1, R2A, R2B, R3, R4 and the scoped Roblox integration. The current executor has no approved free-provider credential/billing grant, and the complete Web → real Hermes model → Luau result path has not been delivered or demonstrated. See the [release gate](docs/releases/V1_SUPERVISED_RELEASE_GATE.md) and [current closeout](docs/releases/V1_SUPERVISED_CLOSEOUT.md). Existing component tests and historic demonstrations are not a mobile release acceptance.
+
+For an offline, metadata-only host configuration check, run `PYTHONPATH=src python scripts/v1_supervised_preflight.py`. This never sends inference and does not certify quota or release readiness. Configure credentials through host settings, never in chat or Git; Codex and Render grants are separate.
 
 Stage 0 closed on 2026-10-31 with a green final closeout gate. The consolidated evidence is in `research/STAGE0_RESULT.md`.
 

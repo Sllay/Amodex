@@ -1,0 +1,40 @@
+{
+  "source_base": "af79465c4920d269d5823e854cda295c8b7abe93",
+  "checkpoint_a_sha": "eeb260334022aed039596ac023bd298d4c3b2107",
+  "commands": [
+    "AMODEX_TEST_DATABASE_URL=<isolated-loopback-dsn> PYTHONPATH=src python -m pytest tests/integration/test_v1_release_migrations.py tests/unit/test_production_deployment.py tests/integration/test_postbaseline_model_intelligence.py tests/integration/test_postbaseline_model_intelligence_resilience.py -ra",
+    "AMODEX_TEST_DATABASE_URL=<isolated-loopback-dsn> PYTHONPATH=src python -m pytest tests/unit/test_v1_supervised_preflight.py tests/integration/test_runner_auth_ownership_r1.py::test_actual_cli_and_client_work_through_the_real_workspace_gate tests/integration/test_runner_auth_ownership_r1.py::test_machine_can_only_read_its_exact_terminal_receipt_through_private_gate tests/integration/test_run_lease_fencing_r2a.py::test_all_authorized_mutations_reject_lost_authority tests/integration/test_runner_dispatch_idempotency_r3.py::test_two_identical_posts_overlap_during_sending_and_only_one_dispatches tests/integration/test_runner_dispatch_idempotency_r3.py::test_two_controllers_can_acquire_only_one_sending_authorization tests/integration/test_runner_terminal_receipts_r2b.py::test_any_write_failure_rolls_back_job_audit_and_receipt tests/integration/test_runner_terminal_receipts_r2b.py::test_simultaneous_reports_have_one_terminal_audit_and_receipt tests/integration/test_runner_terminal_receipts_r2b.py::test_supervisor_reconciles_unknown_report_read_only_without_new_work tests/unit/test_runner_supervision_r4.py::test_heartbeat_loss_kills_active_process_and_descendants tests/unit/test_runner_supervision_r4.py::test_controlled_cancel_escalates_kill_and_reports_once_only_if_still_valid tests/unit/test_runner_supervision_r4.py::test_total_control_timeout_kills_work_and_stops_without_reconnect tests/integration/test_roblox_agent_execution.py::test_deterministic_agent_edits_analyzes_executes_and_reads_result_through_worker_run -ra",
+    "PYTHONPATH=src python -m pytest tests/unit/test_runner_supervision_r4.py::test_heartbeat_loss_kills_active_process_and_descendants -ra",
+    "PYTHONPATH=src python scripts/v1_supervised_preflight.py"
+  ],
+  "batches": [
+    {
+      "name": "checkpoint-a",
+      "passed": 20
+    },
+    {
+      "name": "critical-initial",
+      "passed": 44,
+      "failed": 1,
+      "reason": "R4 test injected loss before process readiness"
+    },
+    {
+      "name": "r4-final",
+      "passed": 1
+    }
+  ],
+  "final_distinct_testcases": {
+    "passed": 65,
+    "failed": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "preflight_exit_code": 2,
+  "final_status": "V1_BLOCKED",
+  "external_effects": {
+    "model_inference": 0,
+    "roblox_open_cloud": 0,
+    "actions_dispatch": 0,
+    "production_schema_writes": 0
+  }
+}
